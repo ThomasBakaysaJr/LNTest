@@ -16,11 +16,12 @@ echo "Removing directories and logs..."
 rm -rf $BASE_DIR/lightning-CC*
 rm -rf $BASE_DIR/lightning-BM
 rm -rf $BASE_DIR/lightning-InnocentNode
-rm -rf $BASE_DIR/BotMasterComms/cc_logs*
+rm -rf $BASE_DIR/BotMasterComms/bm_log*
 rm -f $BASE_DIR/BotMasterComms/counter.txt
 rm -f $BASE_DIR/BotMasterComms/funded_node.txt
-rm -rf $BASE_DIR/NodeManagerComms/cc_logs*
+rm -rf $BASE_DIR/NodeManagerComms/cc_log*
 rm -rf $BASE_DIR/NodeManagerComms/cc_messageLog_*
-rm -rf $BASE_DIR/NodeManagerComms/cc_noise_*
+rm -rf $BASE_DIR/NodeManagerComms/noise_log*
+rm -rf $BASE_DIR/NodeManagerComms/status_CC*
 
 echo "Cleanup complete."

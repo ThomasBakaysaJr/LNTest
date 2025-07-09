@@ -40,8 +40,8 @@ create_innocent_node() {
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=10010
     docker exec $NODE_NAME bash /root/bootstrap.sh
-    echo "Starting REST server on innocent node"
-    docker exec $NODE_NAME python3 /root/REST_server.py &
+    # echo "Starting REST server on innocent node"
+    # docker exec $NODE_NAME python3 /root/REST_server.py &
 }
 
 # Function to extract address and ID and save to files

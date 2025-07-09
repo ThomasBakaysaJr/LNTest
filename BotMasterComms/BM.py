@@ -1,13 +1,15 @@
 #NOTE!! this file should be in the BotMasterCommsComms(directory in home address) directory that gets mounted to the BM docker container
-
 import subprocess
 import json
 import logging
 import os
 import time
 
+# import the ln_checker file
+import ln_checker
+
 HOST_NAME = os.getenv("CONTAINER_NAME")
-logging.basicConfig(filename=f'cc_logs_{HOST_NAME}.log', level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(message)s")
+logging.basicConfig(filename=f'bm_log.log', level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
 
 # Read Innocent Node Address and ID from files
 with open('innocentAddress.txt', 'r') as address_file:
@@ -26,10 +28,12 @@ UNIQUE_FUNDING_AMOUNT = 12312300  # A fixed, unrelated amount for BM funding
 COUNTER_FILE = "counter.txt"  # File to store the counter
 FUNDED_NODE_FILE = "funded_node.txt"
 
-
+THIS_NODE = None
 
 # Global variable for the node BM funded a channel with
 FUNDED_NODE_ID = None
+# The TLV record type used for standard text messages in keysend.
+MESSAGE_TLV_TYPE = "34349334"
 
 def load_counter():
     """
@@ -63,18 +67,17 @@ def run_lightning_cli(command):
             text=True,
             check=True
         )
-        logging.debug(f"run_lightning_cli: stdout: {result.stdout}")
-        logging.debug(f"run_lightning_cli: stderr: {result.stderr}")
+        # logging.debug(f"run_lightning_cli: stdout: {result.stdout}")
+        #logging.debug(f"run_lightning_cli: stderr: {result.stderr}")
         if result.returncode != 0:
             logging.info(f"run_lightning_cli: Command failed with error: {result.stderr.strip()}")
             return None
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
-        logging.info(f"lightning-cli command failed with exit code {e.returncode}")
-        logging.info(f"  lightning-cli STDOUT: {e.stdout.strip()}")
-        logging.info(f"  lightning-cli STDERR: {e.stderr.strip()}") 
-        raise # Re-raise the exception so your calling code can catch it
+        logging.error(f"lightning-cli command failed with exit code {e.returncode}")
+        logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
+        logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}") 
     except Exception as e:
         logging.error(f"run_lightning_cli: Exception occurred: {e}")
         return None
@@ -108,7 +111,7 @@ def get_node_address(node_id):
     """
     output = run_lightning_cli(["listnodes", node_id])
     if not output:
-        logging.error(f"Failed to retrieve node details for node ID: {node_id}.")
+        logging.warning(f"Failed to retrieve node details for node ID: {node_id}.")
         return None, None
 
     try:
@@ -174,7 +177,7 @@ def discover_cc_nodes():
     logging.info("Discovering CC nodes.")
     output = run_lightning_cli(["listchannels"])
     if not output:
-        logging.error("Failed to retrieve channel list.")
+        logging.warning("Failed to retrieve channel list.")
         return []
 
     channels = json.loads(output).get("channels", [])
@@ -207,16 +210,26 @@ def fund_single_channel():
         logging.info(f'Found funded node file, loading.')
         with open(FUNDED_NODE_FILE, 'r') as file:
             FUNDED_NODE_ID = file.read().strip()
-        return
-    logging.info(f'No funded file found, finding node to connect to.')
+        # make sure we have a open channel with this node
+        if ln_checker.has_channel_with(FUNDED_NODE_ID):
+            logging.info(f"Channel found from \n{THIS_NODE}\nto\n{FUNDED_NODE_ID}")
+            return
+        else:
+            # IF NO channel is found, continue and lets find a different node (or just fund this one)
+            logging.info(f"Channel NOT FOUND from\n{THIS_NODE}\nto\n{FUNDED_NODE_ID}")
+            FUNDED_NODE_ID = None
+    else:
+        logging.info(f'No funded file found, finding node to connect to.')
+
     if len(BM_CONNECTED_NODES) >= MAX_BM_CHANNELS:
         logging.info(f"Maximum BM channels ({MAX_BM_CHANNELS}) reached. Skipping funding.")
         return
 
     valid_cc_nodes = discover_cc_nodes()
-    if not valid_cc_nodes:
-        logging.warning("No valid CC nodes found for funding.")
-        return
+    while not valid_cc_nodes:
+        logging.info("No valid CC nodes found for funding. Retrying")
+        time.sleep(10)
+        valid_cc_nodes = discover_cc_nodes()
 
     # Pick one node to fund a channel with
     target_node = valid_cc_nodes[0]
@@ -237,39 +250,21 @@ def fund_single_channel():
     # logging.info(f"Connecting to node {target_node} at {address}:{port}.")
     # run_lightning_cli(["connect", f"{target_node}@{address}:{port}"])
 
-
     #this will allow the CCs to connect to each other by themselves instead of having to mesh connect before hand
     if not FUNDED_NODE_ID:
         demoGetAddressAndConnect(target_node)
         
         logging.info(f"Funding channel with node {target_node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
-        check_funds()
+        ln_checker.check_funds()
         run_lightning_cli(["fundchannel", target_node, str(UNIQUE_FUNDING_AMOUNT)])
-
+    print(f'Funding channel with {target_node}')
     # make sure channel is ready to receive
-    ready_transmit = False
-    while not ready_transmit:
-        try:
-            time.sleep(5)
-            command = ["lightning-cli", f"--network=regtest", "listchannels"]
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            peers_info = json.loads(result.stdout)
-
-            for channel in peers_info.get('channels', []):
-                if channel.get('source') == target_node or channel.get('destination') == target_node \
-                and channel.get('state') == 'CHANNELD_NORMAL':
-                    logging.info(f'Peer {target_node} is ready to receive')
-                    ready_transmit = True
-            logging.info("Peer not ready. Trying again in 5 seconds")
-        except Exception as e:
-            logging.info(f'fund_single_channel: Error {e}')
-
+    ln_checker.wait_node_activated(target_node)
+    print(f'Connected.')
     BM_CONNECTED_NODES.add(target_node)
     FUNDED_NODE_ID = target_node  # Save the funded node ID
     with open(FUNDED_NODE_FILE, 'w') as file:
         file.write(target_node)
-
-
 
 def interactive_command_sender():
     """
@@ -295,17 +290,26 @@ def interactive_command_sender():
         # Concatenate the user input with the counter
         message_with_counter = f"{user_input}|{counter}"
 
-        # Ensure the message is enclosed in double quotes
-        message = f'"{message_with_counter}"'
-        amount = 5  # Minimal msat for sending a message
+        # # Ensure the message is enclosed in double quotes
+        # message = f'"{message_with_counter}"'
+        tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
+        # amount = 5  # Minimal msat for sending a message
 
         # Construct the lightning-cli command
-        command = f'lightning-cli --regtest sendmsg {FUNDED_NODE_ID} {message}'
+        command = ["lightning-cli", "--regtest", "keysend",
+        f"destination={FUNDED_NODE_ID}",
+        f"amount_msat=1",
+        f"extratlvs={tlv_json}"]
 
         try:
             # Execute the command using shell=True to process the quotes correctly
-            result = subprocess.run(command, 
-                                    shell=True,
+                    
+            if not ln_checker.is_node_active(FUNDED_NODE_ID):
+                logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
+                print('Channel disconneted, retrying connection.')
+                fund_single_channel()
+                
+            result = subprocess.run(command,
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
                                     text=True,
@@ -316,59 +320,78 @@ def interactive_command_sender():
                 save_counter(counter)  # Save the updated counter after a successful send
             else:
                 print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-                logging.info(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+                logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
         except Exception as e:
             print(f"Exception occurred while sending command: {e}")
-            logging.info(f"Exception occurred while sending command: {e}")
+            logging.error(f"Exception occurred while sending command: {e}")
 
     save_counter(counter)  # Save the counter when exiting
 
-# thomas functions
-# check and make sure we have funds before we try anything since it takes a while
-# for the funds to actually become available
-def check_funds():
-    funds_available = False
-    while not funds_available:
-        try:
-            logging.info(f"checkfunds: Making sure funds are available.")
-            result = subprocess.run(
-                ["lightning-cli", "--regtest"] + ['listfunds'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True
-            )
-        except subprocess.CalledProcessError as e:
-            # This is where the error from lightning-cli lives!
-            logging.error(f"lightning-cli command failed with exit code {e.returncode}")
-            logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
-            logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}") 
-            raise # Re-raise the exception so your calling code can catch it
-        except Exception as e:
-            logging.error(f"check_funds: Exception occurred: {e}")
-            return None
-        
-        # check output if funds are available
-        result_data = json.loads(result.stdout)
-        if result_data.get('outputs'):
-            on_chain_funds_exist = False
-            total_on_chain_msat = 0
+def encode_msg(in_msg):
+    return in_msg.encode('utf-8').hex()
 
-            for output in result_data['outputs']:
-                if output.get('status') == 'confirmed':
-                    logging.info('we founds confirmed funds')
-                    on_chain_funds_exist = True
-                    total_on_chain_msat += output.get('amount_msat', 0)
+# def interactive_command_sender():
+#     """
+#     Allow the user to send commands interactively to the node BM funded a channel with,
+#     appending a persistent counter to the user input.
+#     """
+#     if not FUNDED_NODE_ID:
+#         print("No node has been funded yet. Exiting command sender.")
+#         return
 
-            if on_chain_funds_exist:
-                logging.info(f"On-chain funds found! Total confirmed and spendable: {total_on_chain_msat / 1000:.8f} BTC")
-                funds_available = True
-                return
-            else:
-                logging.info("No confirmed and spendable on-chain funds found.\n\
-                      Checking again in 5 seconds.")
-        time.sleep(5)
+#     print(f"Type 'quit' to exit.")
+#     counter = load_counter()  # Load the counter from the file
 
+#     while True:
+#         user_input = input("Enter command: ")
+#         if user_input.lower() == 'quit':
+#             print("Exiting.")
+#             break
+
+#         # Increment the counter for each message
+#         counter += 1
+
+#         # Concatenate the user input with the counter
+#         message_with_counter = f"{user_input}|{counter}"
+
+#         # Ensure the message is enclosed in double quotes
+#         message = f'"{message_with_counter}"'
+#         amount = 5  # Minimal msat for sending a message
+
+#         # Construct the lightning-cli command
+#         command = f'lightning-cli --regtest sendmsg {FUNDED_NODE_ID} {message}'
+
+#         try:
+#             # Execute the command using shell=True to process the quotes correctly
+                    
+#             if not ln_checker.is_node_active(FUNDED_NODE_ID):
+#                 logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
+#                 print('Channel disconneted, retrying connection.')
+#                 fund_single_channel()
+                
+#             result = subprocess.run(command,
+#                                     stdout=subprocess.PIPE,
+#                                     stderr=subprocess.PIPE,
+#                                     shell=True,
+#                                     text=True,
+#                                     check=True)
+#             if result.returncode == 0:
+#                 print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
+#                 print(f"Response: {result.stdout}")
+#                 save_counter(counter)  # Save the updated counter after a successful send
+#             else:
+#                 print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+#                 logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+#         except Exception as e:
+#             print(f"Exception occurred while sending command: {e}")
+#             logging.error(f"Exception occurred while sending command: {e}")
+
+#     save_counter(counter)  # Save the counter when exiting
+
+def load_this_node ():
+    global THIS_NODE 
+    output = get_node_info()
+    THIS_NODE = output.get('id')
 
 def main():
     """
@@ -376,6 +399,7 @@ def main():
     """
     logging.info("Starting Botmaster Node Script.")
     connect_to_innocent()
+    load_this_node()
     logging.info("Funding single channel")
     # Fund a single channel with a valid CC node
     fund_single_channel()

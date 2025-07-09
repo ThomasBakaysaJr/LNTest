@@ -13,6 +13,9 @@ PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"
 BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
 BOT_MASTER_CONTAINER_DIR="/root/botmaster"
 
+# ln_checker file
+LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
+
 # Ensure bootstrap script is executable
 chmod +x $PLUGIN_SCRIPT
 
@@ -31,6 +34,7 @@ create_botmaster_node() {
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $PLUGIN_SCRIPT:/root/bootstrap.sh \
         -v $BOT_MASTER_DIR:$BOT_MASTER_CONTAINER_DIR \
+        -v $LN_CHECKER_FILE:$BOT_MASTER_CONTAINER_DIR/ln_checker.py \
         elementsproject/lightningd \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \

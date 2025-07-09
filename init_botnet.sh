@@ -3,6 +3,9 @@
 
 set -eux
 
+# We start fresh
+./cleanup_lightning_nodes.sh
+
 # Start the scripts in order
 ./1create_Innocent_node.sh
 ./2create_botmaster_node.sh

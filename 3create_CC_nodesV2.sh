@@ -20,12 +20,14 @@ NODE_MANAGER_ADDRESS_LIST="$NODE_MANAGER_DIR/CC_address_list.txt"
 BOT_MASTER_ADDRESS_LIST="$BOT_MASTER_DIR/CC_address_list.txt"
 
 # Number of LOOPS, so total nodes will be this * num_concurrent
-NUM_CREATE_LOOP=2
+NUM_CREATE_LOOP=3
 # Number of nodes to create at the same time (so as not to overload)
 NUM_NODES_CONCURRENT=5
 
 NUM_NODES=$((NUM_CREATE_LOOP * NUM_NODES_CONCURRENT))
 
+# ln_checker file
+LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
 
 # Ensure bootstrap script is executable
 chmod +x $PLUGIN_SCRIPT
@@ -75,6 +77,7 @@ create_node() {
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $PLUGIN_SCRIPT:/root/bootstrap.sh \
         -v $NODE_MANAGER_DIR:/root/nodemanager \
+        -v $LN_CHECKER_FILE:/root/nodemanager/ln_checker.py \
         elementsproject/lightningd \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
