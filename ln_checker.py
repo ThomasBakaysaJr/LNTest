@@ -6,12 +6,17 @@ import os
 
 # how many times the checker will try
 RETRY_INT = 10
-SLEEP_INT= 5
+SLEEP_INT= 10
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
 
 # where the status file lives
 STATUS_FILE = 'status_'
+
+# channel states
+NOT_CONNECTING = ['CHANNELD_NORMAL', 'CLOSINGD_COMPLETE', 'ONCHAIN']
+DONT_BALANCE = ['CLOSINGD_COMPLETE', 'ONCHAIN']
+
 
 def run_lightning_cli(command):
     try:
@@ -24,16 +29,13 @@ def run_lightning_cli(command):
         )
         # logging.info(f"run_lightning_cli: stdout: {result.stdout}")
         # logging.info(f"run_lightning_cli: stderr: {result.stderr}")
-        if result.returncode != 0:
-            logging.error(f"run_lightning_cli: Command failed with error: {result.stderr.strip()}")
-            return None
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
         logging.error(f"lightning-cli command failed with exit code {e.returncode}")
         logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
         logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}")
-        raise # Re-raise the exception so your calling code can catch it
+        return None
     except Exception as e:
         logging.error(f"run_lightning_cli: Exception occurred: {e}")
         return None
@@ -42,6 +44,11 @@ def run_lightning_cli(command):
 # check and make sure we have funds before we try anything since it takes a while
 # for the funds to actually become available
 def check_funds():
+    '''
+    Check to see if funds are available to spend.
+    Will wait for a specific time period before returning a bool of 
+    whether the funds are available or not.
+    '''
     for attempt in range(RETRY_INT):
         try:
             logging.info(f"checkfunds: Making sure funds are available.")
@@ -57,7 +64,6 @@ def check_funds():
             logging.error(f"lightning-cli command failed with exit code {e.returncode}")
             logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
             logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}") 
-            raise # Re-raise the exception so your calling code can catch it
         except Exception as e:
             logging.error(f"check_funds: Exception occurred: {e}")
             return None
@@ -74,6 +80,7 @@ def check_funds():
                     total_on_chain_msat += output.get('amount_msat', 0)
 
             if on_chain_funds_exist:
+                time.sleep(1) # adding a timer here, a little buffer
                 logging.info(f"On-chain funds found! Total confirmed and spendable: {total_on_chain_msat / 1000:.8f} BTC")
                 return True
             else:
@@ -84,13 +91,21 @@ def check_funds():
 
 # wait until the connection with this node is active
 def wait_node_activated(target_node):
+    ''''
+    Wait till channel with target_node is normal
+    '''
     for attempt in range(RETRY_INT):
         if is_node_active(target_node):
             return True
         time.sleep(SLEEP_INT)
     logging.warning(f'ln_checker: wait_node_activated: {target_node} not active after {attempt * SLEEP_INT} seconds.')
+    return False
 
 def wait_connection_exists(target_node):
+    '''
+    wait for a connection between this node and target_node to exists.
+    Used to before funding a channel since we need to wait for a connection first.
+    '''
     for attempt in range(RETRY_INT):
         # check to make sure we're not waiting on a channel that no longer exists
         if does_connection_exist(target_node):
@@ -99,6 +114,9 @@ def wait_connection_exists(target_node):
     logging.warning(f'ln_checker: wait_connection_exists: {target_node} not a peer after {attempt * SLEEP_INT} seconds.')
 
 def does_connection_exist(target_node):
+    '''
+    Returns wether a connection between this node and target_node exists.
+    '''
     try:
         command = ["lightning-cli", f"--network=regtest", "listpeers"]
         result = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -114,6 +132,9 @@ def does_connection_exist(target_node):
 
 # check if the connection with this node is active
 def is_node_active(target_node):
+    '''
+    Check whether the channel with this node is CHANNELD_NORMAL
+    '''
     try:
         command = ["lightning-cli", f"--network=regtest", "listfunds"]
         result = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -130,6 +151,9 @@ def is_node_active(target_node):
     return False
 
 def has_channel_with(target_node):
+    '''
+    Check if this node has a channel with target_node.
+    Does not check the state of the channel, just that it exists.'''
     try:
         command = ["lightning-cli", f"--network=regtest", "listfunds"]
         result = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -137,17 +161,24 @@ def has_channel_with(target_node):
 
         for channel in peers_info.get('channels', []):
             if channel.get('peer_id') == target_node:
-                logging.info(f'Channel exists with {target_node}')
+                logging.info(f'has_channel_with: Channel exists with {target_node}')
                 return True
-            else:
-                logging.info(f"No channel with {target_node} found")
+                
     except Exception as e:
         logging.error(f'has_channel_with: Error {e}')
+    logging.info(f"has_channel_with: No channel with {target_node} found")
     return False
 
 def get_channels():
     """
-    First lets get all the nodes that have a channel with this one
+    Returns a dictionary of all the channels associated with this node.
+    Returns:
+        Key = Opposing node that this channel connects to
+        Values = [short_id, state, capacity, our_amount]
+            short_id : shortened id of the node_id
+            state : state of the channel (CHANNELD_NORMAL, etc)
+            capacity : total capacity of the channel
+            our_amount : our liquidity in this channel
     """
     # Query listchannels with the source set to own_node_id
     output = run_lightning_cli(["listfunds"])
@@ -178,13 +209,30 @@ def set_state(state):
     set state to 'state'
     write immediately to json file
     '''
-    node_data = get_state(state)
+    node_data = create_state(state)
     write_state(node_data)
 
-def get_state(state):
+def get_state():
+    ''''
+    get the state of this node
     '''
-    Wrapper to get a dictionary containing all the info required for the tracker
+    filename = f'{STATUS_FILE}{HOST_NAME}_{get_short_id(get_node_id())}.json'
+    
+    try:
+        with open(filename, 'r') as file:
+            data = json.load(file)
+    except Exception as e:
+        logging.warning(f'Get state fails because {e}')
+    if data:
+        return data['state']
+    else:
+        return 'no data'
+    
+def create_state(state):
+    '''
+    Wrapper to get a dictionary containing all the info required for the tracker.
     state is the state we're changing it to (online, sending, down, etc)
+    this state is different (abstracted from) than the actual channel state
     '''
     channels = get_channels()
     this_id = get_node_id()
@@ -200,13 +248,16 @@ def get_state(state):
     return node_data
 
 def set_sending(target_node):
-    node_data = get_state('sending')
+    '''
+    used to set this node to sending when propogating messages
+    '''
+    node_data = create_state('sending')
     node_data['receiver'] = get_short_id(target_node)
     write_state(node_data)
 
 def write_state(data):
     name = data['name']
-    filename = f'{STATUS_FILE}{name}.json'
+    filename = f'{STATUS_FILE}{name}_{get_short_id(get_node_id())}.json'
     with open(filename, 'w') as file:
         json.dump(data, file, indent=4)
 
@@ -217,6 +268,68 @@ def get_node_id():
     output = run_lightning_cli(["getinfo"])
     
     return json.loads(output).get('id')
+
+def balance_all_channels():
+    for channel in get_channels():
+        balance_channel(channel)
+
+def balance_channel(target_node):
+    '''
+    used to balance out the channels
+    can be called at anytime really
+    '''
+    logging.info(f'Balancing channel with node {target_node}')
+    if not has_channel_with(target_node):
+        logging.warning(f'Trying to balance {target_node} but no channel exists.')
+    
+    if wait_node_activated(target_node): # we wait for the channel to be normal so we don't spam sendkeys
+        to_balance = channel_not_balanced(target_node)
+        if to_balance == 0: # if the channel is balanced, channel_not_balanced returns a 0, the amount to balance otherwise
+            return
+        time.sleep(5)
+        check_funds()
+        run_lightning_cli(["keysend", target_node, str(to_balance)])
+    else:
+        logging.info(f'balance_channel: Channel with {target_node} is not normal. Moving on.')
+
+    logging.info(f'Attempted to balance channel with node {target_node}')
+
+def channel_not_balanced(target_node):
+    '''
+    Determine whether the channel with this node is balanced.
+    Returns:
+        Return 0 if balanced
+        Returns the amount to keysend to balance the channel
+    '''
+    channel = get_channels()[target_node]
+    capacity = channel['capacity']
+    our_msat = channel['our_amount']
+
+    return (our_msat - (capacity // 2)) if (our_msat > (capacity * .7)) else 0
+
+def is_node_ready():
+    '''
+    Check if channels are still being created and balanced
+    Return True if a single channel is still connecting and nodes are not balanced
+    False otherwise
+    '''
+    channels = get_channels()
+    if not channels:
+        return True
+    try:
+        for channel in channels.keys():
+            info = channels[channel]
+            if info.get('state') not in NOT_CONNECTING: # if its not normal, then we're finalizing channels
+                set_state('connecting')
+                return True
+            elif info.get('state') not in DONT_BALANCE and channel_not_balanced(channel): # if channels needs to be balanced then we balance
+                set_state('balancing')
+                return True
+        set_state('online')
+        return False # channel is normal and balanced
+    except Exception as e:
+        logging.info(f'Exception {e}')
+        return True
 
 def get_short_id(in_node_id):
     '''

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import sys
 
 # import the ln_checker file
 import ln_checker
@@ -27,6 +28,7 @@ MAX_BM_CHANNELS = 1  # Maximum number of channels BM can fund
 UNIQUE_FUNDING_AMOUNT = 12312300  # A fixed, unrelated amount for BM funding
 COUNTER_FILE = "counter.txt"  # File to store the counter
 FUNDED_NODE_FILE = "funded_node.txt"
+AUTO_TEST_COUNT = 10 # How many commands for auto_test, default is 100
 
 THIS_NODE = None
 
@@ -95,8 +97,11 @@ def connect_to_innocent():
     """
     Connect to the Innocent node.
     """
-    logging.info(f"Connecting to Innocent node: {INNOCENT_NODE_ADDRESS}")
-    run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
+    if ln_checker.does_connection_exist(INNOCENT_NODE_ID):
+        logging.info(f'Already connected to innocent node')
+    else:
+        logging.info(f"Connecting to Innocent node: {INNOCENT_NODE_ADDRESS}")
+        run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
 
 #this wont be used since in regtest i had to mesh connect all nodes, but in testnet or mainnet this would be useful. In regtest, addresses are not properly displayed
 def get_node_address(node_id):
@@ -271,129 +276,75 @@ def interactive_command_sender():
     Allow the user to send commands interactively to the node BM funded a channel with,
     appending a persistent counter to the user input.
     """
-    if not FUNDED_NODE_ID:
-        print("No node has been funded yet. Exiting command sender.")
-        return
+    counter = load_counter()  # Load the counter from the file
 
     print(f"Type 'quit' to exit.")
-    counter = load_counter()  # Load the counter from the file
 
     while True:
         user_input = input("Enter command: ")
         if user_input.lower() == 'quit':
             print("Exiting.")
             break
-
-        # Increment the counter for each message
+        send_msg(user_input, counter)
         counter += 1
-
-        # Concatenate the user input with the counter
-        message_with_counter = f"{user_input}|{counter}"
-
-        # # Ensure the message is enclosed in double quotes
-        # message = f'"{message_with_counter}"'
-        tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
-        # amount = 5  # Minimal msat for sending a message
-
-        # Construct the lightning-cli command
-        command = ["lightning-cli", "--regtest", "keysend",
-        f"destination={FUNDED_NODE_ID}",
-        f"amount_msat=1",
-        f"extratlvs={tlv_json}"]
-
-        try:
-            # Execute the command using shell=True to process the quotes correctly
-                    
-            if not ln_checker.is_node_active(FUNDED_NODE_ID):
-                logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
-                print('Channel disconneted, retrying connection.')
-                fund_single_channel()
-                
-            result = subprocess.run(command,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    check=True)
-            if result.returncode == 0:
-                print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
-                print(f"Response: {result.stdout}")
-                save_counter(counter)  # Save the updated counter after a successful send
-            else:
-                print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-                logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-        except Exception as e:
-            print(f"Exception occurred while sending command: {e}")
-            logging.error(f"Exception occurred while sending command: {e}")
 
     save_counter(counter)  # Save the counter when exiting
 
 def encode_msg(in_msg):
     return in_msg.encode('utf-8').hex()
 
-# def interactive_command_sender():
-#     """
-#     Allow the user to send commands interactively to the node BM funded a channel with,
-#     appending a persistent counter to the user input.
-#     """
-#     if not FUNDED_NODE_ID:
-#         print("No node has been funded yet. Exiting command sender.")
-#         return
+def send_msg(message, counter):
+    # Concatenate the user input with the counter
+    message_with_counter = f"{message}|{counter}"
 
-#     print(f"Type 'quit' to exit.")
-#     counter = load_counter()  # Load the counter from the file
+    # # Ensure the message is enclosed in double quotes
+    # message = f'"{message_with_counter}"'
+    tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
+    # amount = 5  # Minimal msat for sending a message
 
-#     while True:
-#         user_input = input("Enter command: ")
-#         if user_input.lower() == 'quit':
-#             print("Exiting.")
-#             break
+    # Construct the lightning-cli command
+    command = ["lightning-cli", "--regtest", "keysend",
+    f"destination={FUNDED_NODE_ID}",
+    f"amount_msat=1",
+    f"extratlvs={tlv_json}"]
 
-#         # Increment the counter for each message
-#         counter += 1
-
-#         # Concatenate the user input with the counter
-#         message_with_counter = f"{user_input}|{counter}"
-
-#         # Ensure the message is enclosed in double quotes
-#         message = f'"{message_with_counter}"'
-#         amount = 5  # Minimal msat for sending a message
-
-#         # Construct the lightning-cli command
-#         command = f'lightning-cli --regtest sendmsg {FUNDED_NODE_ID} {message}'
-
-#         try:
-#             # Execute the command using shell=True to process the quotes correctly
-                    
-#             if not ln_checker.is_node_active(FUNDED_NODE_ID):
-#                 logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
-#                 print('Channel disconneted, retrying connection.')
-#                 fund_single_channel()
+    try:
+        # Execute the command using shell=True to process the quotes correctly
                 
-#             result = subprocess.run(command,
-#                                     stdout=subprocess.PIPE,
-#                                     stderr=subprocess.PIPE,
-#                                     shell=True,
-#                                     text=True,
-#                                     check=True)
-#             if result.returncode == 0:
-#                 print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
-#                 print(f"Response: {result.stdout}")
-#                 save_counter(counter)  # Save the updated counter after a successful send
-#             else:
-#                 print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-#                 logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-#         except Exception as e:
-#             print(f"Exception occurred while sending command: {e}")
-#             logging.error(f"Exception occurred while sending command: {e}")
-
-#     save_counter(counter)  # Save the counter when exiting
-
+        if not ln_checker.is_node_active(FUNDED_NODE_ID):
+            logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
+            print('Channel disconneted, retrying connection.')
+            fund_single_channel()
+            
+        result = subprocess.run(command,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                check=True)
+        if result.returncode == 0:
+            print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
+            print(f"Response: {result.stdout}")
+            save_counter(counter)  # Save the updated counter after a successful send
+        else:
+            print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+            logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+    except Exception as e:
+            print(f"Exception occurred while sending command: {e}")
+            logging.error(f"Exception occurred while sending command: {e}")
+            
 def load_this_node ():
     global THIS_NODE 
     output = get_node_info()
     THIS_NODE = output.get('id')
 
-def main():
+def auto_send(command):
+    '''
+    auto_send [command] when node is ready to receive.
+    used for testing.
+    '''
+    send_msg(command)
+
+def main(goal, message):
     """
     Main Botmaster logic.
     """
@@ -403,10 +354,19 @@ def main():
     logging.info("Funding single channel")
     # Fund a single channel with a valid CC node
     fund_single_channel()
-
+    if not FUNDED_NODE_ID:
+        print("No node has been funded yet. Exiting command sender.")
+        return
     # Allow interactive command sending
-    interactive_command_sender()
+    if goal == 1:
+        interactive_command_sender()
+    elif goal == 2:
+        send_msg(message, message)
+
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        main(2, sys.argv[1])
+    else:
+        main(1, None)

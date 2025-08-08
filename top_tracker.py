@@ -39,11 +39,11 @@ def create_table(data_headers, data, status_headers, status) -> Table:
 
     interval, msg_propagated = get_time_interval(data)
 
-    # for row in data:
-    #     row[TIME] = time.ctime(float(row[TIME]))
-    #     table.add_row(*[str(word) for word in row])
+    for row in data:
+        row[TIME] = time.ctime(float(row[TIME]))
+        table.add_row(*[str(word) for word in row])
 
-    # table.add_row(table.add_row("Propagation time", f'{interval:0.3f} s', (f'Propagated: {msg_propagated}')))
+    table.add_row(table.add_row("Propagation time", f'{interval:0.3f} s', (f'Propagated: {msg_propagated}')))
 
     # building status section
 

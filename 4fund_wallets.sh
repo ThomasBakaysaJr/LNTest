@@ -18,12 +18,12 @@ fund_node() {
     # Get a new Bitcoin address from the node
     address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
 
-    # Send 50 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
+    # Send 10 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
     txid=$(curl -s --user bitcoinuser:bitcoinpassword \
-        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 50]}" \
+        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 10]}" \
         -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
 
-    echo "Sent 50 BTC to $node at address $address (txid: $txid)"
+    echo "Sent 10 BTC to $node at address $address (txid: $txid)"
 }
 
 # Fund all dynamically discovered CC nodes
@@ -48,10 +48,10 @@ if docker ps --filter "name=$INNOCENT_NODE" --format "{{.Names}}" | grep -q "$IN
     address=$(docker exec $INNOCENT_NODE lightning-cli --regtest newaddr | jq -r '.bech32')
 #           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
     txid=$(curl -s --user bitcoinuser:bitcoinpassword \
-        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$INNOCENT_NODE\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 50]}" \
+        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$INNOCENT_NODE\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 10]}" \
         -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
 
-    echo "Sent 50 BTC to InnocentNode at address $address (txid: $txid)"
+    echo "Sent 10 BTC to InnocentNode at address $address (txid: $txid)"
 else
     echo "InnocentNode not found."
 fi

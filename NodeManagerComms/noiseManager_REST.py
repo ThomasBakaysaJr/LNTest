@@ -4,6 +4,7 @@
 
 import subprocess
 import json
+import random
 # import requests
 import time
 import os
@@ -21,7 +22,8 @@ MESSAGE_LOG_FILE = f'cc_messageLog_{HOST_NAME}.csv'
 DISCOVERY_RULE_DIVISOR = [19, 1231]
 
 RETRY_INT = 5
-SLEEP_INT = 0.5
+SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
+CONNECT_SLEEP = 10 # timer specifically for initialization of channels
 RETRY_COUNT = 10
 
 # how long in s between status updates
@@ -30,14 +32,15 @@ STATUS_TIMER = 1
 THIS_NODE = None
 # for global (is it sending right now?) type ask
 SENDING = False
+CONNECTING = True
 
 # The TLV record type used for standard text messages in keysend.
 MESSAGE_TLV_TYPE = "34349334"
+# to keep track of what has been sent where (if we need to resend it.)
+MESSAGE_TRACKING_DICT = {} # this is going to a be a dict of sets
 
-logging.basicConfig(filename=f'noise_log_{HOST_NAME}.log', level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(filename=f'noise_log_{HOST_NAME}.log', level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
 
-# Cache for processed counters
-processed_counters = set()
 
 def connect_to_server():
     """
@@ -140,15 +143,15 @@ def get_all_messages():
         )
         if result.returncode != 0:
             logging.error(f"Error executing lightning-cli: {result.stderr}")
-            return []
-        
+            return None
+        # the messages that have been received by this node
         invoices = json.loads(result.stdout)['invoices']
 
         if len(invoices) == 0:
             return []
-
+        # each invoice contains the extra tlv that contains the message / command 
         for invoice in invoices:
-            if not invoice:
+            if not invoice: # make sure we actually have invoices to look at
                 logging.info(f'skipping.')
                 continue
             label = invoice.get('label', '')
@@ -161,7 +164,7 @@ def get_all_messages():
                     messages.append(msg)
     except Exception as e:
         logging.error(f"Exception occurred while getting messages: {e}")
-        return []
+        return None
     return messages
 
 def decode_msg(in_msg):
@@ -258,11 +261,13 @@ def get_connected_nodes():
 #         else:
 #             logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
 
-def send_message_to_connected_nodes(message):
+def send_message_to_connected_nodes(message, counter):
     """
     Send a message to all nodes connected to this node via channels and display the message content.
     """
     global SENDING
+    global MESSAGE_TRACKING_DICT
+
     connected_nodes = get_connected_nodes()
     if not connected_nodes:
         logging.warning("No connected nodes found.")
@@ -270,8 +275,15 @@ def send_message_to_connected_nodes(message):
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message)})
 
     for target_node in connected_nodes:
+
+        # we check first, no need to resend a message to a node that has already received it
+        if target_node in MESSAGE_TRACKING_DICT.keys() and counter in MESSAGE_TRACKING_DICT[target_node]:
+            logging.info(f'Message {counter} has already been sent to {target_node}. Aborting send.')
+            logging.info(MESSAGE_TRACKING_DICT)
+            continue
+
         SENDING = True
-        ln_checker.set_sending(target_node) # for the tracker
+        ln_checker.set_sending(target_node) # for the status tracker
         sendmsg_command = ["lightning-cli", "--regtest", "keysend",
             f"destination={target_node}",
             f"amount_msat=1",
@@ -280,18 +292,27 @@ def send_message_to_connected_nodes(message):
         ln_checker.check_funds()
         ln_checker.does_connection_exist(target_node)
         ln_checker.wait_node_activated(target_node)
-        # time.sleep(2) # seeing if a delay fixes the first sending error
-        #for attempt in range(RETRY_COUNT): # maybe the connections are closing because of the repeated tries
-        result = subprocess.run(sendmsg_command, 
+        
+        time.sleep(random.uniform(0.0, 3.0)) # random sleep between messages - see if this fixes exceeding work queue depth
+
+        try:
+            result = subprocess.run(sendmsg_command, 
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 text=True,
                                 check=True)
-        if result.returncode == 0:
-            logging.info(f'Message: "{message}" sent to {target_node} successfully.')
-            continue
-        else:
-            logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
+            if result.returncode == 0: # success
+                if target_node in MESSAGE_TRACKING_DICT.keys(): # make a new entry for the first messages
+                    MESSAGE_TRACKING_DICT[target_node].add(counter) # tracking invidual sends in case it drops
+                else:
+                    MESSAGE_TRACKING_DICT[target_node] = {counter}
+                logging.info(f'Message: "{message}" sent to {target_node} successfully. Counter is {MESSAGE_TRACKING_DICT[target_node]}')
+                continue
+            else:
+                logging.error(f'{MESSAGE_TRACKING_DICT}')
+                logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error sending message to {target_node}: {e}")
 
 
 def process_message(message):
@@ -300,6 +321,9 @@ def process_message(message):
 
     Args:
         message (str): The message to process.
+    Returns:
+        The counter associated with this command
+        Returns nothing if it is an invalid counter
     """
     try:
         parts = message.split('|')
@@ -313,27 +337,12 @@ def process_message(message):
         if not counter.isdigit():
             logging.info(f"Ignoring message with invalid counter: {message}")
             return
-
-        counter = int(counter)
-        if counter in processed_counters:
-            # logging.info(f"Ignoring duplicate message with counter {counter}: {message}")
-            return
-        # record command in file
-        write_to_csv(counter, command)
-        # Process the command and mark the counter as processed
-        logging.info(f"Processing command: {command} with counter: {counter}")
-
-        # This doesn't really do anything important atm
-        # send_command_to_server(command)
-
-        send_message_to_connected_nodes(message)
-
-        # Mark the counter as processed
-        processed_counters.add(counter)
+        # we return the commmand and the counter associated with it
+        return command, counter
     except Exception as e:
         logging.error(f"Error processing message: {e}")
 
-def write_to_csv(counter, message):
+def write_to_csv(message, counter):
         with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
             csvwriter = csv.writer(f)
             #'time_stamp', 'first 5 of the node id', 'CC container', 'Message Counter', 'Message'
@@ -344,6 +353,7 @@ def main():
     Main function to process and send commands to the REST server.
     """
     global SENDING
+    global CONNECTING
     # connect_to_server()  # Register this bot with the REST server on startup
     load_this_node()
     # Create csv file with headers
@@ -353,23 +363,67 @@ def main():
         # put initial message that this node is online (more for the tracker than anthing else.)
         csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, 0, 'node online'])
 
-    ln_checker.set_state('online')
+    # Wait until we've finished creating channels with other nodes
+    # Sleep time here is different since it takes a little to find nodes and then
+    # try to connect to them.
+    
+    ln_checker.set_state('initializing')
+    while not ln_checker.get_channels(): # need to make sure we're returning stuff
+        time.sleep(CONNECT_SLEEP)
+    while len(ln_checker.get_channels()) < 2:
+        ln_checker.set_state('initializing')
+        time.sleep(CONNECT_SLEEP)
+    logging.info('We have created a channel with the Innnocent node.')
 
-    counter = 0
-    max_counter = STATUS_TIMER // SLEEP_INT
+    update_counter = 0
+    max_counter = (STATUS_TIMER // SLEEP_INT) # this is so that we don't update the node too often
+    
     while True:
         # Retrieve all messages using lightning-cli
         messages = get_all_messages()
-        if messages:
+
+        if messages and len(messages) > 0:
             for message in messages:
-                process_message(message)  # Process each message with command and counter
+                command, command_counter = process_message(message)  # seperate the command and counter
+                processed_counters = get_processed_counters()
+                if command_counter and command_counter not in processed_counters:
+                    logging.info(f'Current command is {command}. current counters are {processed_counters}')
+                    processed_counters.add(command_counter)
+                    write_to_csv(command, command_counter)
+                    logging.info(f'Sending message {message} to connected nodes.')
+                    send_message_to_connected_nodes(message, command_counter)
+                    logging.info(f'Sent {message} to all connected nodes.')
+
         time.sleep(SLEEP_INT)
-        if SENDING or counter > max_counter:
-            ln_checker.set_state('online')
-            counter = 0
+        if SENDING or CONNECTING or update_counter > max_counter: # detect state
+            if ln_checker.is_node_ready(): # is_node_ready automatically sets the state
+                CONNECTING = True
+            elif ln_checker.get_state() != 'online':
+                CONNECTING = False
+                
+            update_counter = 0
             SENDING = False
         else:
-            counter += 1
+            if ln_checker.is_node_ready():
+                CONNECTING = True
+            update_counter += 1
+
+def get_processed_counters():
+    '''
+    Get a current set of processed counters
+    Only returns an intersection of all counters
+    Only includes counters that have been sent to ALL connected nodes.'''
+    global MESSAGE_TRACKING_DICT
+    if MESSAGE_TRACKING_DICT:
+        first_value = next(iter(MESSAGE_TRACKING_DICT.values()))
+        processed_counters = first_value.copy()
+    else:
+        return set()
+    
+    for counter_set in MESSAGE_TRACKING_DICT.values():
+        processed_counters = processed_counters & counter_set
+
+    return counter_set
 
 def load_this_node ():
     """

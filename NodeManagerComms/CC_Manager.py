@@ -23,7 +23,7 @@ import ln_checker
 
 # Constants
 DISCOVERY_RULE_DIVISOR = 19  # Capacity must be divisible by 19 (prime number)
-MAX_PEERS = 4  # Maximum number of peers
+MAX_PEERS = 4     # Maximum number of peers
 
 INNOCENT_NODE_ID = None
 INNOCENT_NODE_ADDRESS = None
@@ -33,6 +33,9 @@ BLACKLISTED_NODES = {}# Nodes blacklisted for fundchannel
 
 channel_created_nodes = set()
 innocent_channel_closed = False
+# for channels that need to restart
+CHANNEL_OPENING_TIMES = {}
+DOCKER_CONTAINERS = []
 
 # Cache for nodes already queried
 seen_nodes_cache = {}  # Format: {<target_node_id>: <timestamp>}
@@ -40,6 +43,10 @@ CACHE_EXPIRATION_TIME = 3600  # Cache entries expire after 1 hour
 
 # HOW OFTEN the script looks for new channels
 CHANNEL_SLEEP_INT = 10
+CHANNEL_CHECK_SLEEP_INT = 60
+
+# wait counter for how often to attempt balancing the channels
+CHANNEL_BALANCE_COUNTER = 3
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
 
@@ -57,18 +64,13 @@ def run_lightning_cli(command):
             text=True,
             check=True
         )
-        # logging.info(f"run_lightning_cli: stdout: {result.stdout}")
-        # logging.info(f"run_lightning_cli: stderr: {result.stderr}")
-        if result.returncode != 0:
-            logging.error(f"run_lightning_cli: Command failed with error: {result.stderr.strip()}")
-            return None
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
         logging.error(f"lightning-cli command failed with exit code {e.returncode}")
         logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
         logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}")
-        raise # Re-raise the exception so your calling code can catch it
+        return None
     except Exception as e:
         logging.error(f"run_lightning_cli: Exception occurred: {e}")
         return None
@@ -103,11 +105,11 @@ def connect_to_innocent():
     if INNOCENT_NODE_ID not in peers_with_channels:
         # Calculate funding amount based on the discovery rule
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
-
         try:
             logging.info(f"No channel with Innocent Node. Funding a channel with funding amount: {funding_amount}")
             # seeing if this helps the funding problems
             ln_checker.check_funds()
+            time.sleep(3)
             run_lightning_cli(["fundchannel", INNOCENT_NODE_ID, str(funding_amount)])
         except Exception as e:
             logging.error(f"Funding failed: {e}")
@@ -264,6 +266,7 @@ def create_channels():
     Create channels only with nodes that meet the discovery rule and avoid duplicates.
     """
     global innocent_channel_closed
+    global CHANNEL_OPENING_TIMES
     # logging.info("create_channels: Starting channel creation process.")
 
     peers_with_channels = list_peers_with_channels()
@@ -289,69 +292,89 @@ def create_channels():
         return
 
     for node in valid_nodes:
+        logging.info(f'{len(peers_with_channels_excl_innocent)} channels')
         if len(peers_with_channels_excl_innocent) >= MAX_PEERS:
             logging.info("create_channels: Reached maximum peers with channels while processing nodes.")
             # Close the channel with the Innocent node and disconnect
             if not innocent_channel_closed:
                 close_and_disconnect_innocent()
             break
-        
+        peer_id = node["node_id"]
         # random sleep timer so that they don't all come online and look for each other at the 
         # same time. This is to try to mitigate a bunch of nodes creating a channel to the same
         # node all at once (might also randomzie access to the channel list if this doesnt work)
-        time.sleep(random.random() * random.randint(1, 5))
-        channel_counts = get_channel_counts()
-        peer_id = node["node_id"]
-        # Skip blacklisted nodes and nodes with existing channels
+        attempt = 0
+        channel_counts = get_channel_counts() # get the dictionary mapping node ids to the number of channels they have
+        node_maxed = False
+        while attempt < random.randint(1, MAX_PEERS):
+            time.sleep(random.random() * random.randint(1, 4))
+            new_channel_counts = get_channel_counts()
+
+            # check connection again, if the count change since we last check, loop again and wait
+            if not new_channel_counts[peer_id] == channel_counts[peer_id]:
+                channel_counts = new_channel_counts
+                logging.info(f'create_channels: Restarting loop, channel count changed.\n{channel_counts[peer_id]}\n{new_channel_counts[peer_id]}')
+                continue
+
+            # check connection counts for this node. If not in channel_counts, set it true since we
+            # dont' want that
+            if peer_id in new_channel_counts.keys() and new_channel_counts:
+                if new_channel_counts[peer_id] >= MAX_PEERS:
+                    logging.info(f'create_channels: Skipping node {peer_id} since it has max peers')
+                    node_maxed = True
+                    break
+            else:
+                logging.warning(f'create_channels: trying to connect to a node {peer_id} that is no longer avaiable')
+                node_maxed = True
+                break
+            channel_counts = new_channel_counts
+            attempt += 1
+
+        # checks again in case things have changed
         if peer_id in BLACKLISTED_NODES:
             logging.info(f"create_channels: Skipping blacklisted node {peer_id}.")
             continue
         if peer_id in peers_with_channels:
             logging.info(f"create_channels: Skipping node {peer_id} as a channel already exists.")
-            continue
-        if peer_id in channel_created_nodes:
-            logging.info(f"create_channels: Skipping node {peer_id} as a channel already exists.")
-            continue
+            break
         if channeled_with_peer(peer_id):
             logging.info(f"create_channels: Skipping node {peer_id} as our peer already has a channel with it.")
-            continue
-        if channel_counts[peer_id] >= MAX_PEERS:
+            break
+        if peer_id in channel_counts and channel_counts[peer_id] >= MAX_PEERS:
             logging.info(f"create_channels: Skipping node {peer_id} as it already has max peers")
-            continue
+            break
+        if node_maxed == True:
+            logging.info(f'create_channels: Skipping node {peer_id} as it already has max peers')
+            break
+        if THIS_NODE in channel_counts and channel_counts[THIS_NODE] >= MAX_PEERS:
+            logging.info(f'create_channels: This node has reached the number of channels it can make.')
+            break
 
         # Uncomment the following line in Testnet/Mainnet to connect to the node before funding a channel
         # connect_to_node(peer_id)
-
+        logging.info(f'Checks complete, starting to connect to {peer_id}')
         #this will allow the CCs to connect to each other by themselves instead of having to mesh connect before hand
         if not ln_checker.does_connection_exist(peer_id):
             # make sure we're not trying to connect to a node we're already connected to
             demoGetAddressAndConnect(peer_id)
 
+        logging.info(f'Connected. Funding.')
         if ln_checker.does_connection_exist(peer_id):
             # random funding amount (replaced the minutes version since that can give 19 and 0, which breaks this discovery rule)
-            funding_amount = random.randint(1,15) * 100000
-
+            funding_amount = random.randint(5,15) * 10000
             logging.info(f"create_channels: Opening channel with node {peer_id}. Funding amount: {funding_amount}")
             ln_checker.check_funds()
-            result = run_lightning_cli(["fundchannel", peer_id, str(funding_amount)])
+            result = run_lightning_cli(["fundchannel", peer_id, f'{str(funding_amount)}'])
             # fund the channel and automatically send liqudity to make sure we can communicate using this channel
             # variables are : command, node_to_fund, channel_capacity, feerate, announce, funds_sent_over
             # result = run_lightning_cli(["fundchannel", peer_id, str(funding_amount), str(0), 'true', str(funding_amount // 2)])
             if result:
                 logging.info(f"create_channels: Channel successfully created with node {peer_id}.")
+                CHANNEL_OPENING_TIMES[peer_id] = time.time()
+                logging.info(f'This should have something {CHANNEL_OPENING_TIMES}')
 
-                ln_checker.wait_node_activated(peer_id)
-
-                # Calculate the amount to send via keysend (e.g., 50% of the funding amount)
-                # we do this in the funchannel now
-                keysend_amount_msat = (funding_amount * 1000) // 2  # Convert to msat and take half
-
-                # logging.info(f"create_channels: Sending {keysend_amount_msat} msat to node {peer_id} via keysend.")
-                keysend_result = run_lightning_cli(["keysend", peer_id, str(keysend_amount_msat)])
-                if keysend_result:
-                    logging.info(f"create_channels: Successfully sent {keysend_amount_msat} msat to node {peer_id}.")
-                else:
-                    logging.error(f"create_channels: Failed to send keysend payment to node {peer_id}.")
+                if ln_checker.wait_node_activated(peer_id):
+                    ln_checker.balance_channel(peer_id)
 
                 # channel_created_nodes.add(peer_id)  # Track this node || Outdated, peers_with_channels does this already
                 peers_with_channels.add(peer_id)     # Update peers set
@@ -412,6 +435,12 @@ def discover_nodes():
     """
     # logging.info("discover_nodes: Discovering nodes with valid channels.")
     own_node_id = THIS_NODE
+    inno_node = INNOCENT_NODE_ID
+
+    if not inno_node or not ln_checker.has_channel_with(inno_node):
+        logging.info(f'discover_nodes: Not connected to Innocent Node, cannot connect to new nodes.')
+        return None
+
     valid_nodes = []
 
     output = run_lightning_cli(["listchannels"])
@@ -464,8 +493,6 @@ def discover_nodes():
         # add the destination node, since we check that the channel source is the innocent node
         valid_nodes.append({"node_id": channel['destination']})
     
-    logging.info(channel_counts)
-
     # logging.info(f"discover_nodes: Valid nodes discovered: \n{valid_nodes}")
     return valid_nodes
 
@@ -500,6 +527,46 @@ def close_and_disconnect_innocent():
     run_lightning_cli(["disconnect", INNOCENT_NODE_ID])
     innocent_channel_closed = True
 
+def check_channel_states():
+    ''''
+    Check each channel. If it's been too long and it hasn't gone to normal we drop it.
+    On the main net this wouldn't be a problem, probably.
+    '''
+    global CHANNEL_OPENING_TIMES
+
+    if len(CHANNEL_OPENING_TIMES) == 0:
+        return
+
+    # check if any channels got stuck in AWAITING and thus weren't added to the dicitionary
+    channels = ln_checker.get_channels()
+    for channel in channels:
+        channel_state = channels[channel].get('state')
+        if channel not in CHANNEL_OPENING_TIMES.keys() and channel_state not in ln_checker.NOT_CONNECTING:
+            logging.warning(f'check_channel_states: Channel with {channel} is abnormal and not tracked. Tracking. . .')
+            CHANNEL_OPENING_TIMES[channel] = time.time()
+
+    logging.info(f'check_channel_states: Checking channel states for {len(CHANNEL_OPENING_TIMES)} nodes')
+
+    to_remove = []
+    for node in CHANNEL_OPENING_TIMES.keys():
+        start_time = CHANNEL_OPENING_TIMES[node]
+        elasped_time = time.time() - start_time
+        logging.info(f'check_channel_states: Checking node {node}')
+
+        if ln_checker.is_node_active(node):
+            logging.info(f'check_channel_states: Channel with {node} is normal. Removing from pending list.')
+            to_remove.append(node)
+        elif elasped_time >= CHANNEL_CHECK_SLEEP_INT:
+            logging.warning(f'check_channel_states: Channel with node {node} took too long to become normal. Closing channel.')
+            run_lightning_cli(['close', node])
+            to_remove.append(node)
+    if len(to_remove) > 0:
+        for node in to_remove:
+            CHANNEL_OPENING_TIMES.pop(node)
+            logging.info(f'Popped {node}')
+    logging.info(f'check_channel_states: Finished checking channels')
+
+
 def main():
     """
     Main script loop.
@@ -532,21 +599,28 @@ def main():
             logging.error(f"Error loading the files: {e}")
 
         if attempt >= attempt_max - 1:
-            logging.error(f"Cant find innocent node file after {attempt_max} tries. CATASTROPHIC ERROR DUDE")
+            logging.error(f"Cant find innocent node file after {attempt_max} tries. CATASTROPHIC ERROR")
             return
 
         logging.info(f"Can't find required files. Retrying in {sleep_int} seconds")
         time.sleep(sleep_int)
 
-    time.sleep(sleep_int)
+    while not ln_checker.has_channel_with(INNOCENT_NODE_ID):
+        time.sleep(sleep_int)
+        connect_to_innocent()
 
-    connect_to_innocent()   
+    balance_counter = 0
 
     while True:
         try:
             create_channels()
+            check_channel_states()
+            if balance_counter >= CHANNEL_BALANCE_COUNTER:
+                balance_counter = 0
+                ln_checker.balance_all_channels()
             logging.info("main: Sleeping for 10 seconds.")
             time.sleep(CHANNEL_SLEEP_INT)
+            balance_counter += 1
         except KeyboardInterrupt:
             logging.info("main: Script terminated by user.")
             break

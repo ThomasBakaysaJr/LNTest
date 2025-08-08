@@ -35,7 +35,7 @@ create_innocent_node() {
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $BOOT_SCRIPT:/root/bootstrap.sh \
         -v $INNO_MANAGER_DIR:/root/ \
-        elementsproject/lightningd \
+        elementsproject/lightningd:latest \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=10010

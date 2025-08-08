@@ -20,9 +20,14 @@ NODE_MANAGER_ADDRESS_LIST="$NODE_MANAGER_DIR/CC_address_list.txt"
 BOT_MASTER_ADDRESS_LIST="$BOT_MASTER_DIR/CC_address_list.txt"
 
 # Number of LOOPS, so total nodes will be this * num_concurrent
-NUM_CREATE_LOOP=3
+if [ -z "${1:-}" ]; then
+    NUM_CREATE_LOOP=2
+else
+    NUM_CREATE_LOOP="$1"
+fi
+echo "using $NUM_CREATE_LOOP as number of loops"
 # Number of nodes to create at the same time (so as not to overload)
-NUM_NODES_CONCURRENT=5
+NUM_NODES_CONCURRENT=10
 
 NUM_NODES=$((NUM_CREATE_LOOP * NUM_NODES_CONCURRENT))
 
@@ -41,10 +46,10 @@ fund_node() {
 
     # Send 50 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
     txid=$(curl -s --user bitcoinuser:bitcoinpassword \
-        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 50]}" \
+        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 10]}" \
         -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
 
-    echo "Sent 50 BTC to $node at address $address (txid: $txid)"
+    echo "Sent 10 BTC to $node at address $address (txid: $txid)"
 }
 
 confirm_funds() {
@@ -78,7 +83,7 @@ create_node() {
         -v $PLUGIN_SCRIPT:/root/bootstrap.sh \
         -v $NODE_MANAGER_DIR:/root/nodemanager \
         -v $LN_CHECKER_FILE:/root/nodemanager/ln_checker.py \
-        elementsproject/lightningd \
+        elementsproject/lightningd:latest \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=$NODE_GRPC_PORT
