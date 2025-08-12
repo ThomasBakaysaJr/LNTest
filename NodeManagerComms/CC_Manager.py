@@ -35,7 +35,6 @@ channel_created_nodes = set()
 innocent_channel_closed = False
 # for channels that need to restart
 CHANNEL_OPENING_TIMES = {}
-DOCKER_CONTAINERS = []
 
 # Cache for nodes already queried
 seen_nodes_cache = {}  # Format: {<target_node_id>: <timestamp>}
@@ -186,14 +185,14 @@ def list_peers():
         logging.error("list_peers: Failed to parse peer list output.")
         return set()
 
-def channeled_with_peer(node_id):
+def channeled_with_peer(node_id, peer_channel_list):
     """
     Check if any of our channel peers (excluding the Innocent node) have a channel with the given node_id.
     """
     # logging.info(f"channeled_with_peer: Checking if any channel peer (excluding Innocent node) has a channel with node {node_id}")
 
     #For Regtest with mesh connected CCs, Get the list of peers we have channels with (excluding the Innocent node)
-    peer_ids = list_peers_with_channels() - {INNOCENT_NODE_ID}
+    peer_ids = peer_channel_list - {INNOCENT_NODE_ID}
 
     #for TESTNET/MAINNET 
     #peer_ids = list_peers() - {INNOCENT_NODE_ID}
@@ -266,6 +265,7 @@ def create_channels():
     Create channels only with nodes that meet the discovery rule and avoid duplicates.
     """
     global innocent_channel_closed
+    global channel_created_nodes
     global CHANNEL_OPENING_TIMES
     # logging.info("create_channels: Starting channel creation process.")
 
@@ -285,6 +285,10 @@ def create_channels():
         if not innocent_channel_closed:
             close_and_disconnect_innocent()
         return
+    elif innocent_channel_closed:
+        logging.info('create_channels: Number of channels below threshold, re-opening channel to innocent node.')
+        innocent_channel_closed = False
+        connect_to_innocent()
 
     valid_nodes = discover_nodes()
     if not valid_nodes:
@@ -337,7 +341,7 @@ def create_channels():
         if peer_id in peers_with_channels:
             logging.info(f"create_channels: Skipping node {peer_id} as a channel already exists.")
             break
-        if channeled_with_peer(peer_id):
+        if channeled_with_peer(peer_id, channel_counts.keys()):
             logging.info(f"create_channels: Skipping node {peer_id} as our peer already has a channel with it.")
             break
         if peer_id in channel_counts and channel_counts[peer_id] >= MAX_PEERS:
@@ -354,7 +358,7 @@ def create_channels():
         # connect_to_node(peer_id)
         logging.info(f'Checks complete, starting to connect to {peer_id}')
         #this will allow the CCs to connect to each other by themselves instead of having to mesh connect before hand
-        if not ln_checker.does_connection_exist(peer_id):
+        if peer_id not in channel_created_nodes and not ln_checker.does_connection_exist(peer_id):
             # make sure we're not trying to connect to a node we're already connected to
             demoGetAddressAndConnect(peer_id)
 
@@ -376,13 +380,15 @@ def create_channels():
                 if ln_checker.wait_node_activated(peer_id):
                     ln_checker.balance_channel(peer_id)
 
-                # channel_created_nodes.add(peer_id)  # Track this node || Outdated, peers_with_channels does this already
+                channel_created_nodes.add(peer_id)  # Track this node
                 peers_with_channels.add(peer_id)     # Update peers set
                 peers_with_channels_excl_innocent.add(peer_id)
             else:
                 logging.error(f"create_channels: Failed to create channel with node {peer_id}.")
         else:
             logging.error(f"create_channels: Failed to connect to {peer_id}.")
+            if peer_id in channel_created_nodes:
+                channel_created_nodes.remove(peer_id)
 
 
 def list_peers_with_channels():

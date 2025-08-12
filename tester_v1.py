@@ -13,6 +13,7 @@ BM_PATH = '/root/botmaster'
 BM_SCRIPT = 'BM.py'
 BM_CONT = 'BM'
 CC_MESSAGE_PREFIX = 'NodeManagerComms/cc_messageLog_*'
+CC_CUR_MESSAGE_PREFIX = 'NodeManagerComms/cc_currentMessage_*'
 STATUS_JSON_PREFIX = 'status_CC*'
 
 TIMES_CSV = 'time_data_'
@@ -32,7 +33,7 @@ MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
 # Unless the script isn't working properly, best to leave these values alone
 MAX_WAIT = 450 # max wait for propagation before we move on (default = 300)
 WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
-MAX_TRY = 1 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
+MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
 FM_WAIT = 120 # how long to wait before trying to send the first message (to let the nodes create channels) (default = 120) #OUTDATED
 SLEEP_INTERVAL = 1
 SLEEP_CHANNEL_INTERVAL = 2
@@ -100,11 +101,13 @@ def main(starting_iteration):
             # record the test and set reset attempts
             if success:
                 record_cc_total_time(cc_start_time, x)
+                untrack_containers()
                 attempt = 0
             # if not a succes, add to the attempt
             else:
                 attempt += 1
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+                untrack_containers()
                 print_topology()
                 record_cc_total_time(cc_start_time, x)
 
@@ -227,7 +230,10 @@ def wait_for_propagation(command):
     while sending:
         data = update_data()
         update_containers()
-        time_interval, done = get_time_interval(data, command)
+        if data:
+            time_interval, done = get_time_interval(data, command)
+        else:
+            done = False
         if done:
             sending = False
             success = True 
@@ -280,20 +286,16 @@ def setup_test(count):
         return None
     
 def update_data():
-    msg_files = glob.glob(CC_MESSAGE_PREFIX)
+    msg_files = glob.glob(CC_CUR_MESSAGE_PREFIX)
     all_data = []
 
-    # get all the data and find the one with the highest counter
-    # the message_logs aren't alway going to be in order
+    # get all the data
     for msg_file in msg_files:
         with open(msg_file, 'r') as of:
             reader = csv.reader(of)
-            next(reader) # moves on from the headers
             data = list(reader)
-            sorted_data = sorted(data, key = lambda data : int(data[COUNTER]))
-
-            all_data.append(sorted_data[-1])
-
+            if data:
+                all_data.append(data[-1])
     return all_data
 
 def get_time_interval(data, counter):
@@ -332,6 +334,11 @@ def update_containers():
             print(f'The following containers have died. Recorded at {get_time()}')
             for container in dead_cont:
                 print(f'{container.name}')
+
+def untrack_containers():
+    global DOCKER_CONTAINERS
+
+    DOCKER_CONTAINERS = set()
 
 def print_topology():
     topology = retrieve_all_status()

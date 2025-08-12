@@ -19,7 +19,10 @@ SERVER_URL = 'http://127.0.0.1:8000'
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
 MESSAGE_LOG_FILE = f'cc_messageLog_{HOST_NAME}.csv'
+CURRENT_MESSAGE_FILE = f'cc_currentMessage_{HOST_NAME}.csv'
+CURRENT_COMMAND_COUNTER = 0
 DISCOVERY_RULE_DIVISOR = [19, 1231]
+
 
 RETRY_INT = 5
 SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
@@ -343,10 +346,20 @@ def process_message(message):
         logging.error(f"Error processing message: {e}")
 
 def write_to_csv(message, counter):
-        with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
-            csvwriter = csv.writer(f)
+    global CURRENT_COMMAND_COUNTER
+    
             #'time_stamp', 'first 5 of the node id', 'CC container', 'Message Counter', 'Message'
-            csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, counter, message])
+    entry = [time.time(), THIS_NODE[:5], HOST_NAME, counter, message]
+    logging.info(entry)
+    if int(counter) > CURRENT_COMMAND_COUNTER:
+        print(f'write_to_csv: incrementing counter')
+        with open(CURRENT_MESSAGE_FILE, 'w') as f:
+            csvwriter = csv.writer(f)
+            csvwriter.writerow(entry)
+
+    with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
+        csvwriter = csv.writer(f)
+        csvwriter.writerow(entry)
 
 def main():
     """
@@ -362,6 +375,9 @@ def main():
         csvwriter.writerow(['Time', 'Short_ID', 'CC container', 'Message Counter', 'Message'])
         # put initial message that this node is online (more for the tracker than anthing else.)
         csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, 0, 'node online'])
+    with open(CURRENT_MESSAGE_FILE, 'w') as f:
+        csvwriter = csv.writer(f)
+        csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, '0', '0'])
 
     # Wait until we've finished creating channels with other nodes
     # Sleep time here is different since it takes a little to find nodes and then
@@ -381,15 +397,17 @@ def main():
     while True:
         # Retrieve all messages using lightning-cli
         messages = get_all_messages()
+        written_commands = set()
 
         if messages and len(messages) > 0:
             for message in messages:
                 command, command_counter = process_message(message)  # seperate the command and counter
                 processed_counters = get_processed_counters()
                 if command_counter and command_counter not in processed_counters:
-                    logging.info(f'Current command is {command}. current counters are {processed_counters}')
+                    if command_counter not in written_commands: # this way we only write it once
+                        written_commands.add(command_counter)
+                        write_to_csv(command, command_counter)
                     processed_counters.add(command_counter)
-                    write_to_csv(command, command_counter)
                     logging.info(f'Sending message {message} to connected nodes.')
                     send_message_to_connected_nodes(message, command_counter)
                     logging.info(f'Sent {message} to all connected nodes.')
@@ -412,8 +430,10 @@ def get_processed_counters():
     '''
     Get a current set of processed counters
     Only returns an intersection of all counters
-    Only includes counters that have been sent to ALL connected nodes.'''
+    Only includes counters that have been sent to ALL connected nodes.
+    '''
     global MESSAGE_TRACKING_DICT
+    prun_msg_dict()
     if MESSAGE_TRACKING_DICT:
         first_value = next(iter(MESSAGE_TRACKING_DICT.values()))
         processed_counters = first_value.copy()
@@ -423,7 +443,22 @@ def get_processed_counters():
     for counter_set in MESSAGE_TRACKING_DICT.values():
         processed_counters = processed_counters & counter_set
 
-    return counter_set
+    logging.info(f'countesr is {processed_counters}')
+    return processed_counters
+
+def prun_msg_dict():
+    '''
+    Look at our channels - remove from the dictionary if
+    something happened to them (the node died or something)
+    that way we resend messages in case they got dropped.
+    '''
+    global MESSAGE_TRACKING_DICT
+
+    channels = ln_checker.get_channels()
+    for node in MESSAGE_TRACKING_DICT:
+        if node not in channels:
+            logging.warning(f'Node {node} has no/broken channel. Removing from tracker.')
+            MESSAGE_TRACKING_DICT.pop(node)
 
 def load_this_node ():
     """

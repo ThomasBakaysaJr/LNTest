@@ -29,7 +29,7 @@ create_botmaster_node() {
     mkdir -p $NODE_LIGHTNING_DIR
 
     # Run the Docker container with the specified name
-    docker run -d --network host --name $NODE_NAME \
+    docker run -d --restart unless-stopped --network host --name $NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $PLUGIN_SCRIPT:/root/bootstrap.sh \

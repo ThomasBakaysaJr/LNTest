@@ -10,6 +10,7 @@ BASE_DIR="/home/thomas/Documents/LNBot/Other_files" # Change this to the directo
 LIGHTNING_DIR="/home/thomas/.lightning"
 BITCOIN_DIR="/home/thomas/.bitcoin"
 PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"
+STARTUP_SCRIPT="$BASE_DIR/node_start.sh"
 
 # Directories for NodeManagerComms and BotMasterComms
 NODE_MANAGER_DIR="$BASE_DIR/NodeManagerComms"
@@ -76,13 +77,15 @@ create_node() {
     mkdir -p $NODE_LIGHTNING_DIR
 
     # Run the Docker container with the specified name
-    docker run -d --network host --name $NODE_NAME \
+    docker run -d --restart unless-stopped --network host --name $NODE_NAME \
         -e CONTAINER_NAME=$NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $PLUGIN_SCRIPT:/root/bootstrap.sh \
         -v $NODE_MANAGER_DIR:/root/nodemanager \
         -v $LN_CHECKER_FILE:/root/nodemanager/ln_checker.py \
+        -v $STARTUP_SCRIPT:/root/nodemanager/node_start.sh \
+        --entrypoint /root/nodemanager/node_start.sh \
         elementsproject/lightningd:latest \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
@@ -95,8 +98,8 @@ create_node() {
     # trying to see if we need to wait a bit before starting the manager script
     sleep 5
 
-    docker exec --workdir /root/nodemanager $NODE_NAME python3 CC_Manager.py &
-    docker exec --workdir /root/nodemanager $NODE_NAME python3 noiseManager_REST.py &
+    #docker exec --workdir /root/nodemanager $NODE_NAME python3 CC_Manager.py &
+    #docker exec --workdir /root/nodemanager $NODE_NAME python3 noiseManager_REST.py &
 
     echo "Finished setting up $NODE_NAME"
 }
