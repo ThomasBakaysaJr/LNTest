@@ -4,12 +4,12 @@
 
 import subprocess
 import json
-import random
 # import requests
 import time
 import os
 import csv
 import logging
+from pathlib import Path
 
 import ln_checker
 
@@ -18,8 +18,6 @@ BOT_ADDRESS = '127.0.0.9'  # Adjust if a different address is required
 SERVER_URL = 'http://127.0.0.1:8000'
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
-MESSAGE_LOG_FILE = f'cc_messageLog_{HOST_NAME}.csv'
-CURRENT_MESSAGE_FILE = f'cc_currentMessage_{HOST_NAME}.csv'
 CURRENT_COMMAND_COUNTER = 0
 DISCOVERY_RULE_DIVISOR = [19, 1231]
 
@@ -44,8 +42,16 @@ MESSAGE_TRACKING_DICT = {} # this is going to a be a dict of sets
 SENT_MESSAGES = set()
 LAST_INVOICE_INDEX = -1
 
-logging.basicConfig(filename=f'noise_log_{HOST_NAME}.log', level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
+LOG_DIR = Path('logs')
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+STATUS_DIR = Path('status')
+STATUS_DIR.mkdir(parents=True, exist_ok=True)
 
+MESSAGE_LOG_FILE = STATUS_DIR / f'cc_messageLog_{HOST_NAME}.csv'
+CURRENT_MESSAGE_FILE = STATUS_DIR / f'cc_currentMessage_{HOST_NAME}.csv'
+log_file_path = LOG_DIR / f'noise_log_{HOST_NAME}.log'
+
+logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
 
 def connect_to_server():
     """

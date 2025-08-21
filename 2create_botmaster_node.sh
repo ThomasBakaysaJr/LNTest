@@ -4,7 +4,7 @@
 set -e
 
 # Base directories for lightning and Bitcoin
-BASE_DIR="/home/thomas/Documents/LNBot/Other_files"    #Change this to the directory accordingly to your setup
+BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"    #Change this to the directory accordingly to your setup
 LIGHTNING_DIR="/home/thomas/.lightning"
 BITCOIN_DIR="/home/thomas/.bitcoin"
 PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"

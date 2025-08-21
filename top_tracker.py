@@ -9,8 +9,8 @@ from rich.table import Table
 from rich.console import Console
 from rich import box
 
-CC_MESSAGE_PREFIX = 'NodeManagerComms/cc_messageLog_*'
-CC_STATUS_PREFIX = 'NodeManagerComms/status_*'
+CC_MESSAGE_PREFIX = 'NodeManagerComms/status/cc_messageLog_*'
+CC_STATUS_PREFIX = 'NodeManagerComms/status/status_*'
 LOG_TRACKER = 'log_tracker.py'
 UPDATE_INT = 0.1
 

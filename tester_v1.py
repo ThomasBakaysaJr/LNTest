@@ -12,9 +12,9 @@ import pandas as pd
 BM_PATH = '/root/botmaster'
 BM_SCRIPT = 'BM.py'
 BM_CONT = 'BM'
-CC_MESSAGE_PREFIX = 'NodeManagerComms/cc_messageLog_*'
-CC_CUR_MESSAGE_PREFIX = 'NodeManagerComms/cc_currentMessage_*'
-STATUS_JSON_PREFIX = 'status_CC*'
+CC_MESSAGE_PREFIX = 'NodeManagerComms/status/cc_messageLog_*'
+CC_CUR_MESSAGE_PREFIX = 'NodeManagerComms/status/cc_currentMessage_*'
+STATUS_JSON_PREFIX = 'status/status_CC*'
 
 TIMES_CSV = 'time_data_'
 RUNTIMES_CSV = 'runtime_data.csv'
@@ -30,7 +30,7 @@ CHANNEL_NORMAL = 'CHANNELD_NORMAL'
 NUM_CC_ITERATIONS = 10 # each iteration increases the number of CC servers by 10
 MIN_CHANNELS = 4 # these two govern number of channels for the nodes
 MAX_CHANNELS = 4
-MAX_MESSAGES = 10 # number of messages to test (Prof wants 100)
+MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
 
 # Unless the script isn't working properly, best to leave these values alone
 MAX_WAIT = 450 # max wait for propagation before we move on (default = 300)

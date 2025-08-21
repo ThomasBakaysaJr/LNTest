@@ -4,7 +4,7 @@
 set -e
 
 # Base directories for lightning
-BASE_DIR="/home/thomas/Documents/LNBot/Other_files"   #Change this to the directory accordingly to your setup
+BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"   #Change this to the directory accordingly to your setup
 
 # Stop and remove all containers
 echo "Stopping and removing containers..."
@@ -19,10 +19,10 @@ rm -rf $BASE_DIR/lightning-InnocentNode
 rm -rf $BASE_DIR/BotMasterComms/bm_log*
 rm -f $BASE_DIR/BotMasterComms/counter.txt
 rm -f $BASE_DIR/BotMasterComms/funded_node.txt
-rm -rf $BASE_DIR/NodeManagerComms/cc_log*
-rm -rf $BASE_DIR/NodeManagerComms/cc_currentMessage*
-rm -rf $BASE_DIR/NodeManagerComms/cc_messageLog_*
-rm -rf $BASE_DIR/NodeManagerComms/noise_log*
-rm -rf $BASE_DIR/NodeManagerComms/status_CC*
+rm -rf $BASE_DIR/NodeManagerComms/logs/cc_log*
+rm -rf $BASE_DIR/NodeManagerComms/logs/noise_log*
+rm -rf $BASE_DIR/NodeManagerComms/status/cc_currentMessage*
+rm -rf $BASE_DIR/NodeManagerComms/status/cc_messageLog_*
+rm -rf $BASE_DIR/NodeManagerComms/status/status_CC*
 
 echo "Cleanup complete."

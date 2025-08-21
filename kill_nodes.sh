@@ -4,7 +4,7 @@
 set -e
 
 # Base directories for lightning
-BASE_DIR="/home/thomas/Documents/LNBot/Other_files"   #Change this to the directory accordingly to your setup
+BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"   #Change this to the directory accordingly to your setup
 
 # Stop and remove all containers
 echo "Stopping and removing containers..."

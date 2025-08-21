@@ -1,8 +1,8 @@
 import glob
 import time
 
-LOG_PREFIX = 'NodeManagerComms/cc_log*'
-NOISE_PREFIX = 'NodeManagerComms/noise_log*'
+LOG_PREFIX = 'NodeManagerComms/logs/cc_log*'
+NOISE_PREFIX = 'NodeManagerComms/logs/noise_log*'
 BM_PREFIX = 'BotMasterComms/bm_log.log'
 UPDATE_INT = 0.2
 

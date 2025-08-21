@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 import time
 import subprocess
 import json
@@ -11,7 +12,9 @@ SLEEP_INT= 10
 HOST_NAME = os.getenv("CONTAINER_NAME")
 
 # where the status file lives
-STATUS_FILE = 'status_'
+STATUS_DIR = Path('status')
+STATUS_DIR.mkdir(parents=True, exist_ok=True)
+STATUS_FILE = STATUS_DIR / 'status_'
 
 # channel states
 NOT_CONNECTING = ['CHANNELD_NORMAL', 'CLOSINGD_COMPLETE', 'ONCHAIN']
@@ -126,7 +129,7 @@ def does_connection_exist(target_node):
 
         for peer in peers_info.get('peers', []):
             if peer.get('id') == target_node:
-                logging.info(f'Valid peer: {target_node}')
+                # logging.info(f'Valid peer: {target_node}')
                 return True
     except Exception as e:
         logging.error(f'does_channel_exists: Error {e}')
@@ -213,22 +216,41 @@ def set_state(state):
     node_data = create_state(state)
     write_state(node_data)
 
-def get_state():
-    ''''
-    get the state of this node
+def get_status_data():
+    '''
+    Returns the entirety of the static status data 
     '''
     filename = f'{STATUS_FILE}{HOST_NAME}_{get_short_id(get_node_id())}.json'
-    
+    data = {}
     try:
         with open(filename, 'r') as file:
             data = json.load(file)
     except Exception as e:
         logging.warning(f'Get state fails because {e}')
+
+    return data
+
+def get_state():
+    ''''
+    get the state of this node
+    '''
+    data = get_status_data()
     if data:
         return data['state']
     else:
         return 'no data'
     
+def get_capacity(node):
+    '''
+    Returns the list of channels currently recorded for this node.
+    This uses a static file that may not be completely up to date.
+    '''
+    data = get_status_data()
+    if data:
+        return data['channels'][node]['capacity']
+    else:
+        return None
+        
 def create_state(state):
     '''
     Wrapper to get a dictionary containing all the info required for the tracker.
@@ -279,7 +301,7 @@ def balance_channel(target_node):
     used to balance out the channels
     can be called at anytime really
     '''
-    logging.info(f'Balancing channel with node {target_node}')
+    # logging.info(f'Balancing channel with node {target_node}')
     if not has_channel_with(target_node):
         logging.warning(f'Trying to balance {target_node} but no channel exists.')
         return
