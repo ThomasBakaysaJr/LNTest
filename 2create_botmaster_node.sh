@@ -4,10 +4,10 @@
 set -e
 
 # Base directories for lightning and Bitcoin
-BASE_DIR="/home/c499"    #Change this to the directory accordingly to your setup
-LIGHTNING_DIR="$BASE_DIR/lightning"
-BITCOIN_DIR="$BASE_DIR/.bitcoin"
-PLUGIN_SCRIPT="$BASE_DIR/lightning/bootstrap.sh"
+BASE_DIR="/home/thomas/Documents/LNBot/Other_files"    #Change this to the directory accordingly to your setup
+LIGHTNING_DIR="/home/thomas/.lightning"
+BITCOIN_DIR="/home/thomas/.bitcoin"
+PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"
 
 # Directory for BotMaster scripts
 BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
@@ -33,8 +33,8 @@ create_botmaster_node() {
         -v $BOT_MASTER_DIR:$BOT_MASTER_CONTAINER_DIR \
         elementsproject/lightningd \
         --network=regtest \
-        --addr=127.0.0.1:$NODE_PORT
-
+        --addr=127.0.0.1:$NODE_PORT \
+	    --grpc-port=10011
     # Run the bootstrap script inside the container
     echo "Setting up plugin for $NODE_NAME..."
     docker exec $NODE_NAME bash /root/bootstrap.sh
@@ -43,3 +43,4 @@ create_botmaster_node() {
 # Create the BotMaster node
 echo "Creating BotMaster node..."
 create_botmaster_node
+echo "Botmaster created"

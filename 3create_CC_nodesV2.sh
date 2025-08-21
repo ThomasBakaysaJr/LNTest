@@ -3,11 +3,13 @@
 
 set -e
 
+BITCOIND_RPC="http://bitcoinuser:bitcoinpassword@127.0.0.1:8332"
+
 # Base directories for lightning and Bitcoin
-BASE_DIR="/home/c499" # Change this to the directory accordingly to your setup
-LIGHTNING_DIR="$BASE_DIR/lightning"
-BITCOIN_DIR="$BASE_DIR/.bitcoin"
-PLUGIN_SCRIPT="$BASE_DIR/lightning/bootstrap.sh"
+BASE_DIR="/home/thomas/Documents/LNBot/Other_files" # Change this to the directory accordingly to your setup
+LIGHTNING_DIR="/home/thomas/.lightning"
+BITCOIN_DIR="/home/thomas/.bitcoin"
+PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"
 
 # Directories for NodeManagerComms and BotMasterComms
 NODE_MANAGER_DIR="$BASE_DIR/NodeManagerComms"
@@ -17,31 +19,78 @@ BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
 NODE_MANAGER_ADDRESS_LIST="$NODE_MANAGER_DIR/CC_address_list.txt"
 BOT_MASTER_ADDRESS_LIST="$BOT_MASTER_DIR/CC_address_list.txt"
 
+# Number of LOOPS, so total nodes will be this * num_concurrent
+NUM_CREATE_LOOP=2
+# Number of nodes to create at the same time (so as not to overload)
+NUM_NODES_CONCURRENT=5
+
+NUM_NODES=$((NUM_CREATE_LOOP * NUM_NODES_CONCURRENT))
+
+
 # Ensure bootstrap script is executable
 chmod +x $PLUGIN_SCRIPT
+
+# Function to fund a node's wallet
+fund_node() {
+    local node=$1
+
+    # Get a new Bitcoin address from the node
+    address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
+
+    # Send 50 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
+    txid=$(curl -s --user bitcoinuser:bitcoinpassword \
+        --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 50]}" \
+        -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
+
+    echo "Sent 50 BTC to $node at address $address (txid: $txid)"
+}
+
+confirm_funds() {
+# Mine blocks to confirm transactions
+#           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
+echo "Mining blocks to confirm transactions..."
+mining_address=$(curl -s --user bitcoinuser:bitcoinpassword \
+    --data-binary '{"jsonrpc": "1.0", "id": "mining", "method": "getnewaddress", "params": []}' \
+    -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
+
+curl -s --user bitcoinuser:bitcoinpassword \
+    --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"mining\", \"method\": \"generatetoaddress\", \"params\": [6, \"$mining_address\"]}" \
+    -H 'content-type: text/plain;' $BITCOIND_RPC
+}
 
 # Function to create a node
 create_node() {
     NODE_NAME=$1
     NODE_LIGHTNING_DIR="$BASE_DIR/lightning-$NODE_NAME"
     NODE_PORT=$2
+    NODE_GRPC_PORT=$3
 
     # Create a directory for the node
     mkdir -p $NODE_LIGHTNING_DIR
 
     # Run the Docker container with the specified name
     docker run -d --network host --name $NODE_NAME \
+        -e CONTAINER_NAME=$NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $PLUGIN_SCRIPT:/root/bootstrap.sh \
         -v $NODE_MANAGER_DIR:/root/nodemanager \
         elementsproject/lightningd \
         --network=regtest \
-        --addr=127.0.0.1:$NODE_PORT
+        --addr=127.0.0.1:$NODE_PORT \
+	    --grpc-port=$NODE_GRPC_PORT
 
     # Run the bootstrap script inside the container
-    echo "Setting up plugin for $NODE_NAME..."
+    echo "Running BOOTSTRAP for $NODE_NAME..."
     docker exec $NODE_NAME bash /root/bootstrap.sh
+    echo "Bootstrap for $NODE_NAME finished"
+    # trying to see if we need to wait a bit before starting the manager script
+    sleep 5
+
+    docker exec --workdir /root/nodemanager $NODE_NAME python3 CC_Manager.py &
+    docker exec --workdir /root/nodemanager $NODE_NAME python3 noiseManager_REST.py &
+
+    echo "Finished setting up $NODE_NAME"
 }
 
 # Function to extract addresses and write to files
@@ -71,15 +120,18 @@ write_addresses_to_file() {
     echo "Addresses have been written to $NODE_MANAGER_ADDRESS_LIST and $BOT_MASTER_ADDRESS_LIST."
 }
 
-# Number of nodes to create
-NUM_NODES=4
-
 # Create CC nodes concurrently
-for i in $(seq 1 $NUM_NODES); do
-    NODE_NAME="CC$i"
-    NODE_PORT=$((19848 + i))
-    echo "Creating node $NODE_NAME..."
-    create_node $NODE_NAME $NODE_PORT &
+for x in $(seq 1 $NUM_CREATE_LOOP); do
+    mult=$((((x - 1)) * NUM_NODES_CONCURRENT))
+    for i in $(seq 1 $NUM_NODES_CONCURRENT); do
+        count=$((mult + i))
+        NODE_NAME="CC$count"
+        NODE_PORT=$((19848 + count))
+        NODE_GRPC_PORT=$((10012 + count))
+        echo "Creating node $NODE_NAME..."
+        create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT &
+    done
+    wait
 done
 
 # Wait for all background jobs to finish

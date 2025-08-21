@@ -4,13 +4,15 @@
 set -e
 
 # Base directories for lightning and Bitcoin 
-BASE_DIR="/home/c499"    #Change this to the directory accordingly to your setup
-LIGHTNING_DIR="$BASE_DIR/lightning"
-BITCOIN_DIR="$BASE_DIR/.bitcoin"
+BASE_DIR="/home/thomas/Documents/LNBot/Other_files"    #Change this to the directory accordingly to your setup
+LIGHTNING_DIR="/home/thomas/.lightning"
+BITCOIN_DIR="/home/thomas/.bitcoin"
+BOOT_SCRIPT="$BASE_DIR/inno_bootstrap.sh"
 
 # Directories for NodeManagerComms and BotMasterComms
 NODE_MANAGER_DIR="$BASE_DIR/NodeManagerComms"
 BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
+INNO_MANAGER_DIR="$BASE_DIR/InnocentManager"
 
 # Files to store the address and ID
 NODE_ADDRESS_FILE="$NODE_MANAGER_DIR/innocentAddress.txt"
@@ -31,11 +33,15 @@ create_innocent_node() {
     docker run -d --network host --name $NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
+        -v $BOOT_SCRIPT:/root/bootstrap.sh \
+        -v $INNO_MANAGER_DIR:/root/ \
         elementsproject/lightningd \
         --network=regtest \
-        --addr=127.0.0.1:$NODE_PORT
-
-    echo "Innocent node container created without bootstrap."
+        --addr=127.0.0.1:$NODE_PORT \
+	    --grpc-port=10010
+    docker exec $NODE_NAME bash /root/bootstrap.sh
+    echo "Starting REST server on innocent node"
+    docker exec $NODE_NAME python3 /root/REST_server.py &
 }
 
 # Function to extract address and ID and save to files

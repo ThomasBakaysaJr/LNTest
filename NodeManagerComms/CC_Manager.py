@@ -16,23 +16,17 @@ import json
 import time
 import logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+import os
 
 # Constants
 DISCOVERY_RULE_DIVISOR = 19  # Capacity must be divisible by 19 (prime number)
 MAX_PEERS = 4  # Maximum number of peers
 
-# Read Innocent Node Address and ID from files
-with open('innocentAddress.txt', 'r') as address_file:
-    INNOCENT_NODE_ADDRESS = address_file.read().strip()
-with open('innocentID.txt', 'r') as id_file:
-    INNOCENT_NODE_ID = id_file.read().strip()
+INNOCENT_NODE_ID = None
+INNOCENT_NODE_ADDRESS = None
+CC_ADDRESS_LIST = None
 
-with open('CC_address_list.txt', 'r') as id_file:
-    CC_ADDRESS_LIST = id_file.read().strip()
-
-
-BLACKLISTED_NODES = {INNOCENT_NODE_ID}  # Nodes blacklisted for fundchannel
+BLACKLISTED_NODES = {}# Nodes blacklisted for fundchannel
 
 channel_created_nodes = set()
 innocent_channel_closed = False
@@ -41,6 +35,10 @@ innocent_channel_closed = False
 seen_nodes_cache = {}  # Format: {<target_node_id>: <timestamp>}
 CACHE_EXPIRATION_TIME = 3600  # Cache entries expire after 1 hour
 
+HOST_NAME = os.getenv("CONTAINER_NAME")
+
+logging.basicConfig(filename=f'cc_logs_{HOST_NAME}.log', level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(message)s")
+
 def run_lightning_cli(command):
     try:
         logging.info(f"run_lightning_cli: Running command: {' '.join(command)}")
@@ -48,14 +46,21 @@ def run_lightning_cli(command):
             ["lightning-cli", "--regtest"] + command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            check=True
         )
-        logging.debug(f"run_lightning_cli: stdout: {result.stdout}")
-        logging.debug(f"run_lightning_cli: stderr: {result.stderr}")
+        logging.info(f"run_lightning_cli: stdout: {result.stdout}")
+        logging.info(f"run_lightning_cli: stderr: {result.stderr}")
         if result.returncode != 0:
             logging.error(f"run_lightning_cli: Command failed with error: {result.stderr.strip()}")
             return None
         return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        # This is where the error from lightning-cli lives!
+        logging.error(f"lightning-cli command failed with exit code {e.returncode}")
+        logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
+        logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}")
+        raise # Re-raise the exception so your calling code can catch it
     except Exception as e:
         logging.error(f"run_lightning_cli: Exception occurred: {e}")
         return None
@@ -83,6 +88,7 @@ def connect_to_innocent():
         return
 
     logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
+    run_lightning_cli(["listfunds"])
     run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
     
     # Check if we already have a channel with the Innocent Node
@@ -91,8 +97,15 @@ def connect_to_innocent():
         # Calculate funding amount based on the discovery rule
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
 
-        logging.info(f"No channel with Innocent Node. Funding a channel with funding amount: {funding_amount}")
-        run_lightning_cli(["fundchannel", INNOCENT_NODE_ID, str(funding_amount)])
+        try:
+            logging.info(f"No channel with Innocent Node. Funding a channel with funding amount: {funding_amount}")
+            # seeing if this helps the funding problems
+            check_funds()
+            logging.info('Made it out of check funds, funding channgel with inno node now.')
+            run_lightning_cli(["fundchannel", INNOCENT_NODE_ID, str(funding_amount)])
+            logging.info(f"so the command ran, but uh. yeah.")
+        except Exception as e:
+            logging.error(f"Funding failed: {e}")
     else:
         logging.info("Channel with Innocent Node already exists. Skipping fundchannel.")
 
@@ -339,6 +352,7 @@ def create_channels():
         funding_amount = current_minutes * 10000
 
         logging.info(f"create_channels: Opening channel with node {peer_id}. Funding amount: {funding_amount}")
+        check_funds()
         result = run_lightning_cli(["fundchannel", peer_id, str(funding_amount)])
         if result:
             logging.info(f"create_channels: Channel successfully created with node {peer_id}.")
@@ -459,7 +473,42 @@ def main():
     Main script loop.
     """
     logging.info("Starting node manager script...")
+    logging.info(f"Working directory is {os.getcwd()}")
+
+    sleep_int = 1
+    attempt_max = 10
+
+    global INNOCENT_NODE_ID
+    global INNOCENT_NODE_ADDRESS 
+    global CC_ADDRESS_LIST
+    
+    for attempt in range(attempt_max):
+        try:
+            with open('innocentAddress.txt', 'r') as address_file:
+                INNOCENT_NODE_ADDRESS = address_file.read().strip()
+            with open('innocentID.txt', 'r') as id_file:
+                INNOCENT_NODE_ID = id_file.read().strip()
+
+            with open('CC_address_list.txt', 'r') as id_file:
+                CC_ADDRESS_LIST = id_file.read().strip()
+            
+            BLACKLISTED_NODES = {INNOCENT_NODE_ID}
+            logging.info(f"Found Innocent node at {INNOCENT_NODE_ADDRESS}")
+            break
+        except Exception as e:
+            logging.info(f"Error loading the files: {e}")
+
+        if attempt >= attempt_max - 1:
+            logging.info(f"Cant find innocent node file after {attempt_max} tries. CATASTROPHIC ERROR DUDE")
+            return
+
+        logging.info(f"Can't find required files. Retrying in {sleep_int} seconds")
+        time.sleep(sleep_int)
+
+    time.sleep(sleep_int)
+
     connect_to_innocent()   
+
     while True:
         try:
             create_channels()
@@ -472,6 +521,55 @@ def main():
             logging.error(f"main: An error occurred in the main loop: {e}")
             time.sleep(5)
 
+
+# thomas functions
+# check and make sure we have funds before we try anything since it takes a while
+# for the funds to actually become available
+def check_funds():
+    funds_available = False
+    while not funds_available:
+        try:
+            logging.info(f"checkfunds: Making sure funds are available.")
+            result = subprocess.run(
+                ["lightning-cli", "--regtest"] + ['listfunds'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            # This is where the error from lightning-cli lives!
+            logging.error(f"lightning-cli command failed with exit code {e.returncode}")
+            logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
+            logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}") 
+            raise # Re-raise the exception so your calling code can catch it
+        except Exception as e:
+            logging.error(f"check_funds: Exception occurred: {e}")
+            return None
+        
+        # check output if funds are available
+        result_data = json.loads(result.stdout)
+        if result_data.get('outputs'):
+            on_chain_funds_exist = False
+            total_on_chain_msat = 0
+
+            for output in result_data['outputs']:
+                if output.get('status') == 'confirmed':
+                    logging.info('we founds confirmed funds')
+                    on_chain_funds_exist = True
+                    total_on_chain_msat += output.get('amount_msat', 0)
+
+            if on_chain_funds_exist:
+                logging.info(f"On-chain funds found! Total confirmed and spendable: {total_on_chain_msat / 1000:.8f} BTC")
+                funds_available = True
+                return
+            else:
+                logging.info("No confirmed and spendable on-chain funds found.\n\
+                      Checking again in 5 seconds.")
+        logging.info('Sleeping in check funds')
+        time.sleep(5)
+            
+    
 
 if __name__ == "__main__":
     main()

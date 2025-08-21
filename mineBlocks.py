@@ -28,10 +28,12 @@ if not address:
     print("Failed to generate a valid address. Exiting.")
     exit(1)
 
+# Generate the required 100 blocks first then
 # Run the command every 2 seconds
 try:
+    command = f"bitcoin-cli -rpcuser={rpc_user} -rpcpassword={rpc_password} generatetoaddress 101 {address}"
     while True:
-        command = f"bitcoin-cli -rpcuser={rpc_user} -rpcpassword={rpc_password} generatetoaddress 15 {address}"
+        command = f"bitcoin-cli -rpcuser={rpc_user} -rpcpassword={rpc_password} generatetoaddress 1 {address}"
         os.system(command)
         print("Command executed successfully.")
         time.sleep(2)  # Wait for 2 seconds
