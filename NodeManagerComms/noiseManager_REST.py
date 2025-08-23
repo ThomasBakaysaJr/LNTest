@@ -417,10 +417,14 @@ def prun_msg_dict():
     global MESSAGE_TRACKING_DICT
 
     channels = ln_checker.get_channels()
+    to_remove = []
     for node in MESSAGE_TRACKING_DICT:
         if node not in channels:
             logging.warning(f'Node {node} has no/broken channel. Removing from tracker.')
-            MESSAGE_TRACKING_DICT.pop(node)
+            to_remove.add(node)\
+            
+    for node in to_remove:
+        MESSAGE_TRACKING_DICT.pop(node)
 
 def load_this_node ():
     """
