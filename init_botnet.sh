@@ -4,9 +4,15 @@
 set -eux
 
 if [ -z "${1:-}" ]; then
-    NUM_LOOPS=2
+    TOTAL_NODES=2
 else
-    NUM_LOOPS="$1"
+    TOTAL_NODES="$1"
+fi
+
+if [ -z "${2:-}" ]; then
+    ACTIVE_NODES=2
+else
+    ACTIVE_NODES="$2"
 fi
 
 # We start fresh
@@ -15,6 +21,6 @@ fi
 # Start the scripts in order
 ./1create_Innocent_node.sh
 ./2create_botmaster_node.sh
-./3create_CC_nodesV2.sh "$NUM_LOOPS"
+./3create_CC_nodesV2.sh "$TOTAL_NODES" "$ACTIVE_NODES"
 ./4fund_wallets.sh
 echo "Initialiation Finished"

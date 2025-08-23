@@ -20,17 +20,26 @@ BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
 NODE_MANAGER_ADDRESS_LIST="$NODE_MANAGER_DIR/CC_address_list.txt"
 BOT_MASTER_ADDRESS_LIST="$BOT_MASTER_DIR/CC_address_list.txt"
 
-# Number of LOOPS, so total nodes will be this * num_concurrent
+# Total number of CC nodes, multiplied by 10 (so an incoming value of 1 will be 10 nodes)
+# Default to 20 nodes
 if [ -z "${1:-}" ]; then
-    NUM_CREATE_LOOP=2
+    NUM_TOTAL_NODES=2
 else
-    NUM_CREATE_LOOP="$1"
+    NUM_TOTAL_NODES="$1"
 fi
-echo "using $NUM_CREATE_LOOP as number of loops"
+# Number of MAX_ACTIVE_NODES, so we create this many nodes at a time then wait a bit
+# so that we can get the simulated nature of the OG algorithm
+# default to 4 active nodes
+if [ -z "${2:-}" ]; then
+    NUM_ACTIVE_NODES=4
+else
+    NUM_ACTIVE_NODES="$2"
+    NUM_NODES_CONCURRENT=$((NUM_ACTIVE_NODES * 2))
+fi
+echo "Creating a total of $NUM_TOTAL_NODES nodes. $NUM_ACTIVE_NODES at a time."
 # Number of nodes to create at the same time (so as not to overload)
-NUM_NODES_CONCURRENT=10
 
-NUM_NODES=$((NUM_CREATE_LOOP * NUM_NODES_CONCURRENT))
+NUM_NODES=$((NUM_TOTAL_NODES * NUM_NODES_CONCURRENT))
 
 # ln_checker file
 LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
@@ -45,7 +54,7 @@ fund_node() {
     # Get a new Bitcoin address from the node
     address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
 
-    # Send 50 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
+    # Send 10 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
     txid=$(curl -s --user bitcoinuser:bitcoinpassword \
         --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 10]}" \
         -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
@@ -95,8 +104,18 @@ create_node() {
     echo "Running BOOTSTRAP for $NODE_NAME..."
     docker exec $NODE_NAME bash /root/bootstrap.sh
     echo "Bootstrap for $NODE_NAME finished"
+
+    # give the node some time to spin up before we try to fund it
+    sleep 2
+    write_address_to_file "$NODE_NAME"
+
+    # we fund and confirm so that we can start connecting already.
+    echo "Funding node $NODE_NAME"
+    fund_node $NODE_NAME
+    confirm_funds 
+
     # trying to see if we need to wait a bit before starting the manager script
-    sleep 5
+    sleep 30
 
     #docker exec --workdir /root/nodemanager $NODE_NAME python3 CC_Manager.py &
     #docker exec --workdir /root/nodemanager $NODE_NAME python3 noiseManager_REST.py &
@@ -104,50 +123,72 @@ create_node() {
     echo "Finished setting up $NODE_NAME"
 }
 
-# Function to extract addresses and write to files
-write_addresses_to_file() {
+clear_address_file() {
     # Clear existing content in the address list files
     > $NODE_MANAGER_ADDRESS_LIST
     > $BOT_MASTER_ADDRESS_LIST
+}
 
-    # Iterate through nodes to extract addresses
-    for i in $(seq 1 $NUM_NODES); do
-        NODE_NAME="CC$i"
+# Function to extract addresses and write to files
+write_address_to_file() {
+    # Write this CC2 server to the address file
+    NODE_NAME="$1"
 
-        # Extract the information using the Docker exec command
-        NODE_INFO=$(sudo docker exec -it $NODE_NAME lightning-cli --regtest getinfo)
+    # Extract the information using the Docker exec command
+    NODE_INFO=$(sudo docker exec $NODE_NAME lightning-cli --regtest getinfo)
 
-        # Parse the address from the JSON output
-        NODE_ID=$(echo $NODE_INFO | jq -r '.id')
-        NODE_PORT=$(echo $NODE_INFO | jq -r '.binding[0].port')
-        NODE_IP=$(echo $NODE_INFO | jq -r '.binding[0].address')
-        NODE_ADDRESS="${NODE_ID}@${NODE_IP}:${NODE_PORT}"
+    # Parse the address from the JSON output
+    NODE_ID=$(echo $NODE_INFO | jq -r '.id')
+    NODE_PORT=$(echo $NODE_INFO | jq -r '.binding[0].port')
+    NODE_IP=$(echo $NODE_INFO | jq -r '.binding[0].address')
+    NODE_ADDRESS="${NODE_ID}@${NODE_IP}:${NODE_PORT}"
 
-        # Append the address to both address list files
-        echo $NODE_ADDRESS >> $NODE_MANAGER_ADDRESS_LIST
-        echo $NODE_ADDRESS >> $BOT_MASTER_ADDRESS_LIST
-    done
+    # Append the address to both address list files
+    echo $NODE_ADDRESS >> $NODE_MANAGER_ADDRESS_LIST
+    echo $NODE_ADDRESS >> $BOT_MASTER_ADDRESS_LIST
 
-    echo "Addresses have been written to $NODE_MANAGER_ADDRESS_LIST and $BOT_MASTER_ADDRESS_LIST."
+    echo "Address for $1 has been written to $NODE_MANAGER_ADDRESS_LIST and $BOT_MASTER_ADDRESS_LIST."
 }
 
 # Create CC nodes concurrently
-for x in $(seq 1 $NUM_CREATE_LOOP); do
-    mult=$((((x - 1)) * NUM_NODES_CONCURRENT))
-    for i in $(seq 1 $NUM_NODES_CONCURRENT); do
-        count=$((mult + i))
-        NODE_NAME="CC$count"
-        NODE_PORT=$((19848 + count))
-        NODE_GRPC_PORT=$((10012 + count))
+# for x in $(seq 1 $NUM_TOTAL_NODES); do
+#     mult=$((((x - 1)) * NUM_NODES_CONCURRENT))
+#     for i in $(seq 1 $NUM_NODES_CONCURRENT); do
+#         count=$((mult + i))
+#         NODE_NAME="CC$count"
+#         NODE_PORT=$((19848 + count))
+#         NODE_GRPC_PORT=$((10012 + count))
+#         echo "Creating node $NODE_NAME..."
+#         create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT &
+#     done
+#     wait
+# done
+# echo "Created $COUNTER CC nodes."
+
+clear_address_file
+
+COUNTER=1
+while ((COUNTER <= $NUM_TOTAL_NODES)); do
+    for (( i=1; i<=$NUM_NODES_CONCURRENT; i++ )); do
+        NODE_NAME="CC$COUNTER"
+        NODE_PORT=$((19848 + COUNTER))
+        NODE_GRPC_PORT=$((10012 + COUNTER))
         echo "Creating node $NODE_NAME..."
         create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT &
+        # early breakout so we don't make more than the required number of cc nodes
+        ((COUNTER++))
+        if (( $COUNTER > $NUM_TOTAL_NODES )); then
+            break
+        fi
     done
     wait
 done
 
+    
 # Wait for all background jobs to finish
 wait
 
+echo "Created $COUNTER CC nodes."
 echo "All CC nodes created successfully."
 
 # Wait a moment to ensure all nodes are up and running
@@ -155,4 +196,3 @@ sleep 5
 
 # Write addresses to files
 echo "Extracting addresses and writing to files..."
-write_addresses_to_file

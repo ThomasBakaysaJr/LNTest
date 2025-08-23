@@ -42,11 +42,12 @@ SLEEP_CHANNEL_INTERVAL = 2
 
 DOCKER_CONTAINERS = set()
 
-def main(starting_iteration):
+def main(starting_iteration, active_nodes):
     if starting_iteration == 0:
-        print(f'No arguments provided. Provide an argument to determine a custom starting iteration.')
+        print(f'Invalid arguments provided. Provide in order of STARTING_ITERATION, NUM_ACTIVE_NODES to determine a custom starting iteration.')
         starting_iteration = 1
-    print(f'Starting iteration is {starting_iteration}.')
+        active_nodes = 4
+    print(f'Starting iteration is {starting_iteration} with {active_nodes} active nodes.')
     
     if not confirm_execution('Run testing script script.'):
         print('Exiting . . .')
@@ -59,18 +60,19 @@ def main(starting_iteration):
     starting_iteration = int(starting_iteration)
     for x in range(starting_iteration, NUM_CC_ITERATIONS + 1):
         success = False
+        total_nodes = x * 10
         while not success:
             # fail safe so it doesn't just keep failing over and over
             if attempt > MAX_TRY:
-                print(f"Could not run {MAX_MESSAGES} messages for {x * 10} CC nodes after {attempt} attempts. Shutting down.")
+                print(f"Could not run {MAX_MESSAGES} messages for {total_nodes} CC nodes after {attempt} attempts. Shutting down.")
                 kill_nodes()
                 return
             
             cc_start_time = time.time()
-            record_create(x)
+            record_create(total_nodes)
             
-            print(f'\n\n\nRunning init with loop count of {x}')
-            setup_test(x)
+            print(f'\n\n\nRunning init for a total of {total_nodes}')
+            setup_test(total_nodes, active_nodes)
             print(f'Setup finished at {get_time()}')
             
             print(f'Waiting for channels to be created . . .')
@@ -98,11 +100,11 @@ def main(starting_iteration):
                 
                 print(f'Command {y} is finished. Propagation time is {send_time} seconds.')
                 print(f'Time: {get_time()}')
-                entry = [x, y, send_time]
-                record_test(entry, x)
+                entry = [total_nodes, y, send_time]
+                record_test(entry, total_nodes)
             # record the test and set reset attempts
             if success:
-                record_cc_total_time(cc_start_time, x)
+                record_cc_total_time(cc_start_time, total_nodes)
                 untrack_containers()
                 attempt = 0
             # if not a succes, add to the attempt
@@ -111,7 +113,7 @@ def main(starting_iteration):
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
                 untrack_containers()
                 print_topology()
-                record_cc_total_time(cc_start_time, x)
+                record_cc_total_time(cc_start_time, total_nodes)
 
     now_time = time.time()
     print(f'Testing with: {starting_iteration * 10} - {NUM_CC_ITERATIONS * 10} CC servers at {MAX_MESSAGES} messsages each finished in {now_time - main_start_time} seconds.')
@@ -133,13 +135,13 @@ def confirm_execution(message):
             print(f'{user_input} is an invalid option')
 
 def record_create(in_suffix):
-    suffix = in_suffix * 10
+    suffix = in_suffix
     csv_name = f'{TIMES_CSV}{suffix}_CC_nodes.csv'
     with open(csv_name, 'w', newline='') as f:
         pass
 
 def record_test(record, in_suffix):
-    suffix = in_suffix * 10
+    suffix = in_suffix
     csv_name = f'{TIMES_CSV}{suffix}_CC_nodes.csv'
     with open(csv_name, 'a', newline='') as f:
         writer = csv.writer(f)
@@ -164,7 +166,7 @@ def record_cc_total_time(start_time, cc_count):
     Record the topology of the lightning network.
     '''
     # we want to read the csv file already there (or create it if it doesn't exist)
-    cc_num = cc_count * 10
+    cc_num = cc_count
     elapsed_time = time.time() - start_time
 
     headers = ['#CCs', 'Time_Taken']
@@ -268,14 +270,14 @@ def send_msg(message):
     if result.stderr:
         print(f'Errors are {result.stderr}')
 
-def setup_test(count):
+def setup_test(total_nodes, active_nodes):
     ''''
     setup the number of CC servers needed
     returns true when the the cc servers have been made
     '''
     try:
         subprocess.run(
-            ["./init_botnet.sh", f'{count}']
+            ["./init_botnet.sh", f'{total_nodes}', f'{active_nodes}']
         )
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
@@ -346,7 +348,7 @@ def print_topology():
     topology = retrieve_all_status()
     if topology:
         for node in topology:
-            print(f'{node.get('name')} : {node.get('short id')} : {node.get('state')}')
+            print(f'{node.get('name')} : {node.get('short id')} : {node.get('state')} : channel count = {len(node.get('channels'))}')
             for channel in node.get('channels'):
                 print(node.get('channels')[channel])
             print('')
@@ -382,12 +384,12 @@ def get_time():
     return datetime.now().strftime('%H:%M:%S')
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] > '0':
-            main(sys.argv[1])
+    if len(sys.argv) > 2:
+        if sys.argv[1] > '0' and sys.argv[2] > '0':
+            main(sys.argv[1], sys.argv[2])
         else:
             print_topology()
             print_messages()
             print_container_counters()
     else:
-        main(0)
+        main(0, 0)

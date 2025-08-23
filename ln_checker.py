@@ -157,7 +157,8 @@ def is_node_active(target_node):
 def has_channel_with(target_node):
     '''
     Check if this node has a channel with target_node.
-    Does not check the state of the channel, just that it exists.'''
+    Does not check the state of the channel, just that it exists.
+    '''
     try:
         command = ["lightning-cli", f"--network=regtest", "listfunds"]
         result = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -172,6 +173,18 @@ def has_channel_with(target_node):
         logging.error(f'has_channel_with: Error {e}')
     logging.info(f"has_channel_with: No channel with {target_node} found")
     return False
+
+def check_channels(channels: set) -> set:
+    '''
+    Check a list of multiple nodes and return a list of nodes from that list that have active connections.
+    Args:
+        channels : Set of channels to check the connection status of.
+    Returns:
+        A set of channels from the incoming list that have an active channel.
+    '''
+    return_list = [channel for channel in channels if has_channel_with(channel)]
+
+    return set(return_list)
 
 def get_channels():
     """
