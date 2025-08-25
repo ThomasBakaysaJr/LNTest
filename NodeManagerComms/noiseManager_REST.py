@@ -375,6 +375,7 @@ def write_to_csv(message, counter):
         with open(CURRENT_MESSAGE_FILE, 'w') as f:
             csvwriter = csv.writer(f)
             csvwriter.writerow(entry)
+        CURRENT_COMMAND_COUNTER = int(counter)
 
     with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
         csvwriter = csv.writer(f)

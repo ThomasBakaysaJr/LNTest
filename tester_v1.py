@@ -38,9 +38,87 @@ WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
 FM_WAIT = 120 # how long to wait before trying to send the first message (to let the nodes create channels) (default = 120) #OUTDATED
 SLEEP_INTERVAL = 1
-SLEEP_CHANNEL_INTERVAL = 2
+SLEEP_CHANNEL_INTERVAL = 10
 
 DOCKER_CONTAINERS = set()
+
+# def main(starting_iteration, active_nodes):
+#     if starting_iteration == 0:
+#         print(f'Invalid arguments provided. Provide in order of STARTING_ITERATION, NUM_ACTIVE_NODES to determine a custom starting iteration.')
+#         starting_iteration = 1
+#         active_nodes = 4
+#     print(f'Starting iteration is {starting_iteration} with {active_nodes} active nodes.')
+    
+#     if not confirm_execution('Run testing script script.'):
+#         print('Exiting . . .')
+#         return
+#     else:
+#         print('Starting testing script')
+
+#     main_start_time = time.time()
+#     attempt = 0
+#     starting_iteration = int(starting_iteration)
+#     for x in range(starting_iteration, NUM_CC_ITERATIONS + 1):
+#         success = False
+#         total_nodes = x * 10
+#         while not success:
+#             # fail safe so it doesn't just keep failing over and over
+#             if attempt > MAX_TRY:
+#                 print(f"Could not run {MAX_MESSAGES} messages for {total_nodes} CC nodes after {attempt} attempts. Shutting down.")
+#                 kill_nodes()
+#                 return
+            
+#             cc_start_time = time.time()
+#             record_create(total_nodes)
+            
+#             print(f'\n\n\nRunning init for a total of {total_nodes}')
+#             setup_test(total_nodes, active_nodes)
+#             print(f'Setup finished at {get_time()}')
+            
+#             print(f'Waiting for channels to be created . . .')
+#             update_containers()
+#             channels_created = are_channels_ready()
+#             print(f'Channels created in {time.time() - cc_start_time} seconds.')
+
+#             # checkpoint, if channels aren't created then we start again.
+#             if not channels_created:
+#                 attempt += 1
+#                 print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+#                 continue
+
+#             print(f'Waiting done, proceeding to testing.')
+#             # ACTUAL SENDING OF MESSAGES
+#             for y in range(1, MAX_MESSAGES + 1):
+#                 # another wait, just in case we got nodes disconnecting or something
+#                 are_channels_ready()
+
+#                 send_msg(y)
+#                 send_time, success = wait_for_propagation(y)
+                
+#                 if not success:
+#                     break
+                
+#                 print(f'Command {y} is finished. Propagation time is {send_time} seconds.')
+#                 print(f'Time: {get_time()}')
+#                 entry = [total_nodes, y, send_time]
+#                 record_test(entry, total_nodes)
+#             # record the test and set reset attempts
+#             if success:
+#                 record_cc_total_time(cc_start_time, total_nodes)
+#                 untrack_containers()
+#                 attempt = 0
+#             # if not a succes, add to the attempt
+#             else:
+#                 attempt += 1
+#                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+#                 untrack_containers()
+#                 print_topology()
+#                 record_cc_total_time(cc_start_time, total_nodes)
+
+#     now_time = time.time()
+#     print(f'Testing with: {starting_iteration * 10} - {NUM_CC_ITERATIONS * 10} CC servers at {MAX_MESSAGES} messsages each finished in {now_time - main_start_time} seconds.')
+#     print(f'Total runtime data saved in {RUNTIMES_CSV}')
+#     kill_nodes()
 
 def main(starting_iteration, active_nodes):
     if starting_iteration == 0:
@@ -72,19 +150,17 @@ def main(starting_iteration, active_nodes):
             record_create(total_nodes)
             
             print(f'\n\n\nRunning init for a total of {total_nodes}')
-            setup_test(total_nodes, active_nodes)
+            channels_created = setup_test(int(total_nodes), int(active_nodes))
             print(f'Setup finished at {get_time()}')
-            
-            print(f'Waiting for channels to be created . . .')
-            update_containers()
-            channels_created = are_channels_ready()
-            print(f'Channels created in {time.time() - cc_start_time} seconds.')
-
+            fund_nodes()
             # checkpoint, if channels aren't created then we start again.
             if not channels_created:
                 attempt += 1
                 print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
-                continue
+                continue            
+
+            update_containers()
+            print(f'Channels created in {time.time() - cc_start_time} seconds.')
 
             print(f'Waiting done, proceeding to testing.')
             # ACTUAL SENDING OF MESSAGES
@@ -207,10 +283,14 @@ def are_channels_ready():
         False when waiting time has exceeded MAX_WAIT
     '''
     start_time = time.time()
-
+    counter = 0
+    
     while True:
+        if counter > 2:
+            return True
         cur_top = retrieve_all_status()
         update_containers()
+
         channels_created = True
         if is_kill_time(start_time, MAX_WAIT * WAIT_MULT):
             return False
@@ -218,13 +298,18 @@ def are_channels_ready():
             for status in cur_top:
                 if status.get('state') != 'online':
                     channels_created = False
+                    counter = 0
+                    continue
         else:
             channels_created = False
 
         if channels_created:
-            return True
+            counter += 1
         
-        time.sleep(SLEEP_CHANNEL_INTERVAL)
+        if counter < 1:
+            time.sleep(SLEEP_CHANNEL_INTERVAL)
+        else:
+            time.sleep(SLEEP_CHANNEL_INTERVAL // 2)
 
 def wait_for_propagation(command):
     print(f'Now waiting for command {command} to propagate.')
@@ -270,6 +355,25 @@ def send_msg(message):
     if result.stderr:
         print(f'Errors are {result.stderr}')
 
+# def setup_test(total_nodes, active_nodes):
+#     ''''
+#     setup the number of CC servers needed
+#     returns true when the the cc servers have been made
+#     '''
+#     try:
+#         subprocess.run(
+#             ["./init_botnet.sh", f'{total_nodes}', f'{active_nodes}']
+#         )
+#     except subprocess.CalledProcessError as e:
+#         # This is where the error from lightning-cli lives!
+#         print(f"tester failed with exit code {e.returncode}")
+#         print(f"  tester STDOUT: {e.stdout.strip()}")
+#         print(f"  tester STDERR: {e.stderr.strip()}") 
+#         raise # Re-raise the exception so your calling code can catch it
+#     except Exception as e:
+#         print(f"tester: Exception occurred: {e}")
+#         return None
+    
 def setup_test(total_nodes, active_nodes):
     ''''
     setup the number of CC servers needed
@@ -278,6 +382,48 @@ def setup_test(total_nodes, active_nodes):
     try:
         subprocess.run(
             ["./init_botnet.sh", f'{total_nodes}', f'{active_nodes}']
+        )
+    except subprocess.CalledProcessError as e:
+        # This is where the error from lightning-cli lives!
+        print(f"tester failed with exit code {e.returncode}")
+        print(f"  tester STDOUT: {e.stdout.strip()}")
+        print(f"  tester STDERR: {e.stderr.strip()}") 
+        raise # Re-raise the exception so your calling code can catch it
+    except Exception as e:
+        print(f"tester: Exception occurred: {e}")
+        return None
+    
+    # know we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
+    counter = 1
+    while counter < total_nodes:
+        for i in range(2):
+            try:
+                subprocess.run(
+                    ["./3create_CC_nodesV3.sh", f'{counter}']
+                )
+            except subprocess.CalledProcessError as e:
+                # This is where the error from lightning-cli lives!
+                print(f"tester failed with exit code {e.returncode}")
+                print(f"  tester STDOUT: {e.stdout.strip()}")
+                print(f"  tester STDERR: {e.stderr.strip()}") 
+                raise # Re-raise the exception so your calling code can catch it
+            except Exception as e:
+                print(f"tester: Exception occurred: {e}")
+                return None
+            counter += 1
+
+            if counter > total_nodes:
+                break
+        # now we wait for for those nodes to fully connect before we create new nodes
+        if not are_channels_ready():
+            print(f'Channels were not ready in time')
+            return False
+    return True
+
+def fund_nodes():
+    try:
+        subprocess.run(
+            ["./4fund_wallets.sh"]
         )
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!

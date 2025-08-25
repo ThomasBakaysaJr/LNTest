@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import sys
+import random
 
 # import the ln_checker file
 import ln_checker
@@ -46,8 +47,8 @@ def load_counter():
             try:
                 return int(file.read().strip())
             except ValueError:
-                return 0  # If the file is corrupted, reset to 0
-    return 0
+                return 1  # If the file is corrupted, reset to 0
+    return 1
 
 def save_counter(counter):
     """
@@ -196,8 +197,9 @@ def discover_cc_nodes():
             logging.info(f"Skipping Innocent node {INNOCENT_NODE_ID} during discovery.")
             continue
 
-        if capacity % DISCOVERY_RULE_DIVISOR == 0 and node_id not in BM_CONNECTED_NODES:
-            valid_nodes.append(node_id)
+        valid_nodes.append(node_id)
+        # if capacity % DISCOVERY_RULE_DIVISOR == 0 and node_id not in BM_CONNECTED_NODES:
+        #     valid_nodes.append(node_id)
 
     logging.info(f"Valid CC nodes discovered: {valid_nodes}")
     return valid_nodes
@@ -237,6 +239,7 @@ def fund_single_channel():
         valid_cc_nodes = discover_cc_nodes()
 
     # Pick one node to fund a channel with
+    random.shuffle(valid_cc_nodes)
     target_node = valid_cc_nodes[0]
 
     # Ensure the target is not the Innocent node (extra safeguard)
@@ -265,7 +268,12 @@ def fund_single_channel():
     print(f'Funding channel with {target_node}')
     # make sure channel is ready to receive
     ln_checker.wait_node_activated(target_node)
-    print(f'Connected.')
+
+    if not ln_checker.has_channel_with(target_node):
+        print(f'Could not connect to node.')
+        return
+
+    logging.info(f'Connected to {target_node}.')
     BM_CONNECTED_NODES.add(target_node)
     FUNDED_NODE_ID = target_node  # Save the funded node ID
     with open(FUNDED_NODE_FILE, 'w') as file:
@@ -286,7 +294,7 @@ def interactive_command_sender():
             print("Exiting.")
             break
         send_msg(user_input, counter)
-        counter += 1
+
 
     save_counter(counter)  # Save the counter when exiting
 
@@ -301,6 +309,10 @@ def send_msg(message, counter):
     # message = f'"{message_with_counter}"'
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
     # amount = 5  # Minimal msat for sending a message
+
+    # check to make sure FUNDED_NODE_ID exists
+    while not FUNDED_NODE_ID:
+        fund_single_channel()
 
     # Construct the lightning-cli command
     command = ["lightning-cli", "--regtest", "keysend",
@@ -324,7 +336,7 @@ def send_msg(message, counter):
         if result.returncode == 0:
             print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
             print(f"Response: {result.stdout}")
-            save_counter(counter)  # Save the updated counter after a successful send
+            save_counter(counter + 1)  # Save the updated counter after a successful send
         else:
             print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
             logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
@@ -337,31 +349,26 @@ def load_this_node ():
     output = get_node_info()
     THIS_NODE = output.get('id')
 
-def auto_send(command):
-    '''
-    auto_send [command] when node is ready to receive.
-    used for testing.
-    '''
-    send_msg(command)
-
 def main(goal, message):
     """
     Main Botmaster logic.
     """
     logging.info("Starting Botmaster Node Script.")
-    connect_to_innocent()
+    connect_to_innocent() # why do we need to connect to the innocent?
     load_this_node()
     logging.info("Funding single channel")
     # Fund a single channel with a valid CC node
     fund_single_channel()
     if not FUNDED_NODE_ID:
-        print("No node has been funded yet. Exiting command sender.")
-        return
+        print("No node has been funded yet. Retrying.")
+        fund_single_channel()
     # Allow interactive command sending
     if goal == 1:
         interactive_command_sender()
     elif goal == 2:
-        send_msg(message, message)
+        counter = load_counter()
+        send_msg(message, counter)
+
 
 
 

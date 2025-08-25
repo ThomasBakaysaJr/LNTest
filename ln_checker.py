@@ -42,6 +42,28 @@ def run_lightning_cli(command):
     except Exception as e:
         logging.error(f"run_lightning_cli: Exception occurred: {e}")
         return None
+    
+def run_bitcoin_cli(command):
+    try:
+        result = subprocess.run(
+            ["bitcoin-cli", "--regtest"] + command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        # logging.info(f"run_bitcoin_cli: stdout: {result.stdout}")
+        # logging.info(f"run_bitcoin_cli: stderr: {result.stderr}")
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        # This is where the error from bitcoin-cli lives!
+        logging.error(f"bitcoin-cli command failed with exit code {e.returncode}")
+        logging.error(f"  bitcoin-cli STDOUT: {e.stdout.strip()}")
+        logging.error(f"  bitcoin-cli STDERR: {e.stderr.strip()}")
+        return None
+    except Exception as e:
+        logging.error(f"run_bitcoin_cli: Exception occurred: {e}")
+        return None
 
 # thomas functions
 # check and make sure we have funds before we try anything since it takes a while
@@ -83,7 +105,7 @@ def check_funds():
                     total_on_chain_msat += output.get('amount_msat', 0)
 
             if on_chain_funds_exist:
-                time.sleep(1) # adding a timer here, a little buffer
+                time.sleep(2) # adding a timer here, a little buffer
                 logging.info(f"On-chain funds found! Total confirmed and spendable: {total_on_chain_msat / 1000:.8f} BTC")
                 return True
             else:
@@ -171,7 +193,7 @@ def has_channel_with(target_node):
                 
     except Exception as e:
         logging.error(f'has_channel_with: Error {e}')
-    logging.info(f"has_channel_with: No channel with {target_node} found")
+    # logging.info(f"has_channel_with: No channel with {target_node} found")
     return False
 
 def check_channels(channels: set) -> set:
@@ -366,6 +388,23 @@ def is_node_ready():
     except Exception as e:
         logging.info(f'Exception {e}')
         return True
+    
+def check_blockchain_height(in_height):
+    '''
+    Test if this blockchain height matches the actual height of the blockchain.
+    '''
+    output = run_bitcoin_cli(['getblockcount'])
+
+    if not output:
+        return False
+    
+    try:
+        height = int(output)
+    except ValueError:
+        logging.warning(f'check_blockchain_height: Could not convert blockheight {output} to int')
+
+    # logging.info(f'Blockchain height is {height} against incoming height of {in_height}')
+    return height == in_height
 
 def get_short_id(in_node_id):
     '''
