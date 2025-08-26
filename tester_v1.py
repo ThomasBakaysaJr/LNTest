@@ -33,7 +33,7 @@ MAX_CHANNELS = 4
 MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
 
 # Unless the script isn't working properly, best to leave these values alone
-MAX_WAIT = 450 # max wait for propagation before we move on (default = 300)
+MAX_WAIT = 1500 # max wait for propagation before we move on (default = 300)
 WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
 FM_WAIT = 120 # how long to wait before trying to send the first message (to let the nodes create channels) (default = 120) #OUTDATED
@@ -181,6 +181,7 @@ def main(starting_iteration, active_nodes):
             # record the test and set reset attempts
             if success:
                 record_cc_total_time(cc_start_time, total_nodes)
+                record_topology()
                 untrack_containers()
                 attempt = 0
             # if not a succes, add to the attempt
@@ -188,7 +189,7 @@ def main(starting_iteration, active_nodes):
                 attempt += 1
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
                 untrack_containers()
-                print_topology()
+                record_topology()
                 record_cc_total_time(cc_start_time, total_nodes)
 
     now_time = time.time()
@@ -236,13 +237,12 @@ def retrieve_all_status():
     except Exception as e:
         pass
 
-def record_cc_total_time(start_time, cc_count):
+def record_cc_total_time(start_time, cc_num):
     '''
     Records the total time elapsed from the initialization of the nodes to the last message.
     Record the topology of the lightning network.
     '''
     # we want to read the csv file already there (or create it if it doesn't exist)
-    cc_num = cc_count
     elapsed_time = time.time() - start_time
 
     headers = ['#CCs', 'Time_Taken']
@@ -259,16 +259,16 @@ def record_cc_total_time(start_time, cc_count):
         df = entry
 
     df = df.sort_values(by=[headers[0]]).reset_index(drop=True)
-
     df.to_csv(RUNTIMES_CSV, index=False)
+    print(f'Individual run times saved at {TIMES_CSV}{cc_num}_CC_nodes.csv')
 
-    top_name = f'{TOPO_JSON}{cc_num}.json'
+def record_topology():
     cur_top = retrieve_all_status()
+    top_name = f'{TOPO_JSON}{len(cur_top)}.json'
     with open(top_name, 'w') as f:
         json.dump(cur_top, f, indent=4)
-
-    print(f'Topology data saved as {top_name}')
-    print(f'Individual run times saved at {TIMES_CSV}{cc_num}_CC_nodes.csv')
+    
+    print(f'Topology data for {len(cur_top)} nodes saved as {top_name}')
     
 def kill_nodes():
     subprocess.run(
@@ -396,7 +396,7 @@ def setup_test(total_nodes, active_nodes):
     # know we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
     counter = 1
     while counter < total_nodes:
-        for i in range(2):
+        for i in range(active_nodes):
             try:
                 subprocess.run(
                     ["./3create_CC_nodesV3.sh", f'{counter}']
@@ -436,7 +436,7 @@ def fund_nodes():
         return None
     
 def update_data():
-    msg_files = glob.glob(CC_CUR_MESSAGE_PREFIX)
+    msg_files = sort_files(glob.glob(CC_CUR_MESSAGE_PREFIX))
     all_data = []
 
     # get all the data
@@ -533,6 +533,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 2:
         if sys.argv[1] > '0' and sys.argv[2] > '0':
             main(sys.argv[1], sys.argv[2])
+        elif sys.argv[1] == '0' and sys.argv[2] == '1':
+            record_topology()
         else:
             print_topology()
             print_messages()

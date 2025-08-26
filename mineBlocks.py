@@ -33,9 +33,9 @@ if not address:
 try:
     command = f"bitcoin-cli -rpcuser={rpc_user} -rpcpassword={rpc_password} generatetoaddress 101 {address}"
     while True:
-        command = f"bitcoin-cli -rpcuser={rpc_user} -rpcpassword={rpc_password} generatetoaddress 15 {address}"
+        command = f"bitcoin-cli -rpcuser={rpc_user} -rpcpassword={rpc_password} generatetoaddress 6 {address}"
         os.system(command)
         print("Command executed successfully.")
-        time.sleep(5)  # Wait for 2 seconds
+        time.sleep(2)  # Wait for 2 seconds
 except KeyboardInterrupt:
     print("\nProcess interrupted by user. Exiting...")
