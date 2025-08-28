@@ -286,30 +286,22 @@ def are_channels_ready():
     counter = 0
     
     while True:
-        if counter > 2:
-            return True
+        time.sleep(SLEEP_CHANNEL_INTERVAL // 2)
         cur_top = retrieve_all_status()
         update_containers()
 
-        channels_created = True
         if is_kill_time(start_time, MAX_WAIT * WAIT_MULT):
             return False
         if cur_top:
+            channels_created = True
+            # if a single channel is not online, then channels create will be false and we sleep
             for status in cur_top:
-                if status.get('state') != 'online':
+                if cur_top[-1].get('state') != 'connected':
                     channels_created = False
-                    counter = 0
-                    continue
-        else:
-            channels_created = False
+                    break
 
-        if channels_created:
-            counter += 1
-        
-        if counter < 1:
-            time.sleep(SLEEP_CHANNEL_INTERVAL)
-        else:
-            time.sleep(SLEEP_CHANNEL_INTERVAL // 2)
+            if channels_created:
+                return True
 
 def wait_for_propagation(command):
     print(f'Now waiting for command {command} to propagate.')
@@ -395,8 +387,8 @@ def setup_test(total_nodes, active_nodes):
     
     # know we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
     counter = 1
-    while counter < total_nodes:
-        for i in range(active_nodes):
+    while counter <= total_nodes:
+        for i in range(1):
             try:
                 subprocess.run(
                     ["./3create_CC_nodesV3.sh", f'{counter}']

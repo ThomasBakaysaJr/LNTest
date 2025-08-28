@@ -35,7 +35,8 @@ CC_ADDRESS_LIST = None
 BLACKLISTED_NODES = {}# Nodes blacklisted for fundchannel
 
 outbound_channels = set()
-innocent_channel_closed = True
+innocent_channel_closed = False
+channels_created = False
 # for channels that need to restart
 CHANNEL_OPENING_TIMES = {}
 
@@ -87,58 +88,44 @@ def get_node_info():
     output = run_lightning_cli(["getinfo"])
     return json.loads(output) if output else None
 
-def evaluate_discovery_rule(capacity):
-    """
-    Check if the given capacity satisfies the discovery rule.
-    """
-    return capacity % DISCOVERY_RULE_DIVISOR == 0
-
 def connect_to_innocent():
     """
-    Connect to the Innocent node and fund a channel if necessary.
+    Connect to the Innocent node but do not fund a channel
     """
+    global channels_created
     global innocent_channel_closed
 
+    # the innocent channel was closed, we shouldn't open it again
+    if innocent_channel_closed:
+        return
+
+    if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
+        logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
+        run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
+    # logging.info(f"Inno node peers are {run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])}")
+    time.sleep(25)
+
+def fund_innocent_channel():
+    global innocent_channel_closed
+    global channels_created
+    
 
     if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
         logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
         run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
 
-        
-    # if the innocent channel is still open, lets not try to open it again.
-    # or if we're at or more than max peers, shouldn't need to open up a channel with inno node
-    if not innocent_channel_closed or len(ln_checker.get_channels()) >= MAX_PEERS:
-        return
-
     # Check if we already have a channel with the Innocent Node
-    if not ln_checker.has_channel_with(INNOCENT_NODE_ID):
+    if not channels_created:
         # Calculate funding amount based on the discovery rule
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
-        # Try to govern the number of active nodes at once.
-        # channel_counts = get_channel_counts()
 
         # logging.info(f"Inno node peers are {run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])}")
-        time.sleep(15)
+        # time.sleep(15)
         output = run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])
         if output:
             inno_channels = json.loads(output).get('channels') if output else None
         else:
             return
-
-        # if inno_channels:
-        #     logging.info(f"Inno node peers with count of {len(inno_channels)} are {inno_channels}")
-        # else:
-        #     logging.info(f'Could not retrieve innocent peer data')
-
-        # if INNOCENT_NODE_ID in channel_counts.keys():
-        #     logging.warning(f'Inno node has {channel_counts[INNOCENT_NODE_ID]} channels')
-
-        # logging.warning(f'Channel counts is {channel_counts}')
-
-        # un-comment to limit the number of nodes connected to the innocent node at one time
-        # if INNOCENT_NODE_ID in channel_counts.keys() and len(inno_channels) >= MAX_ACTIVE_NODES:
-        #     logging.info(f'Trying to connect to innocent node but it currently has max number of active nodes channeled. Aborting.')
-        #     return
 
         if inno_channels and len(inno_channels) >= MAX_ACTIVE_NODES:
             logging.info(f'Trying to connect to innocent node but it currently has max number of active nodes channeled. Aborting.')
@@ -148,12 +135,32 @@ def connect_to_innocent():
             logging.info(f"No channel with Innocent Node. Funding a channel with funding amount: {funding_amount}")
             # seeing if this helps the funding problems
             if ln_checker.check_funds():
-                run_lightning_cli(["fundchannel", INNOCENT_NODE_ID, str(funding_amount)])
-            innocent_channel_closed = False
+                result = run_lightning_cli(["fundchannel", INNOCENT_NODE_ID, str(funding_amount)])
+                logging.info(f'Channel created with innocent node. Stopping channel creation.')
+                if result:
+                    innocent_channel_closed = False
+                    channels_created = True # we are done creating channels
         except Exception as e:
             logging.error(f"Funding failed: {e}")
-    else:
-        logging.info("Channel with Innocent Node already exists. Skipping fundchannel.")
+
+def close_and_disconnect_innocent():
+    """
+    Close the channel with the Innocent node and disconnect.
+    """
+    global innocent_channel_closed
+    if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
+        logging.warning('close_and_disconnect_innocent: Tried to disconnect/close with inno node when already disconnected/closed')
+        innocent_channel_closed = True
+        return
+    
+    try:
+        logging.info(f"Closing channel with Innocent Node: {INNOCENT_NODE_ID}")
+        run_lightning_cli(["close", f"id={INNOCENT_NODE_ID}"])
+        logging.info(f"Disconnecting from Innocent Node: {INNOCENT_NODE_ID}")
+        run_lightning_cli(["disconnect", INNOCENT_NODE_ID])    
+        innocent_channel_closed = True
+    except Exception as e:
+        logging.warning(f'close_and_disconnect_innocent: Error {e}')
     
 #DON'T TAKE THIS OUT this won't get used in Regtest
 def get_node_address(node_id):
@@ -300,6 +307,170 @@ def demoGetAddressAndConnect(node_ID):
 
 
 
+# def create_channels():
+#     """
+#     Create channels only with nodes that meet the discovery rule and avoid duplicates.
+#     Rules:
+#         Can only make maximum of MAX_ACTIVE_NODES outbound channels
+#         Can only have max MAX_PEERS (which is MAX_ACTIVE_NODES * 2) channels
+#     This should happen organically as nodes come online, since once we have the max channels we
+#     disconnect from the innocent node. Checks and failsafes make sure this is the case.
+#     """
+#     global innocent_channel_closed
+#     global outbound_channels
+#     global CHANNEL_OPENING_TIMES
+#     # logging.info("create_channels: Starting channel creation process.")
+
+#     peers_with_channels = list_peers_with_channels()
+#     # logging.info(f"create_channels: Current peers with channels: {peers_with_channels}")
+
+#     # Exclude Innocent node from peers_with_channels
+#     if INNOCENT_NODE_ID in peers_with_channels:
+#         peers_with_channels_excl_innocent = peers_with_channels - {INNOCENT_NODE_ID}
+#     else:
+#         peers_with_channels_excl_innocent = peers_with_channels
+
+
+#     # if we have reached the limit of number of channels, we disconnect from the inno node
+#     if len(peers_with_channels_excl_innocent) >= MAX_ACTIVE_NODES:
+#         # Now we need to close the channel with the Innocent node and disconnect
+        
+#         extra_channels = len(peers_with_channels_excl_innocent)  - MAX_PEERS # in case we went over the limit
+        
+#         if not innocent_channel_closed:
+#             logging.info("create_channels: Max channels reached. Disconnecting from innocent node.")
+#             close_and_disconnect_innocent()
+#             return
+#         # N channels we connect to, and the N channels made from other nodes connecting to us
+#         elif extra_channels > 0:
+#             logging.info(f'create_channels: We have {extra_channels} extra channels')
+#             # first, lets check and make sure those are active channels
+#             active_channels = [node for node in peers_with_channels_excl_innocent if ln_checker.is_node_active(node)]
+#             inbound_channels = set(active_channels) - set(outbound_channels)
+#             num_nodes_close = len(active_channels) - MAX_ACTIVE_NODES # nodes should be half inbound and half outbound
+#             logging.info(f'create_channels: We have {num_nodes_close} extra nodes')
+#             if num_nodes_close > 0:
+#                 logging.warning(f"create_channels: Inbound channel overload, {len(inbound_channels)} > MAX_ACTIVE_NODES, disconnecting nodes.")
+#                 # we will only disconnect nodes that made channels with us, since that should be the only
+#                 # way to go over the channel limit
+#                 close_and_disconnect_nodes(num_nodes_close, list(inbound_channels)) # CHANGE: we look at the entire active node list, not just outbound nodes
+#                 return
+
+#     # checks for outbound connections. Each node should only make MAX_ACTIVE_NODES connections out
+#     if len(outbound_channels) >= MAX_ACTIVE_NODES and not innocent_channel_closed: # CHANGE: we don't care about outbound nodes right now
+#         logging.info("create_channels: Max outbound channels reached, no more channels will be created. Still connected to innocent node")
+#         return
+#     elif len(peers_with_channels_excl_innocent) < MAX_PEERS and innocent_channel_closed: # CHANGE: this was an elif before
+#         logging.info(f'create_channels: Number of channels ({len(peers_with_channels_excl_innocent)}) below threshold, re-opening channel to innocent node.')
+#         connect_to_innocent()
+
+#     # checkpoint. No point in continuing if we have filled our outbound connections or we have filled our channel capacity
+#     if len(outbound_channels) > MAX_ACTIVE_NODES or len(peers_with_channels_excl_innocent) >= MAX_PEERS:
+#         return
+#     # if len(peers_with_channels_excl_innocent) >= MAX_PEERS: # CHANGE: We only care about active nodes rn
+#     #     return
+#     valid_nodes = set(discover_nodes().copy())
+#     if not valid_nodes:
+#         logging.info("create_channels: No valid nodes discovered. Aborting channel creation.")
+#         return
+#     for node in valid_nodes:
+#         logging.info(f'create_channels: Found {len(valid_nodes)} valid channels')
+#         if len(peers_with_channels_excl_innocent) >= MAX_PEERS:
+#             logging.info("create_channels: Reached maximum peers with channels while processing nodes.")
+#             # Close the channel with the Innocent node and disconnect
+#             if not innocent_channel_closed:
+#                 close_and_disconnect_innocent()
+#             break
+    
+#         peer_id = node # remnant of a different time
+#         # random sleep timer so that they don't all come online and look for each other at the 
+#         # same time. This is to try to mitigate a bunch of nodes creating a channel to the same
+#         # node all at once (might also randomzie access to the channel list if this doesnt work)
+#         attempt = 0
+#         channel_counts = get_channel_counts_exclude_inno() # get the dictionary mapping node ids to the number of channels they have
+#         # logging.warning(f'channel counts is {channel_counts}')
+#         node_maxed = False
+        
+#         # while attempt < random.randint(1, MAX_PEERS):
+#         #     time.sleep(random.random() * random.randint(1, 4))
+#         #     new_channel_counts = get_channel_counts_exclude_inno()
+
+#         #     # check connection again, if the count change since we last check, loop again and wait
+#         #     if peer_id in new_channel_counts.keys() and not new_channel_counts[peer_id] == channel_counts[peer_id]:
+#         #         channel_counts = new_channel_counts
+#         #         logging.info(f'create_channels: Restarting loop, channel count changed.\n{channel_counts[peer_id]}\n{new_channel_counts[peer_id]}')
+#         #         continue
+
+#         #     # check connection counts for this node. If not in channel_counts then it has nothing connected to it
+#         #     if peer_id in new_channel_counts.keys() and new_channel_counts:
+#         #         if new_channel_counts[peer_id] >= MAX_PEERS:
+#         #             logging.info(f'create_channels: Skipping node {peer_id} since it has max peers')
+#         #             node_maxed = True
+#         #             break
+#         #     channel_counts = new_channel_counts
+#         #     attempt += 1
+
+#         # checks again in case things have changed
+#         if peer_id in BLACKLISTED_NODES:
+#             logging.info(f"create_channels: Skipping blacklisted node {peer_id}.")
+#             continue
+#         if ln_checker.has_channel_with(peer_id):
+#             logging.info(f"create_channels: Skipping node {peer_id} as a channel already exists.")
+#             continue
+#         if peer_id in channel_counts.keys() and channel_counts[peer_id] >= MAX_PEERS:
+#             logging.info(f"create_channels: Skipping node {peer_id} as it already has max peers of {channel_counts[peer_id]}")
+#             continue
+#         if node_maxed == True:
+#             logging.info(f'create_channels: Skipping node {peer_id} as it already has max peers')
+#             continue
+#         if peer_id == THIS_NODE:
+#             logging.warning(f'create_channels: Trying to connect to self. Skipping.')
+#             continue
+#         if peer_id in outbound_channels: # CHANGE: We don't care about outbound nodes
+#             logging.warning(f'Trying to connect to a node that was in the outbound connection. Aborting this round of channel creation.')
+#             break
+#         if len(outbound_channels) >= MAX_ACTIVE_NODES:
+#             logging.info(f'create_channels: This node has reached max outbound channels')
+#             break
+
+#         # Uncomment the following line in Testnet/Mainnet to connect to the node before funding a channel
+#         # connect_to_node(peer_id)
+#         logging.info(f'Checks complete, starting to connect to {peer_id}')
+#         #this will allow the CCs to connect to each other by themselves instead of having to mesh connect before hand
+#         if peer_id not in outbound_channels and not ln_checker.does_connection_exist(peer_id):
+#             # make sure we're not trying to connect to a node we're already connected to
+#             demoGetAddressAndConnect(peer_id)
+#         if not ln_checker.does_connection_exist(peer_id): # CHANGE: only care if channel exists, don't care about outbound nodes
+#             # make sure we're not trying to connect to a node we're already connected to
+#             demoGetAddressAndConnect(peer_id)
+
+#         if ln_checker.does_connection_exist(peer_id):
+#             logging.info(f'Connected. Funding.')
+#             # random funding amount (replaced the minutes version since that can give 19 and 0, which breaks this discovery rule)
+#             funding_amount = random.randint(5,15) * 10000
+#             logging.info(f"create_channels: Opening channel with node {peer_id}. Funding amount: {funding_amount}")
+#             ln_checker.check_funds()
+#             result = run_lightning_cli(["fundchannel", peer_id, f'{str(funding_amount)}'])
+#             # fund the channel and automatically send liqudity to make sure we can communicate using this channel
+#             # variables are : command, node_to_fund, channel_capacity, feerate, announce, funds_sent_over
+#             # result = run_lightning_cli(["fundchannel", peer_id, str(funding_amount), str(0), 'true', str(funding_amount // 2)])
+#             if result:
+#                 logging.info(f"create_channels: Channel successfully created with node {peer_id}.")
+#                 CHANNEL_OPENING_TIMES[peer_id] = time.time()
+
+#                 if ln_checker.wait_node_activated(peer_id):
+#                     ln_checker.balance_channel(peer_id)
+
+#                 # outbound_channels.add(peer_id)  # Track this node # CHANGE : not tracking outbound nodes
+#                 peers_with_channels.add(peer_id)     # Update peers set
+#                 peers_with_channels_excl_innocent.add(peer_id)
+#             else:
+#                 logging.error(f"create_channels: Failed to create channel with node {peer_id}.")
+#         else:
+#             logging.error(f"create_channels: Failed to connect to {peer_id}.")
+#             if peer_id in outbound_channels:
+#                 outbound_channels.remove(peer_id) # CHANGE: just in case this does something, don't call it for outbound nodes
+
 def create_channels():
     """
     Create channels only with nodes that meet the discovery rule and avoid duplicates.
@@ -314,155 +485,61 @@ def create_channels():
     global CHANNEL_OPENING_TIMES
     # logging.info("create_channels: Starting channel creation process.")
 
-    peers_with_channels = list_peers_with_channels()
-    # logging.info(f"create_channels: Current peers with channels: {peers_with_channels}")
-
-    # Exclude Innocent node from peers_with_channels
-    if INNOCENT_NODE_ID in peers_with_channels:
-        peers_with_channels_excl_innocent = peers_with_channels - {INNOCENT_NODE_ID}
-    else:
-        peers_with_channels_excl_innocent = peers_with_channels
+    if is_max_inbound_channels() and not innocent_channel_closed:
+        logging.info(f'create_channels: We have reached incoming node saturation. Disconnecting from innocent node')
+        close_and_disconnect_innocent()
+        return
+    elif channels_created:
+        return
 
 
-    # if we have reached the limit of number of channels, we disconnect from the inno node
-    if len(peers_with_channels_excl_innocent) >= MAX_PEERS:
-        # Now we need to close the channel with the Innocent node and disconnect
-        
-        extra_channels = len(peers_with_channels_excl_innocent)  - MAX_PEERS # in case we went over the limit
-        
-        if not innocent_channel_closed:
-            logging.info("create_channels: Max channels reached. Disconnecting from innocent node.")
-            close_and_disconnect_innocent()
+    while True:
+        # logging.info(f"Inno node peers are {run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])}")
+        valid_nodes = discover_nodes()
+
+        if not valid_nodes:
+            logging.info(f'create_channels: No valid nodes found. Aborting channel creation.')
             return
-        # N channels we connect to, and the N channels made from other nodes connecting to us
-        elif extra_channels > 0:
-            logging.info(f'create_channels: We have {extra_channels} extra channels')
-            # first, lets check and make sure those are active channels
-            active_channels = [node for node in peers_with_channels_excl_innocent if ln_checker.is_node_active(node)]
-            inbound_channels = set(active_channels) - set(outbound_channels)
-            num_nodes_close = len(active_channels) - MAX_ACTIVE_NODES # nodes should be half inbound and half outbound
-            logging.info(f'create_channels: We have {num_nodes_close} extra nodes')
-            if num_nodes_close > 0:
-                logging.warning(f"create_channels: Inbound channel overload, {len(inbound_channels)} > MAX_ACTIVE_NODES, disconnecting nodes.")
-                # we will only disconnect nodes that made channels with us, since that should be the only
-                # way to go over the channel limit
-                close_and_disconnect_nodes(num_nodes_close, list(inbound_channels)) # CHANGE: we look at the entire active node list, not just outbound nodes
-                return
 
-    # checks for outbound connections. Each node should only make MAX_ACTIVE_NODES connections out
-    if len(outbound_channels) >= MAX_ACTIVE_NODES and not innocent_channel_closed: # CHANGE: we don't care about outbound nodes right now
-        logging.info("create_channels: Max outbound channels reached, no more channels will be created. Still connected to innocent node")
-        return
-    elif len(peers_with_channels_excl_innocent) < MAX_PEERS and innocent_channel_closed: # CHANGE: this was an elif before
-        logging.info(f'create_channels: Number of channels ({len(peers_with_channels_excl_innocent)}) below threshold, re-opening channel to innocent node.')
-        connect_to_innocent()
+        for node in valid_nodes:
 
-    # checkpoint. No point in continuing if we have filled our outbound connections or we have filled our channel capacity
-    if len(outbound_channels) > MAX_ACTIVE_NODES or len(peers_with_channels_excl_innocent) >= MAX_PEERS:
-        return
-    # if len(peers_with_channels_excl_innocent) >= MAX_PEERS: # CHANGE: We only care about active nodes rn
-    #     return
-    valid_nodes = set(discover_nodes().copy())
-    if not valid_nodes:
-        logging.info("create_channels: No valid nodes discovered. Aborting channel creation.")
-        return
-    for node in valid_nodes:
-        logging.info(f'create_channels: Found {len(valid_nodes)} valid channels')
-        if len(peers_with_channels_excl_innocent) >= MAX_PEERS:
-            logging.info("create_channels: Reached maximum peers with channels while processing nodes.")
-            # Close the channel with the Innocent node and disconnect
-            if not innocent_channel_closed:
-                close_and_disconnect_innocent()
-            break
-    
-        peer_id = node # remnant of a different time
-        # random sleep timer so that they don't all come online and look for each other at the 
-        # same time. This is to try to mitigate a bunch of nodes creating a channel to the same
-        # node all at once (might also randomzie access to the channel list if this doesnt work)
-        attempt = 0
-        channel_counts = get_channel_counts_exclude_inno() # get the dictionary mapping node ids to the number of channels they have
-        # logging.warning(f'channel counts is {channel_counts}')
-        node_maxed = False
-        
-        # while attempt < random.randint(1, MAX_PEERS):
-        #     time.sleep(random.random() * random.randint(1, 4))
-        #     new_channel_counts = get_channel_counts_exclude_inno()
+            # just in case we try to connect to more (this shouldn't happen)
+            if len(outbound_channels) >= MAX_ACTIVE_NODES:
+                logging.info("create_channels: Reached maximum outbound peers while processing nodes.")
+                return 
+            
+            outbound_channels.add(node)  # Track this node
 
-        #     # check connection again, if the count change since we last check, loop again and wait
-        #     if peer_id in new_channel_counts.keys() and not new_channel_counts[peer_id] == channel_counts[peer_id]:
-        #         channel_counts = new_channel_counts
-        #         logging.info(f'create_channels: Restarting loop, channel count changed.\n{channel_counts[peer_id]}\n{new_channel_counts[peer_id]}')
-        #         continue
+            if node in outbound_channels and not ln_checker.does_connection_exist(node):
+                # make sure we're not trying to connect to a node we're already connected to
+                demoGetAddressAndConnect(node)
 
-        #     # check connection counts for this node. If not in channel_counts then it has nothing connected to it
-        #     if peer_id in new_channel_counts.keys() and new_channel_counts:
-        #         if new_channel_counts[peer_id] >= MAX_PEERS:
-        #             logging.info(f'create_channels: Skipping node {peer_id} since it has max peers')
-        #             node_maxed = True
-        #             break
-        #     channel_counts = new_channel_counts
-        #     attempt += 1
-
-        # checks again in case things have changed
-        if peer_id in BLACKLISTED_NODES:
-            logging.info(f"create_channels: Skipping blacklisted node {peer_id}.")
-            continue
-        if ln_checker.has_channel_with(peer_id):
-            logging.info(f"create_channels: Skipping node {peer_id} as a channel already exists.")
-            continue
-        if peer_id in channel_counts.keys() and channel_counts[peer_id] >= MAX_PEERS:
-            logging.info(f"create_channels: Skipping node {peer_id} as it already has max peers of {channel_counts[peer_id]}")
-            continue
-        if node_maxed == True:
-            logging.info(f'create_channels: Skipping node {peer_id} as it already has max peers')
-            continue
-        if peer_id == THIS_NODE:
-            logging.warning(f'create_channels: Trying to connect to self. Skipping.')
-            continue
-        if peer_id in outbound_channels: # CHANGE: We don't care about outbound nodes
-            logging.warning(f'Trying to connect to a node that was in the outbound connection. Aborting this round of channel creation.')
-            break
-        if len(outbound_channels) >= MAX_ACTIVE_NODES:
-            logging.info(f'create_channels: This node has reached max outbound channels')
-            break
-
-        # Uncomment the following line in Testnet/Mainnet to connect to the node before funding a channel
-        # connect_to_node(peer_id)
-        logging.info(f'Checks complete, starting to connect to {peer_id}')
-        #this will allow the CCs to connect to each other by themselves instead of having to mesh connect before hand
-        if peer_id not in outbound_channels and not ln_checker.does_connection_exist(peer_id):
-            # make sure we're not trying to connect to a node we're already connected to
-            demoGetAddressAndConnect(peer_id)
-        if not ln_checker.does_connection_exist(peer_id): # CHANGE: only care if channel exists, don't care about outbound nodes
-            # make sure we're not trying to connect to a node we're already connected to
-            demoGetAddressAndConnect(peer_id)
-
-        if ln_checker.does_connection_exist(peer_id):
-            logging.info(f'Connected. Funding.')
-            # random funding amount (replaced the minutes version since that can give 19 and 0, which breaks this discovery rule)
-            funding_amount = random.randint(5,15) * 10000
-            logging.info(f"create_channels: Opening channel with node {peer_id}. Funding amount: {funding_amount}")
-            ln_checker.check_funds()
-            result = run_lightning_cli(["fundchannel", peer_id, f'{str(funding_amount)}'])
-            # fund the channel and automatically send liqudity to make sure we can communicate using this channel
-            # variables are : command, node_to_fund, channel_capacity, feerate, announce, funds_sent_over
-            # result = run_lightning_cli(["fundchannel", peer_id, str(funding_amount), str(0), 'true', str(funding_amount // 2)])
-            if result:
-                logging.info(f"create_channels: Channel successfully created with node {peer_id}.")
-                CHANNEL_OPENING_TIMES[peer_id] = time.time()
-
-                if ln_checker.wait_node_activated(peer_id):
-                    ln_checker.balance_channel(peer_id)
-
-                # outbound_channels.add(peer_id)  # Track this node # CHANGE : not tracking outbound nodes
-                peers_with_channels.add(peer_id)     # Update peers set
-                peers_with_channels_excl_innocent.add(peer_id)
+            if ln_checker.does_connection_exist(node):
+                fund_channel(node)
             else:
-                logging.error(f"create_channels: Failed to create channel with node {peer_id}.")
-        else:
-            logging.error(f"create_channels: Failed to connect to {peer_id}.")
-            if peer_id in outbound_channels:
-                outbound_channels.remove(peer_id) # CHANGE: just in case this does something, don't call it for outbound nodes
+                logging.error(f"create_channels: Failed to connect to {node}.")
+        
+        # last check, in case we came online too fast and missed some nodes
+        new_valid_nodes = discover_nodes()
+        if new_valid_nodes == valid_nodes:
+            break
+
+def fund_channel(node):
+    logging.info(f'fund_channel: Connected to {node}. Funding.')
+    # random funding amount (replaced the minutes version since that can give 19 and 0, which breaks this discovery rule)
+    funding_amount = random.randint(5,15) * 10000
+    logging.info(f"fund_channel: Opening channel with node {node}. Funding amount: {funding_amount}")
+    if ln_checker.check_funds():
+        result = run_lightning_cli(["fundchannel", node, f'{str(funding_amount)}'])
+        if result:
+            logging.info(f"fund_channel: Channel successfully created with node {node}.")
+            # CHANNEL_OPENING_TIMES[node] = time.time()
+    # fund the channel and automatically send liqudity to make sure we can communicate using this channel
+    # variables are : command, node_to_fund, channel_capacity, feerate, announce, funds_sent_over
+    # result = run_lightning_cli(["fundchannel", peer_id, str(funding_amount), str(0), 'true', str(funding_amount // 2)])
+    # bug: this command doesn't work for some reason when I was creating the scripts
+    else:
+        logging.error(f"create_channels: Failed to create channel with node {node}.")
 
 
 def list_peers_with_channels():
@@ -509,6 +586,17 @@ def list_peers_with_channels():
     return peers_with_channels
     """
 
+def is_max_inbound_channels():
+    '''
+    Count how many incoming channels there are and return whether we are saturated.
+    Returns:
+        True if incoming nodes >= MAX_ACTIVE_NODES
+    '''
+    active_channels = list_peers_with_channels() - {INNOCENT_NODE_ID}
+    incoming_channels = active_channels - outbound_channels
+    # logging.warning(f'We currently have {len(incoming_channels)} incoming channels')
+    return len(incoming_channels) >= MAX_ACTIVE_NODES
+
 def discover_nodes():
     """
     Discover nodes strictly based on existing channels that meet the discovery rule.
@@ -517,14 +605,10 @@ def discover_nodes():
     own_node_id = THIS_NODE
     inno_node = INNOCENT_NODE_ID
 
-    # uncomment this to make sure nodes can only make channels if they are also connected to the innocent node
-    # if not inno_node or not ln_checker.has_channel_with(inno_node):
-    #     logging.info(f'discover_nodes: Not connected to Innocent Node, cannot connect to new nodes.')
-    #     return None
-
     valid_nodes = []
 
-    output = run_lightning_cli(["listchannels"])
+    output = run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])
+
     if not output:
         logging.error("discover_nodes: Failed to retrieve channel list.")
         return valid_nodes
@@ -532,61 +616,40 @@ def discover_nodes():
     channels = json.loads(output).get("channels", [])
     # logging.info(f"discover_nodes: Total channels found: {len(channels)}")
 
-    channel_counts_no_inno = {}
-
-    # going to randomize access to the channel list
-    random.shuffle(channels)
-
     for channel in channels:
         '''
         Valid nodes are those that are:
         1. Have no channel with this node
         2. Connected to innocent node with KEY amount
-        3. Has less than MAX channels
         '''
-        # if not evaluate_discovery_rule(int(channel.get("amount_msat", 0)) // 1000):
-        #     logging.error('discover rule got procd')
-        #     continue
 
-        # add to the count dict (so we can make sure we aren't connecting to a maxed out node)
-        # call a fucnction that way we get updated counts
-        channel_counts_no_inno = get_channel_counts_exclude_inno()
+        # immediately through out channels that don't have the discovery rule
+        if not ln_checker.evaluate_discovery_rule(int(channel.get("amount_msat", 0)) // 1000):
+            continue
 
-        # channel = channels[index]
         destination = channel['destination']
         source = channel['source']
 
         # only check either source or destination (connected to innocent node)
-        channel_with_innocent = (source == INNOCENT_NODE_ID)
-        # channel_with_innocent = True # CHANGE: DON'T care if its connected to innocent node
-        channel_with_self = (source == own_node_id or destination == own_node_id)
+        # a check, but this shouldn't be called if we're connected to the innnocent node anyway
+        if (source == own_node_id or destination == own_node_id):
+            logging.error(f'discover_nodes: Is connected to innocent node. Not supposed to creating channels after connection to Innocent node.')
+        if (len(outbound_channels) >= MAX_ACTIVE_NODES):
+            logging.info(f'Node outbound channels is saturated.')
+            return []
+        
         node_is_blacklisted = (source in BLACKLISTED_NODES or destination in BLACKLISTED_NODES)
-        node_is_outbound = destination in outbound_channels # CHANGE: don't care about outbound nodes
+        node_is_outbound = destination in outbound_channels
         node_is_innocent = (destination == INNOCENT_NODE_ID)
-        # if this is an outbound node and is has a channel with us, that means this channel was closed from the other side
-        # remove it from the outbound section and skip it, we'll get it on the go around if its still here.
-        if node_is_outbound and not channel_with_self: # CHANGE: don't care about outbound nodes
-            logging.warning(f'Node {destination} is an outbound node but channel does not exist anymore.')
-            remove_outbound_channel(destination)
 
-        # check connection counts for this node. If not in channel_counts then there's no channels with it
-        # or its only connected to the innocent node.
-        if destination in channel_counts_no_inno.keys():
-            # logging.warning(f'Channel counting {destination} has {channel_counts_no_inno[destination]} channels')
-            node_is_maxed = channel_counts_no_inno[destination] >= MAX_PEERS
-        else:
-            node_is_maxed = False # this means we didn't even count it, so it has either 1 or none channels
-
-        # checkpoint, we only want nodes below MAX_PEERS and connected to the innocent node
-        if node_is_innocent or channel_with_self or (not channel_with_innocent) or node_is_blacklisted or node_is_maxed or node_is_outbound:
+        # checkpoint, we only want nodes connceted to the innocent node while our outbound nodes < Max active nodes
+        if node_is_innocent or node_is_blacklisted or node_is_outbound:
             continue
-        # if node_is_innocent or channel_with_self or (not channel_with_innocent) or node_is_blacklisted or node_is_maxed: # CHANGE: don't care about outbound nodes
-        #     continue
         
         # add the destination node, since we check that the channel source is the innocent node
         valid_nodes.append(destination)
     
-    # logging.info(f"discover_nodes: Valid nodes discovered: \n{valid_nodes}")
+    logging.info(f"discover_nodes: Valid nodes discovered: \n{valid_nodes}")
     return valid_nodes
 
 def get_channel_counts():
@@ -632,21 +695,6 @@ def channel_counter(exclude_inno):
 
     channel_counts = {source: len(channels) for source, channels in channels_counted.items()}
     return channel_counts
-
-def close_and_disconnect_innocent():
-    """
-    Close the channel with the Innocent node and disconnect.
-    """
-    global innocent_channel_closed
-    if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
-        logging.warning('close_and_disconnect_innocent: Tried to disconnect/close with inno node when already disconnected/closed')
-        innocent_channel_closed = True
-        return
-    logging.info(f"Closing channel with Innocent Node: {INNOCENT_NODE_ID}")
-    run_lightning_cli(["close", f"id={INNOCENT_NODE_ID}"])
-    logging.info(f"Disconnecting from Innocent Node: {INNOCENT_NODE_ID}")
-    run_lightning_cli(["disconnect", INNOCENT_NODE_ID])
-    innocent_channel_closed = True
 
 def close_and_disconnect_nodes(num_nodes_close, channel_list):
     '''
@@ -725,19 +773,17 @@ def check_channel_states():
 
 def check_outbound_channels():
     '''
-    Check the outbound channel list to make sure we're still connected with those channels,
-    since we don't close those channels but other nodes might.
+    Check the outbound channel list to make sure we're still connected with those channels.
+    Balance and fund those channels if we haven't
     '''
-    global outbound_channels
-
-    # we only want to look at this node if its not in the CHANNEL_OPENING_TIMES
-    # else we might disconnect from a node that is still trying to open a channel
-    channels_to_check = {channel for channel in outbound_channels if channel not in CHANNEL_OPENING_TIMES.keys()}
-
-    new_outbound_channels = ln_checker.check_channels(channels_to_check)
-    if new_outbound_channels != outbound_channels:
-        logging.warning(f'Removed {outbound_channels - new_outbound_channels} from outbound channel list.')
-        outbound_channels = new_outbound_channels.copy() # make a hard copy
+    for node in outbound_channels:
+        if not ln_checker.has_channel_with(node):
+            if ln_checker.does_connection_exist(node):
+                    fund_channel(node)
+            else:
+                logging.warning(f'check_outbound_channels: Node {node} is in outbound but we dont have a connection with it.')
+            
+            
 
 def remove_outbound_channel(node_id):
     '''
@@ -795,18 +841,19 @@ def main():
         time.sleep(sleep_int)
 
     balance_counter = 0
+    connect_to_innocent()
 
-    while True:
+    while not (channels_created and innocent_channel_closed):
         try:
-            connect_to_innocent()
             create_channels()
-            check_outbound_channels() # CHANGE: don't care about outbound nodes
+            check_outbound_channels()
+            fund_innocent_channel()
             if balance_counter >= CHANNEL_BALANCE_COUNTER:
                 balance_counter = 0
-                check_channel_states()
+                # check_channel_states()
                 ln_checker.balance_all_channels()
-            logging.info("main: Sleeping for 10 seconds.")
-            time.sleep(CHANNEL_SLEEP_INT)
+            # logging.info("main: Sleeping for 10 seconds.")
+            time.sleep(1)
             balance_counter += 1
         except KeyboardInterrupt:
             logging.info("main: Script terminated by user.")
@@ -814,6 +861,7 @@ def main():
         except Exception as e:
             logging.error(f"main: An error occurred in the main loop: {e}")
             time.sleep(5)
+    logging.info(f'Node has finished creating connections. Exiting out of CC_manager.')
 
 def load_this_node ():
     """
@@ -827,20 +875,20 @@ def load_this_node ():
     node_synced = False
     node_info = None
 
-    logging.info(f'Waiting for node to sync with blockchain')
+    # logging.info(f'Waiting for node to sync with blockchain')
     
-    time.sleep(30)
+    # time.sleep(15)
 
-    while not node_synced:
-        output = run_lightning_cli(['getinfo'])
-        node_info = json.loads(output) if output else None
+    # while not node_synced:
+    #     output = run_lightning_cli(['getinfo'])
+    #     node_info = json.loads(output) if output else None
 
-        if node_info and ln_checker.check_blockchain_height(node_info.get('blockheight')):
-            node_synced = True
-        else:
-            time.sleep(1)
+    #     if node_info and ln_checker.check_blockchain_height(node_info.get('blockheight')):
+    #         node_synced = True
+    #     else:
+    #         time.sleep(1)
     
-    logging.info(f'Node has synced successfully.')
+    # logging.info(f'Node has synced successfully.')
 
 
 if __name__ == "__main__":

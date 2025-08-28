@@ -465,10 +465,10 @@ def main():
     ln_checker.set_state('initializing')
     while not ln_checker.get_channels(): # need to make sure we're returning stuff
         time.sleep(CONNECT_SLEEP)
-    while len(ln_checker.get_channels()) < 2:
+    while len(ln_checker.get_channels()) < 1:
         ln_checker.set_state('initializing')
         time.sleep(CONNECT_SLEEP)
-    logging.info('We have created a channel with the Innnocent node.')
+    logging.info('Channels have started being created.')
 
     update_counter = 0
     max_counter = (STATUS_TIMER // SLEEP_INT) # this is so that we don't update the node too often
@@ -495,7 +495,7 @@ def main():
         if SENDING or CONNECTING or update_counter > max_counter: # detect state
             if ln_checker.is_node_ready(): # is_node_ready automatically sets the state
                 CONNECTING = False
-            elif ln_checker.get_state() != 'online':
+            elif ln_checker.get_state() != 'connected':
                 CONNECTING = True
                 
             update_counter = 0

@@ -4,7 +4,7 @@
 set -eux  # Exit on errors
 
 # Update and install required packages
-echo "starting bootstrap"
+# echo "starting bootstrap"
 # apt update -y -qq
 # apt install git -y -q > /dev/null 2>&1
 apt-get install -y -qq python3-pip
@@ -22,7 +22,7 @@ apt-get install -y -qq python3-pip
 
 # Start the plugin
 # lightning-cli --regtest plugin start /plugins/archived/noise/noise.py > /dev/null 2>&1
-echo "bootstrapping done"
+# echo "bootstrapping done"
 
 
 

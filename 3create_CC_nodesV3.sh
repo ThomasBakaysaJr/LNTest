@@ -127,7 +127,7 @@ write_address_to_file() {
     echo $NODE_ADDRESS >> $NODE_MANAGER_ADDRESS_LIST
     echo $NODE_ADDRESS >> $BOT_MASTER_ADDRESS_LIST
 
-    echo "Address for $1 has been written to $NODE_MANAGER_ADDRESS_LIST and $BOT_MASTER_ADDRESS_LIST."
+    # echo "Address for $1 has been written to $NODE_MANAGER_ADDRESS_LIST and $BOT_MASTER_ADDRESS_LIST."
 }
 
 # Create CC nodes concurrently

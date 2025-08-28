@@ -8,6 +8,7 @@ import os
 # how many times the checker will try
 RETRY_INT = 5
 SLEEP_INT= 10
+DISCOVERY_RULE_DIVISOR = 19
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
 
@@ -345,8 +346,8 @@ def balance_channel(target_node):
         to_balance = channel_not_balanced(target_node)
         if to_balance == 0: # if the channel is balanced, channel_not_balanced returns a 0, the amount to balance otherwise
             return
-        check_funds()
-        run_lightning_cli(["keysend", target_node, str(to_balance)])
+        if check_funds():
+            run_lightning_cli(["keysend", target_node, str(to_balance)])
     else:
         logging.info(f'balance_channel: Channel with {target_node} is not normal. Moving on.')
 
@@ -377,13 +378,17 @@ def is_node_ready():
     try:
         for channel in channels.keys():
             info = channels[channel]
-            if info.get('state') not in NOT_CONNECTING: # if its not normal, then we're finalizing channels
-                set_state('connecting')
+            # old channel states, now we only care if we're connected to the innnocent node
+            # if info.get('state') not in NOT_CONNECTING: # if its not normal, then we're finalizing channels
+            #     set_state('connecting')
+            #     return True
+            # elif info.get('state') not in DONT_BALANCE and channel_not_balanced(channel): # if channels needs to be balanced then we balance
+            #     set_state('balancing')
+            #     return True
+            if evaluate_discovery_rule(int(info.get("capacity", 0)) // 1000) and info.get('state') in NOT_CONNECTING:
+                set_state('connected')
                 return True
-            elif info.get('state') not in DONT_BALANCE and channel_not_balanced(channel): # if channels needs to be balanced then we balance
-                set_state('balancing')
-                return True
-        set_state('online')
+        set_state('connecting')
         return False # channel is normal and balanced
     except Exception as e:
         logging.info(f'Exception {e}')
@@ -411,3 +416,9 @@ def get_short_id(in_node_id):
     Return the first 5 characters of the node ID (or any string really)
     '''
     return in_node_id[:5]
+
+def evaluate_discovery_rule(capacity):
+    """
+    Check if the given capacity satisfies the discovery rule.
+    """
+    return capacity % DISCOVERY_RULE_DIVISOR == 0
