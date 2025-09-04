@@ -27,7 +27,14 @@ if [ -z "${1:-}" ]; then
 else
     suffix="$1"
 fi
-echo "Creating a total of node CC$suffix."
+# Make sure we have a value for number of active nodes
+# default to 4
+if [ -z "${2:-}" ]; then
+    active_nodes=4
+else
+    active_nodes="$2"
+fi
+echo "Creating node CC$suffix with $active_nodes active nodes."
 
 # ln_checker file
 LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
@@ -69,6 +76,7 @@ create_node() {
     NODE_LIGHTNING_DIR="$BASE_DIR/lightning-$NODE_NAME"
     NODE_PORT=$2
     NODE_GRPC_PORT=$3
+    NUM_ACTIVE_NODES=$4
 
     # Create a directory for the node
     mkdir -p $NODE_LIGHTNING_DIR
@@ -84,6 +92,7 @@ create_node() {
         -v $STARTUP_SCRIPT:/root/nodemanager/node_start.sh \
         --entrypoint /root/nodemanager/node_start.sh \
         elementsproject/lightningd:latest \
+        $NUM_ACTIVE_NODES \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=$NODE_GRPC_PORT
@@ -149,6 +158,6 @@ NODE_NAME="CC$suffix"
 NODE_PORT=$((19848 + suffix))
 NODE_GRPC_PORT=$((10012 + suffix))
 echo "Creating node $NODE_NAME..."
-create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT &
+create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT $active_nodes &
 # early breakout so we don't make more than the required number of cc nodes
     

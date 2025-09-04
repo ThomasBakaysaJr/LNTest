@@ -34,6 +34,7 @@ THIS_NODE = None
 # for global (is it sending right now?) type ask
 SENDING = False
 CONNECTING = True
+CREATED_CHANNELS = False
 
 # The TLV record type used for standard text messages in keysend.
 MESSAGE_TLV_TYPE = "34349334"
@@ -440,6 +441,46 @@ def load_this_node ():
     output = result.stdout.strip()
     THIS_NODE = json.loads(output).get('id')
 
+def is_node_ready():
+    '''
+    Check if channels are still being created and balanced
+    Return False if a single channel is still connecting and nodes are not balanced
+    True otherwise
+    '''
+    global CREATED_CHANNELS
+
+    channels = ln_checker.get_channels()
+    if not channels:
+        return True
+    
+
+    try:
+        is_connecting = False
+        for channel in channels.keys():
+            info = channels[channel]
+            # old channel states, now we only care if we're connected to the innnocent node
+            # if info.get('state') not in NOT_CONNECTING: # if its not normal, then we're finalizing channels
+            #     set_state('connecting')
+            #     return True
+            # elif info.get('state') not in DONT_BALANCE and channel_not_balanced(channel): # if channels needs to be balanced then we balance
+            #     set_state('balancing')
+            #     return True
+            if ln_checker.evaluate_discovery_rule(int(info.get("capacity", 0)) // 1000) and info.get('state') in ln_checker.NOT_CONNECTING:
+                ln_checker.set_state('connected')
+                CREATED_CHANNELS = True
+                return True
+            elif info.get('state') not in ln_checker.NOT_CONNECTING:
+                is_connecting = True
+        if CREATED_CHANNELS and not is_connecting:
+            ln_checker.set_state('connected')
+            return True # channel is normal and balanced
+        else:
+            ln_checker.set_state('connecting')
+            return False
+    except Exception as e:
+        logging.info(f'Exception {e}')
+        return True
+
 def main():
     """
     Main function to process and send commands to the REST server.
@@ -493,7 +534,7 @@ def main():
 
         time.sleep(SLEEP_INT)
         if SENDING or CONNECTING or update_counter > max_counter: # detect state
-            if ln_checker.is_node_ready(): # is_node_ready automatically sets the state
+            if is_node_ready(): # is_node_ready automatically sets the state
                 CONNECTING = False
             elif ln_checker.get_state() != 'connected':
                 CONNECTING = True
@@ -501,7 +542,7 @@ def main():
             update_counter = 0
             SENDING = False
         elif update_counter > max_counter:
-            if ln_checker.is_node_ready():
+            if is_node_ready():
                 CONNECTING = True
         else:
             update_counter += 1

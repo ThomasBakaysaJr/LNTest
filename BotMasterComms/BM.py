@@ -176,34 +176,54 @@ def demoGetAddressAndConnect(node_ID):
         logging.error(f"demoGetAddressAndConnect: Exception occurred: {e}")
 
 
+# def discover_cc_nodes():
+#     """
+#     Discover CC nodes that satisfy the discovery rule.
+#     """
+#     logging.info("Discovering CC nodes.")
+#     output = run_lightning_cli(["listchannels"])
+#     if not output:
+#         logging.warning("Failed to retrieve channel list.")
+#         return []
+
+#     channels = json.loads(output).get("channels", [])
+#     valid_nodes = []
+#     for channel in channels:
+#         capacity = int(channel.get("amount_msat", 0)) // 1000
+#         node_id = channel["destination"]
+
+#         # Exclude Innocent node and nodes already connected
+#         if node_id == INNOCENT_NODE_ID:
+#             logging.info(f"Skipping Innocent node {INNOCENT_NODE_ID} during discovery.")
+#             continue
+
+#         valid_nodes.append(node_id)
+#         # if capacity % DISCOVERY_RULE_DIVISOR == 0 and node_id not in BM_CONNECTED_NODES:
+#         #     valid_nodes.append(node_id)
+
+#     logging.info(f"Valid CC nodes discovered: {valid_nodes}")
+#     return valid_nodes
+
+# This assumes that the BM node knows the address of every CC node, and so can just connect at random
 def discover_cc_nodes():
     """
     Discover CC nodes that satisfy the discovery rule.
     """
-    logging.info("Discovering CC nodes.")
-    output = run_lightning_cli(["listchannels"])
-    if not output:
-        logging.warning("Failed to retrieve channel list.")
-        return []
+    try:
+        logging.info("Discovering CC nodes.")
+        # read the file that contains all the CC adresses
+        with open('CC_address_list.txt', 'r') as id_file:
+                address_list = id_file.readlines()
 
-    channels = json.loads(output).get("channels", [])
-    valid_nodes = []
-    for channel in channels:
-        capacity = int(channel.get("amount_msat", 0)) // 1000
-        node_id = channel["destination"]
+        valid_nodes = set()
+        for node in address_list:
+            valid_nodes.add(node.strip())
+        logging.info(f"Valid CC nodes discovered: {valid_nodes}")
 
-        # Exclude Innocent node and nodes already connected
-        if node_id == INNOCENT_NODE_ID:
-            logging.info(f"Skipping Innocent node {INNOCENT_NODE_ID} during discovery.")
-            continue
-
-        valid_nodes.append(node_id)
-        # if capacity % DISCOVERY_RULE_DIVISOR == 0 and node_id not in BM_CONNECTED_NODES:
-        #     valid_nodes.append(node_id)
-
-    logging.info(f"Valid CC nodes discovered: {valid_nodes}")
-    return valid_nodes
-
+        return valid_nodes
+    except Exception as e:
+            logging.error(f"demoGetAddressAndConnect: Exception occurred: {e}")
+            return set()
 
 
 def fund_single_channel():

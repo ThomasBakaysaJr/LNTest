@@ -17,7 +17,7 @@ import time
 import logging
 from pathlib import Path
 import random
-
+import sys
 import os
 
 import ln_checker
@@ -776,14 +776,16 @@ def check_outbound_channels():
     Check the outbound channel list to make sure we're still connected with those channels.
     Balance and fund those channels if we haven't
     '''
+    outbound_connected = True
     for node in outbound_channels:
         if not ln_checker.has_channel_with(node):
             if ln_checker.does_connection_exist(node):
+                    outbound_connected = False
                     fund_channel(node)
             else:
                 logging.warning(f'check_outbound_channels: Node {node} is in outbound but we dont have a connection with it.')
-            
-            
+    
+    return outbound_connected
 
 def remove_outbound_channel(node_id):
     '''
@@ -799,7 +801,7 @@ def remove_outbound_channel(node_id):
         outbound_channels = outbound_channels - {node_id}
     
 
-def main():
+def main(max_active_nodes):
     """
     Main script loop.
     """
@@ -812,8 +814,13 @@ def main():
     global INNOCENT_NODE_ADDRESS 
     global CC_ADDRESS_LIST
     global MAX_PEERS
+    global MAX_ACTIVE_NODES
     
+    # setting some important variables.
+    MAX_ACTIVE_NODES = max_active_nodes
     MAX_PEERS = MAX_ACTIVE_NODES * 2
+
+    logging.warning(f'For node {HOST_NAME}, active nodes is {MAX_ACTIVE_NODES} and max peers is {MAX_PEERS}')
 
     load_this_node() # retrieve vital information and wait for node to sync
 
@@ -843,14 +850,14 @@ def main():
     balance_counter = 0
     connect_to_innocent()
 
-    while not (channels_created and innocent_channel_closed):
+    while ln_checker.has_channel_with(INNOCENT_NODE_ID) or not channels_created or balance_counter == 0:
         try:
             create_channels()
-            check_outbound_channels()
-            fund_innocent_channel()
             if balance_counter >= CHANNEL_BALANCE_COUNTER:
                 balance_counter = 0
                 # check_channel_states()
+                if check_outbound_channels():
+                    fund_innocent_channel()
                 ln_checker.balance_all_channels()
             # logging.info("main: Sleeping for 10 seconds.")
             time.sleep(1)
@@ -892,4 +899,9 @@ def load_this_node ():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] > '0':
+        main(int(sys.argv[1]))
+    else:
+        main(4)
+    
+

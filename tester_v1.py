@@ -18,6 +18,7 @@ STATUS_JSON_PREFIX = 'status/status_CC*'
 
 TIMES_CSV = 'time_data_'
 RUNTIMES_CSV = 'runtime_data.csv'
+SETUPTIMES_CSV = 'setuptime_data.csv'
 TOPO_JSON = 'topology_data_'
 
 MASTER_LOG_PATH = ''
@@ -31,6 +32,10 @@ NUM_CC_ITERATIONS = 10 # each iteration increases the number of CC servers by 10
 MIN_CHANNELS = 4 # these two govern number of channels for the nodes
 MAX_CHANNELS = 4
 MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
+
+# Variables for active node iteration tests
+ACTIVE_NODES_NUM_CC = 50 # default is 50
+ACTIVE_NODES_MAX_NUM = 6 # default is 6
 
 # Unless the script isn't working properly, best to leave these values alone
 MAX_WAIT = 1500 # max wait for propagation before we move on (default = 300)
@@ -120,25 +125,47 @@ DOCKER_CONTAINERS = set()
 #     print(f'Total runtime data saved in {RUNTIMES_CSV}')
 #     kill_nodes()
 
-def main(starting_iteration, active_nodes):
-    if starting_iteration == 0:
-        print(f'Invalid arguments provided. Provide in order of STARTING_ITERATION, NUM_ACTIVE_NODES to determine a custom starting iteration.')
-        starting_iteration = 1
-        active_nodes = 4
-    print(f'Starting iteration is {starting_iteration} with {active_nodes} active nodes.')
+def main(starting_cc_num, starting_active_node_num, mode):
+    '''
+    Args:
+        mode: What type of test to conduct.
+        1 = number of cc iterations
+        2 = number of active nodes iterations
+    '''
+
+    if mode == '1':
+        print(f'Starting at {int(starting_cc_num) * 10} CC servers going to {NUM_CC_ITERATIONS * 10} CC servers with {starting_active_node_num} active nodes.')
+    elif mode == '2':
+        print(f'Starting at {starting_active_node_num} actives nodes and goign to {ACTIVE_NODES_MAX_NUM} active nodes with {ACTIVE_NODES_NUM_CC} CC servers.')
+    else:
+        print(f'Error. Invalid mode argument. Mode is {mode} which is neither 1 nor 2.')
     
     if not confirm_execution('Run testing script script.'):
         print('Exiting . . .')
         return
     else:
         print('Starting testing script')
+    
+    if mode == '1':
+        test_cc_iteration(starting_active_node_num, starting_cc_num, NUM_CC_ITERATIONS)
+    elif mode == '2':
+        test_active_nodes_iteration(50, starting_active_node_num, ACTIVE_NODES_MAX_NUM)
 
+    print(f'Testing finished. Exiting.')
+    kill_nodes()
+
+def test_cc_iteration(active_nodes, starting_iteration, end):
+    '''
+    Testing function for different number of CC servers.
+    Number of active nodes is constant.
+    '''
     main_start_time = time.time()
     attempt = 0
     starting_iteration = int(starting_iteration)
-    for x in range(starting_iteration, NUM_CC_ITERATIONS + 1):
+    for iteration in range(starting_iteration, end + 1):
         success = False
-        total_nodes = x * 10
+        total_nodes = iteration * 10
+        total_nodes += total_nodes % int(active_nodes)
         while not success:
             # fail safe so it doesn't just keep failing over and over
             if attempt > MAX_TRY:
@@ -151,7 +178,9 @@ def main(starting_iteration, active_nodes):
             
             print(f'\n\n\nRunning init for a total of {total_nodes}')
             channels_created = setup_test(int(total_nodes), int(active_nodes))
+
             print(f'Setup finished at {get_time()}')
+            record_setup_total_time(cc_start_time, total_nodes)
             fund_nodes()
             # checkpoint, if channels aren't created then we start again.
             if not channels_created:
@@ -193,9 +222,86 @@ def main(starting_iteration, active_nodes):
                 record_cc_total_time(cc_start_time, total_nodes)
 
     now_time = time.time()
-    print(f'Testing with: {starting_iteration * 10} - {NUM_CC_ITERATIONS * 10} CC servers at {MAX_MESSAGES} messsages each finished in {now_time - main_start_time} seconds.')
+    print(f'FINISHED testing for message propagtion different number of CC servers.')
+    print(f'Testing with: {starting_iteration * 10} - {end * 10} CC servers at {MAX_MESSAGES} messsages each, finished in {now_time - main_start_time} seconds.')
     print(f'Total runtime data saved in {RUNTIMES_CSV}')
-    kill_nodes()
+
+def test_active_nodes_iteration(num_cc, active_nodes_start, active_nodes_end):
+    '''
+    Testing function for different number of active nodes.
+    Number of CC servers is constant.
+    '''
+    main_start_time = time.time()
+    attempt = 0
+    starting_iteration = int(active_nodes_start)
+    # just in case, never have the number of active nodes be less than 1
+    if starting_iteration < 1:
+        starting_iteration = 1
+
+    for active_nodes in range(starting_iteration, active_nodes_end + 1):
+        success = False
+        total_nodes = num_cc
+        total_nodes += total_nodes % int(active_nodes)
+        while not success:
+            # fail safe so it doesn't just keep failing over and over
+            if attempt > MAX_TRY:
+                print(f"Could not run {MAX_MESSAGES} messages for {active_nodes} active nodes after {attempt} attempts. Shutting down.")
+                kill_nodes()
+                return
+            
+            cc_start_time = time.time()
+            record_create(total_nodes)
+            
+            print(f'\n\n\nRunning init for {total_nodes} CC servers with {active_nodes} active nodes.')
+            channels_created = setup_test(int(total_nodes), int(active_nodes))
+
+            print(f'Setup finished at {get_time()}')
+            record_setup_total_time(cc_start_time, total_nodes)
+            fund_nodes()
+            # checkpoint, if channels aren't created then we start again.
+            if not channels_created:
+                attempt += 1
+                print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+                continue            
+
+            update_containers()
+            print(f'Channels created in {time.time() - cc_start_time} seconds.')
+
+            print(f'Waiting done, proceeding to testing.')
+            # ACTUAL SENDING OF MESSAGES
+            for y in range(1, MAX_MESSAGES + 1):
+                # another wait, just in case we got nodes disconnecting or something
+                are_channels_ready()
+
+                send_msg(y)
+                send_time, success = wait_for_propagation(y)
+                
+                if not success:
+                    break
+                
+                print(f'Command {y} is finished. Propagation time is {send_time} seconds.')
+                print(f'Time: {get_time()}')
+                entry = [total_nodes, y, send_time]
+                record_test(entry, total_nodes)
+            # record the test and set reset attempts
+            if success:
+                record_cc_total_time(cc_start_time, total_nodes)
+                record_topology()
+                untrack_containers()
+                attempt = 0
+            # if not a succes, add to the attempt
+            else:
+                attempt += 1
+                print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+                untrack_containers()
+                record_topology()
+                record_cc_total_time(cc_start_time, total_nodes)
+
+    now_time = time.time()
+    print(f'FINISHED testing for different number of active_nodes.')
+    print(f'Testing with: {starting_iteration} - {active_nodes_end} active nodes with {num_cc} CC servers at {MAX_MESSAGES} messsages each, finished in {now_time - main_start_time} seconds.')
+    print(f'Total runtime data saved in {RUNTIMES_CSV}')
+
 
 def confirm_execution(message):
     confirmation = ['y','yes','ye']
@@ -239,7 +345,7 @@ def retrieve_all_status():
 
 def record_cc_total_time(start_time, cc_num):
     '''
-    Records the total time elapsed from the initialization of the nodes to the last message.
+    Records the time elapsed from the BM connecting and sending the first message to the last message.
     Record the topology of the lightning network.
     '''
     # we want to read the csv file already there (or create it if it doesn't exist)
@@ -260,7 +366,31 @@ def record_cc_total_time(start_time, cc_num):
 
     df = df.sort_values(by=[headers[0]]).reset_index(drop=True)
     df.to_csv(RUNTIMES_CSV, index=False)
-    print(f'Individual run times saved at {TIMES_CSV}{cc_num}_CC_nodes.csv')
+    print(f'Total time saved at {RUNTIMES_CSV}')
+
+def record_setup_total_time(start_time, cc_num):
+    '''
+    Record the time take to create and channel all the nodes for this iteration.
+    '''
+    # we want to read the csv file already there (or create it if it doesn't exist)
+    elapsed_time = time.time() - start_time
+
+    headers = ['#CCs', 'Time_Taken']
+    entry = pd.DataFrame({headers[0]: [cc_num], headers[1]: elapsed_time})
+    df = pd.DataFrame()
+
+    try:
+        df = pd.read_csv(SETUPTIMES_CSV)
+        # delete old values if they exist
+        if cc_num in df[headers[0]].values:
+            df = df[df[headers[0]] != cc_num]
+        df = pd.concat([df, entry], ignore_index=True)
+    except FileNotFoundError:
+        df = entry
+
+    df = df.sort_values(by=[headers[0]]).reset_index(drop=True)
+    df.to_csv(SETUPTIMES_CSV, index=False)
+    print(f'Setup times saved at {SETUPTIMES_CSV}')
 
 def record_topology():
     cur_top = retrieve_all_status()
@@ -296,7 +426,7 @@ def are_channels_ready():
             channels_created = True
             # if a single channel is not online, then channels create will be false and we sleep
             for status in cur_top:
-                if cur_top[-1].get('state') != 'connected':
+                if status.get('state') != 'connected':
                     channels_created = False
                     break
 
@@ -388,10 +518,10 @@ def setup_test(total_nodes, active_nodes):
     # know we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
     counter = 1
     while counter <= total_nodes:
-        for i in range(1):
+        for i in range(active_nodes):
             try:
                 subprocess.run(
-                    ["./3create_CC_nodesV3.sh", f'{counter}']
+                    ["./3create_CC_nodesV3.sh", f'{counter}', f'{active_nodes}']
                 )
             except subprocess.CalledProcessError as e:
                 # This is where the error from lightning-cli lives!
@@ -522,14 +652,24 @@ def get_time():
     return datetime.now().strftime('%H:%M:%S')
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2:
-        if sys.argv[1] > '0' and sys.argv[2] > '0':
-            main(sys.argv[1], sys.argv[2])
-        elif sys.argv[1] == '0' and sys.argv[2] == '1':
-            record_topology()
-        else:
+    warning_text = '''
+Invalid arguments. tester_v1 starting_cc_number starting_active_nodes mode
+mode = 0: no testing.   with arguments 0 0, print topology and message progress;
+                        with arguements 0 1 save the current topology as a json file 
+mode = 1: Test iterations of number of CC servers, starting at starting_cc_number (will be mult. by 10) and stopping at 100 
+mode = 2: Test iterations of number of active nodes, starting at starting_active nodes and stopping at 6
+'''
+
+    if len(sys.argv) > 3:
+        if sys.argv[1] > '0' and sys.argv[2] > '0' and (sys.argv[3] == '1' or sys.argv[3] == '2'):
+            main(sys.argv[1], sys.argv[2], sys.argv[3])
+        elif sys.argv[1] == '0' and sys.argv[2] == '0' and sys.argv[3] == '0':
             print_topology()
             print_messages()
             print_container_counters()
+        elif sys.argv[1] == '0' and sys.argv[2] == '1' and sys.argv[3] == '0':
+            record_topology()
+        else:
+            print(warning_text)
     else:
-        main(0, 0)
+        print(warning_text)

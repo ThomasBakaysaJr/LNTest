@@ -18,7 +18,7 @@ STATUS_DIR.mkdir(parents=True, exist_ok=True)
 STATUS_FILE = STATUS_DIR / 'status_'
 
 # channel states
-NOT_CONNECTING = ['CHANNELD_NORMAL', 'CLOSINGD_COMPLETE', 'ONCHAIN']
+NOT_CONNECTING = ['CHANNELD_NORMAL', 'ONCHAIN']
 DONT_BALANCE = ['CLOSINGD_COMPLETE', 'ONCHAIN']
 
 
@@ -365,34 +365,6 @@ def channel_not_balanced(target_node):
     our_msat = channel['our_amount']
 
     return (our_msat - (capacity // 2)) if (our_msat > (capacity * .7)) else 0
-
-def is_node_ready():
-    '''
-    Check if channels are still being created and balanced
-    Return False if a single channel is still connecting and nodes are not balanced
-    True otherwise
-    '''
-    channels = get_channels()
-    if not channels:
-        return True
-    try:
-        for channel in channels.keys():
-            info = channels[channel]
-            # old channel states, now we only care if we're connected to the innnocent node
-            # if info.get('state') not in NOT_CONNECTING: # if its not normal, then we're finalizing channels
-            #     set_state('connecting')
-            #     return True
-            # elif info.get('state') not in DONT_BALANCE and channel_not_balanced(channel): # if channels needs to be balanced then we balance
-            #     set_state('balancing')
-            #     return True
-            if evaluate_discovery_rule(int(info.get("capacity", 0)) // 1000) and info.get('state') in NOT_CONNECTING:
-                set_state('connected')
-                return True
-        set_state('connecting')
-        return False # channel is normal and balanced
-    except Exception as e:
-        logging.info(f'Exception {e}')
-        return True
     
 def check_blockchain_height(in_height):
     '''

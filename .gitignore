@@ -11,4 +11,4 @@ NodeManagerComms/*
 !NodeManagerComms/CC_Manager.py
 !NodeManagerComms/noiseManager_REST.py
 master_log.log
-
+setuptime_data.csv

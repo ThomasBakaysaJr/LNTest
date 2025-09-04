@@ -19,10 +19,12 @@ rm -rf $BASE_DIR/lightning-InnocentNode
 rm -rf $BASE_DIR/BotMasterComms/bm_log*
 rm -f $BASE_DIR/BotMasterComms/counter.txt
 rm -f $BASE_DIR/BotMasterComms/funded_node.txt
+rm -f $BASE_DIR/BotMasterComms/CC_address_list.txt
 rm -rf $BASE_DIR/NodeManagerComms/logs/cc_log*
 rm -rf $BASE_DIR/NodeManagerComms/logs/noise_log*
 rm -rf $BASE_DIR/NodeManagerComms/status/cc_currentMessage*
 rm -rf $BASE_DIR/NodeManagerComms/status/cc_messageLog_*
 rm -rf $BASE_DIR/NodeManagerComms/status/status_CC*
+rm -f $BASE_DIR/NodeManagerComms/CC_address_list.txt
 
 echo "Cleanup complete."
