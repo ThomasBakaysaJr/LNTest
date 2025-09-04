@@ -7,6 +7,7 @@ import re
 import docker
 import sys
 from datetime import datetime
+from multiprocessing import shared_memory
 import pandas as pd
 
 BM_PATH = '/root/botmaster'
@@ -46,84 +47,6 @@ SLEEP_INTERVAL = 1
 SLEEP_CHANNEL_INTERVAL = 10
 
 DOCKER_CONTAINERS = set()
-
-# def main(starting_iteration, active_nodes):
-#     if starting_iteration == 0:
-#         print(f'Invalid arguments provided. Provide in order of STARTING_ITERATION, NUM_ACTIVE_NODES to determine a custom starting iteration.')
-#         starting_iteration = 1
-#         active_nodes = 4
-#     print(f'Starting iteration is {starting_iteration} with {active_nodes} active nodes.')
-    
-#     if not confirm_execution('Run testing script script.'):
-#         print('Exiting . . .')
-#         return
-#     else:
-#         print('Starting testing script')
-
-#     main_start_time = time.time()
-#     attempt = 0
-#     starting_iteration = int(starting_iteration)
-#     for x in range(starting_iteration, NUM_CC_ITERATIONS + 1):
-#         success = False
-#         total_nodes = x * 10
-#         while not success:
-#             # fail safe so it doesn't just keep failing over and over
-#             if attempt > MAX_TRY:
-#                 print(f"Could not run {MAX_MESSAGES} messages for {total_nodes} CC nodes after {attempt} attempts. Shutting down.")
-#                 kill_nodes()
-#                 return
-            
-#             cc_start_time = time.time()
-#             record_create(total_nodes)
-            
-#             print(f'\n\n\nRunning init for a total of {total_nodes}')
-#             setup_test(total_nodes, active_nodes)
-#             print(f'Setup finished at {get_time()}')
-            
-#             print(f'Waiting for channels to be created . . .')
-#             update_containers()
-#             channels_created = are_channels_ready()
-#             print(f'Channels created in {time.time() - cc_start_time} seconds.')
-
-#             # checkpoint, if channels aren't created then we start again.
-#             if not channels_created:
-#                 attempt += 1
-#                 print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
-#                 continue
-
-#             print(f'Waiting done, proceeding to testing.')
-#             # ACTUAL SENDING OF MESSAGES
-#             for y in range(1, MAX_MESSAGES + 1):
-#                 # another wait, just in case we got nodes disconnecting or something
-#                 are_channels_ready()
-
-#                 send_msg(y)
-#                 send_time, success = wait_for_propagation(y)
-                
-#                 if not success:
-#                     break
-                
-#                 print(f'Command {y} is finished. Propagation time is {send_time} seconds.')
-#                 print(f'Time: {get_time()}')
-#                 entry = [total_nodes, y, send_time]
-#                 record_test(entry, total_nodes)
-#             # record the test and set reset attempts
-#             if success:
-#                 record_cc_total_time(cc_start_time, total_nodes)
-#                 untrack_containers()
-#                 attempt = 0
-#             # if not a succes, add to the attempt
-#             else:
-#                 attempt += 1
-#                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
-#                 untrack_containers()
-#                 print_topology()
-#                 record_cc_total_time(cc_start_time, total_nodes)
-
-#     now_time = time.time()
-#     print(f'Testing with: {starting_iteration * 10} - {NUM_CC_ITERATIONS * 10} CC servers at {MAX_MESSAGES} messsages each finished in {now_time - main_start_time} seconds.')
-#     print(f'Total runtime data saved in {RUNTIMES_CSV}')
-#     kill_nodes()
 
 def main(starting_cc_num, starting_active_node_num, mode):
     '''
@@ -330,18 +253,30 @@ def record_test(record, in_suffix):
         writer = csv.writer(f)
         writer.writerow(record)
 
+
+
 def retrieve_all_status():
-    files = sort_files(glob.glob(f'NodeManagerComms/{STATUS_JSON_PREFIX}'))
-    current_topology = []
-    try:
-        for status_file in files:
-            with open(status_file, 'r') as f:
-                if f:
-                    node_status = json.load(f)
-            current_topology.append(node_status)
-        return current_topology
-    except Exception as e:
-        pass
+    cc_containers = get_cc_containers()
+    all_status = []
+
+    for cont in cc_containers:
+        node_name = f'{cont.name}_status'
+        try:
+            shm = shared_memory.SharedMemory(name=node_name)
+            data = shm.buf.tobytes().split(b'\x00', 1)[0]
+            shm.close()
+
+            if not data:
+                continue
+
+            status = json.loads(data.decode('utf-8'))
+            all_status.append(status)
+        except Exception as e:
+            # print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
+            setup_shm(node_name)
+            continue
+    return all_status
+
 
 def record_cc_total_time(start_time, cc_num):
     '''
@@ -401,9 +336,13 @@ def record_topology():
     print(f'Topology data for {len(cur_top)} nodes saved as {top_name}')
     
 def kill_nodes():
+    '''
+    Cleanup nodes and unlink the shared memory
+    '''
     subprocess.run(
         ["./kill_nodes.sh"]
     )
+    # cleanup_shm()
 
 def are_channels_ready():
     '''
@@ -476,25 +415,6 @@ def send_msg(message):
     result = subprocess.run(command, capture_output=True, text=True)
     if result.stderr:
         print(f'Errors are {result.stderr}')
-
-# def setup_test(total_nodes, active_nodes):
-#     ''''
-#     setup the number of CC servers needed
-#     returns true when the the cc servers have been made
-#     '''
-#     try:
-#         subprocess.run(
-#             ["./init_botnet.sh", f'{total_nodes}', f'{active_nodes}']
-#         )
-#     except subprocess.CalledProcessError as e:
-#         # This is where the error from lightning-cli lives!
-#         print(f"tester failed with exit code {e.returncode}")
-#         print(f"  tester STDOUT: {e.stdout.strip()}")
-#         print(f"  tester STDERR: {e.stderr.strip()}") 
-#         raise # Re-raise the exception so your calling code can catch it
-#     except Exception as e:
-#         print(f"tester: Exception occurred: {e}")
-#         return None
     
 def setup_test(total_nodes, active_nodes):
     ''''
@@ -507,30 +427,31 @@ def setup_test(total_nodes, active_nodes):
         )
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
-        print(f"tester failed with exit code {e.returncode}")
-        print(f"  tester STDOUT: {e.stdout.strip()}")
-        print(f"  tester STDERR: {e.stderr.strip()}") 
+        print(f"testsetup_tester failed with exit code {e.returncode}")
+        print(f"  setup_test STDOUT: {e.stdout.strip()}")
+        print(f"  setup_test STDERR: {e.stderr.strip()}") 
         raise # Re-raise the exception so your calling code can catch it
     except Exception as e:
-        print(f"tester: Exception occurred: {e}")
+        print(f"setup_test: Exception occurred: {e}")
         return None
     
-    # know we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
+    # now we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
     counter = 1
     while counter <= total_nodes:
         for i in range(active_nodes):
             try:
+                setup_shm(counter)
                 subprocess.run(
                     ["./3create_CC_nodesV3.sh", f'{counter}', f'{active_nodes}']
                 )
             except subprocess.CalledProcessError as e:
                 # This is where the error from lightning-cli lives!
-                print(f"tester failed with exit code {e.returncode}")
-                print(f"  tester STDOUT: {e.stdout.strip()}")
-                print(f"  tester STDERR: {e.stderr.strip()}") 
+                print(f"setup_test failed with exit code {e.returncode}")
+                print(f"  setup_test STDOUT: {e.stdout.strip()}")
+                print(f"  setup_test STDERR: {e.stderr.strip()}") 
                 raise # Re-raise the exception so your calling code can catch it
             except Exception as e:
-                print(f"tester: Exception occurred: {e}")
+                print(f"setup_test: Exception occurred: {e}")
                 return None
             counter += 1
 
@@ -541,6 +462,47 @@ def setup_test(total_nodes, active_nodes):
             print(f'Channels were not ready in time')
             return False
     return True
+
+def setup_shm(suffix):
+    '''
+    Setup the shm block for this node using incoming suffix counter
+    Make sure node_name and block_size matches the name and block_size in ln_checker.
+    '''
+    if 'status' not in f'{suffix}':
+        # this will be creating the first memory buffer
+        node_name = f'CC{suffix}_status'
+        print(f'Creating shared memeory buffer for {node_name}')
+    else:
+        # this will be recreating it if the shm dies for some reason; silent
+        node_name = suffix
+
+    block_size = 2048
+
+    try:
+        shm = shared_memory.SharedMemory(name=node_name, create=True, size=block_size)
+        shm.close()
+    except FileExistsError:
+        # Found a block by this name still, probably from bad cleanup. Clear and prepare it again
+        print(f'setup_shm: Shared memory block found for {node_name}. Clearing. . .')
+        temp_shm = shared_memory.SharedMemory(name=node_name)
+        temp_shm.unlink()
+
+        # recreate memory block
+        shm = shared_memory.SharedMemory(name=node_name, create=True, size=block_size)
+        shm.close()
+
+def cleanup_shm():
+    '''
+    Clear out all the shared memory blocks.
+    '''
+    cc_containers = get_cc_containers()
+    for cont in cc_containers:
+        node_name = cont.name
+        try:
+            shm = shared_memory.SharedMemory(name=node_name)
+            shm.unlink()
+        except Exception as e:
+            print(f'cleanup_shm: ERROR in cleaning up memory. Error: {e}')
 
 def fund_nodes():
     try:
@@ -590,11 +552,7 @@ def get_time_interval(data, counter):
 def update_containers():
     global DOCKER_CONTAINERS
 
-    try:
-        client = docker.from_env()
-        containers = set(client.containers.list(filters={'status' : 'running'}))
-    except docker.errors.DockerException as e:
-        print(f'Error with docker module. Error: {e}')
+    containers = get_containers()
     
     if not DOCKER_CONTAINERS:
         DOCKER_CONTAINERS = containers
@@ -612,6 +570,32 @@ def untrack_containers():
 
     DOCKER_CONTAINERS = set()
 
+def get_cc_containers():
+    '''
+    Get the set of all CC server docker containers
+    '''
+    try:
+        client = docker.from_env()
+        containers = set(client.containers.list(filters={'status' : 'running', 'name': '^CC'}))
+    except docker.errors.DockerException as e:
+        print(f'get_cc_containers: Error with docker module. Error: {e}')
+        return set()
+
+    return containers
+
+def get_containers():
+    '''
+    Return a set of all currently running docker containers.
+    '''
+    try:
+        client = docker.from_env()
+        containers = set(client.containers.list(filters={'status' : 'running'}))
+    except docker.errors.DockerException as e:
+        print(f'get_containers: Error with docker module. Error: {e}')
+        return set()
+    
+    return containers
+
 def print_topology():
     topology = retrieve_all_status()
     if topology:
@@ -627,12 +611,8 @@ def print_messages():
         print(f'{msg}')
 
 def print_container_counters():
-    try:
-        client = docker.from_env()
-        containers = client.containers.list(filters={'status' : 'running'})
-        print(f'Total of {len(containers)} active containers.')
-    except docker.errors.DockerException as e:
-        print(f'Error with docker module. Error: {e}')
+    containers = get_containers()
+    print(f'Total of {len(containers)} active containers.')
 
 def sort_files(in_files):
     '''
@@ -668,7 +648,8 @@ mode = 2: Test iterations of number of active nodes, starting at starting_active
             print_messages()
             print_container_counters()
         elif sys.argv[1] == '0' and sys.argv[2] == '1' and sys.argv[3] == '0':
-            record_topology()
+            # record_topology()
+            pass
         else:
             print(warning_text)
     else:

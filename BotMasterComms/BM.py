@@ -217,7 +217,8 @@ def discover_cc_nodes():
 
         valid_nodes = set()
         for node in address_list:
-            valid_nodes.add(node.strip())
+            address = node.strip()
+            valid_nodes.add(address.split('@')[0])
         logging.info(f"Valid CC nodes discovered: {valid_nodes}")
 
         return valid_nodes
@@ -259,6 +260,7 @@ def fund_single_channel():
         valid_cc_nodes = discover_cc_nodes()
 
     # Pick one node to fund a channel with
+    valid_cc_nodes = list(valid_cc_nodes)
     random.shuffle(valid_cc_nodes)
     target_node = valid_cc_nodes[0]
 

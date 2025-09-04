@@ -4,6 +4,7 @@ import time
 import subprocess
 import json
 import os
+from multiprocessing import shared_memory
 
 # how many times the checker will try
 RETRY_INT = 5
@@ -256,13 +257,19 @@ def get_status_data():
     '''
     Returns the entirety of the static status data 
     '''
-    filename = f'{STATUS_FILE}{HOST_NAME}_{get_short_id(get_node_id())}.json'
+    node_name = f'{HOST_NAME}_status'
     data = {}
     try:
-        with open(filename, 'r') as file:
-            data = json.load(file)
+        shm = shared_memory.SharedMemory(name=node_name)
+        data = shm.buf.tobytes().split(b'\x00', 1)[0]
+        shm.close()
+
+        if not data:
+            return data
+
+        data = json.loads(data.decode('utf-8'))
     except Exception as e:
-        logging.warning(f'Get state fails because {e}')
+        print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
 
     return data
 
@@ -315,10 +322,28 @@ def set_sending(target_node):
     write_state(node_data)
 
 def write_state(data):
-    name = data['name']
-    filename = f'{STATUS_FILE}{name}_{get_short_id(get_node_id())}.json'
-    with open(filename, 'w') as file:
-        json.dump(data, file, indent=4)
+    '''
+    Write the state to a shared memory buffer.
+    '''
+    block_size = 2048 # give ourselves a little wiggle room (each status can get to roughly 1.5KB)
+    status = json.dumps(data).encode('utf-8')
+
+    if len(status) >= block_size:
+        logging.error(f'write_data: Status is greater than block_size {block_size}. Aborting write to memory.')
+        return
+    
+    # Memory blocks are created by the tester_v1 script
+    try:
+        shm = shared_memory.SharedMemory(name=f'{HOST_NAME}_status')
+        shm.buf[:len(status)] = status
+        shm.buf[len(status):] = b'\x00' * (block_size - len(status))
+        shm.close()
+    except FileNotFoundError:
+        logging.error(f'write_state: Error: Shared memory block for {HOST_NAME} not found.')
+    except Exception as e:
+        logging.error(f'write_state: Error: {e}')
+
+
 
 def get_node_id():
     """

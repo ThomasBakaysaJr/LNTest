@@ -34,7 +34,6 @@ if [ -z "${2:-}" ]; then
 else
     active_nodes="$2"
 fi
-echo "Creating node CC$suffix with $active_nodes active nodes."
 
 # ln_checker file
 LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
@@ -82,7 +81,7 @@ create_node() {
     mkdir -p $NODE_LIGHTNING_DIR
 
     # Run the Docker container with the specified name
-    docker run -d --restart unless-stopped --network host --name $NODE_NAME \
+    docker run -d --restart unless-stopped --network host --ipc=host --name $NODE_NAME \
         -e CONTAINER_NAME=$NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
@@ -157,7 +156,7 @@ write_address_to_file() {
 NODE_NAME="CC$suffix"
 NODE_PORT=$((19848 + suffix))
 NODE_GRPC_PORT=$((10012 + suffix))
-echo "Creating node $NODE_NAME..."
+echo "Creating node CC$suffix with $active_nodes active nodes."
 create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT $active_nodes &
 # early breakout so we don't make more than the required number of cc nodes
     
