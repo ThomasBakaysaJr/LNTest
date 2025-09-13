@@ -342,30 +342,33 @@ def send_msg(message, counter):
     f"amount_msat=1",
     f"extratlvs={tlv_json}"]
 
-    try:
-        # Execute the command using shell=True to process the quotes correctly
+    while load_counter() == counter:
+        try:
+            # Execute the command using shell=True to process the quotes correctly
+                    
+            if not ln_checker.is_node_active(FUNDED_NODE_ID):
+                logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
+                print('Channel disconneted, retrying connection.')
+                fund_single_channel()
                 
-        if not ln_checker.is_node_active(FUNDED_NODE_ID):
-            logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
-            print('Channel disconneted, retrying connection.')
-            fund_single_channel()
-            
-        result = subprocess.run(command,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                check=True)
-        if result.returncode == 0:
-            print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
-            print(f"Response: {result.stdout}")
-            save_counter(counter + 1)  # Save the updated counter after a successful send
-        else:
-            print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-            logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-    except Exception as e:
-            print(f"Exception occurred while sending command: {e}")
-            logging.error(f"Exception occurred while sending command: {e}")
-            
+            result = subprocess.run(command,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True,
+                                    check=True)
+            if result.returncode == 0:
+                print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
+                print(f"Response: {result.stdout}")
+                save_counter(counter + 1)  # Save the updated counter after a successful send
+                return
+            else:
+                print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+                logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+        except Exception as e:
+                print(f"Exception occurred while sending command: {e}")
+                logging.error(f"Exception occurred while sending command: {e}\nRetrying . . .")
+        time.sleep(5)
+        
 def load_this_node ():
     global THIS_NODE 
     output = get_node_info()

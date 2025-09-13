@@ -81,6 +81,75 @@ def run_lightning_cli(command):
         logging.error(f"run_lightning_cli: Exception occurred: {e}")
         return None
 
+def main(max_active_nodes):
+    """
+    Main script loop.
+    """
+    logging.info("Starting node manager script...")
+
+    sleep_int = 1
+    attempt_max = 10
+
+    global INNOCENT_NODE_ID
+    global INNOCENT_NODE_ADDRESS 
+    global CC_ADDRESS_LIST
+    global MAX_PEERS
+    global MAX_ACTIVE_NODES
+    
+    # setting some important variables.
+    MAX_ACTIVE_NODES = max_active_nodes
+    MAX_PEERS = MAX_ACTIVE_NODES * 2
+
+    logging.warning(f'For node {HOST_NAME}, active nodes is {MAX_ACTIVE_NODES} and max peers is {MAX_PEERS}')
+
+    load_this_node() # retrieve vital information and wait for node to sync
+
+    for attempt in range(attempt_max):
+        try:
+            with open('innocentAddress.txt', 'r') as address_file:
+                INNOCENT_NODE_ADDRESS = address_file.read().strip()
+            with open('innocentID.txt', 'r') as id_file:
+                INNOCENT_NODE_ID = id_file.read().strip()
+
+            with open('CC_address_list.txt', 'r') as id_file:
+                CC_ADDRESS_LIST = id_file.read().strip()
+            
+            BLACKLISTED_NODES = {INNOCENT_NODE_ID}
+            logging.info(f"Found Innocent node at {INNOCENT_NODE_ADDRESS}")
+            break
+        except Exception as e:
+            logging.error(f"Error loading the files: {e}")
+
+        if attempt >= attempt_max - 1:
+            logging.error(f"Cant find innocent node file after {attempt_max} tries. CATASTROPHIC ERROR")
+            return
+
+        logging.info(f"Can't find required files. Retrying in {sleep_int} seconds")
+        time.sleep(sleep_int)
+
+    balance_counter = 0
+    connect_to_innocent()
+
+    while ln_checker.has_channel_with(INNOCENT_NODE_ID) or not channels_created or balance_counter == 0:
+        try:
+            create_channels()
+            if balance_counter >= CHANNEL_BALANCE_COUNTER:
+                balance_counter = 0
+                # check_channel_states()
+                if check_outbound_channels():
+                    fund_innocent_channel()
+                ln_checker.balance_all_channels()
+            # logging.info("main: Sleeping for 10 seconds.")
+            time.sleep(1)
+            balance_counter += 1
+        except KeyboardInterrupt:
+            logging.info("main: Script terminated by user.")
+            break
+        except Exception as e:
+            logging.error(f"main: An error occurred in the main loop: {e}")
+            time.sleep(5)
+    logging.info(f'Node has finished creating connections. Exiting out of CC_manager.')
+
 def get_node_info():
     """
     Retrieve node information, including its ID.
@@ -103,7 +172,7 @@ def connect_to_innocent():
         logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
         run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
     # logging.info(f"Inno node peers are {run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])}")
-    time.sleep(25)
+    time.sleep(0)
 
 def fund_innocent_channel():
     global innocent_channel_closed
@@ -800,75 +869,6 @@ def remove_outbound_channel(node_id):
     if not ln_checker.has_channel_with(node_id):
         outbound_channels = outbound_channels - {node_id}
     
-
-def main(max_active_nodes):
-    """
-    Main script loop.
-    """
-    logging.info("Starting node manager script...")
-
-    sleep_int = 1
-    attempt_max = 10
-
-    global INNOCENT_NODE_ID
-    global INNOCENT_NODE_ADDRESS 
-    global CC_ADDRESS_LIST
-    global MAX_PEERS
-    global MAX_ACTIVE_NODES
-    
-    # setting some important variables.
-    MAX_ACTIVE_NODES = max_active_nodes
-    MAX_PEERS = MAX_ACTIVE_NODES * 2
-
-    logging.warning(f'For node {HOST_NAME}, active nodes is {MAX_ACTIVE_NODES} and max peers is {MAX_PEERS}')
-
-    load_this_node() # retrieve vital information and wait for node to sync
-
-    for attempt in range(attempt_max):
-        try:
-            with open('innocentAddress.txt', 'r') as address_file:
-                INNOCENT_NODE_ADDRESS = address_file.read().strip()
-            with open('innocentID.txt', 'r') as id_file:
-                INNOCENT_NODE_ID = id_file.read().strip()
-
-            with open('CC_address_list.txt', 'r') as id_file:
-                CC_ADDRESS_LIST = id_file.read().strip()
-            
-            BLACKLISTED_NODES = {INNOCENT_NODE_ID}
-            logging.info(f"Found Innocent node at {INNOCENT_NODE_ADDRESS}")
-            break
-        except Exception as e:
-            logging.error(f"Error loading the files: {e}")
-
-        if attempt >= attempt_max - 1:
-            logging.error(f"Cant find innocent node file after {attempt_max} tries. CATASTROPHIC ERROR")
-            return
-
-        logging.info(f"Can't find required files. Retrying in {sleep_int} seconds")
-        time.sleep(sleep_int)
-
-    balance_counter = 0
-    connect_to_innocent()
-
-    while ln_checker.has_channel_with(INNOCENT_NODE_ID) or not channels_created or balance_counter == 0:
-        try:
-            create_channels()
-            if balance_counter >= CHANNEL_BALANCE_COUNTER:
-                balance_counter = 0
-                # check_channel_states()
-                if check_outbound_channels():
-                    fund_innocent_channel()
-                ln_checker.balance_all_channels()
-            # logging.info("main: Sleeping for 10 seconds.")
-            time.sleep(1)
-            balance_counter += 1
-        except KeyboardInterrupt:
-            logging.info("main: Script terminated by user.")
-            break
-        except Exception as e:
-            logging.error(f"main: An error occurred in the main loop: {e}")
-            time.sleep(5)
-    logging.info(f'Node has finished creating connections. Exiting out of CC_manager.')
 
 def load_this_node ():
     """

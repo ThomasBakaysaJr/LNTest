@@ -10,7 +10,7 @@ BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"   #Change this to
 echo "Stopping and removing containers..."
 docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker stop
 docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker rm
-echo "Clearning out shared memory..."
-# rm /dev/shm/CC*
+echo "Cleaning out shared memory..."
+rm -f /dev/shm/CC* # forced so that the script doesn't fail if it successfully wiped the shm links
 
 echo "Nodes killed."

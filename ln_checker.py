@@ -325,7 +325,7 @@ def write_state(data):
     '''
     Write the state to a shared memory buffer.
     '''
-    block_size = 2048 # give ourselves a little wiggle room (each status can get to roughly 1.5KB)
+    block_size = 5012 # give ourselves a little wiggle room (each status can get to roughly 1.5KB)
     status = json.dumps(data).encode('utf-8')
 
     if len(status) >= block_size:

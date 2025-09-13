@@ -3,6 +3,7 @@ time_data*
 runtime_data.csv
 topology*
 Backup_data/
+data/*
 BotMasterComms/*
 !BotMasterComms/BM.py
 Dockerfile

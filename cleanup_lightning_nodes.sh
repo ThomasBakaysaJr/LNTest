@@ -9,7 +9,7 @@ BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"   #Change this to
 # Stop and remove all containers
 echo "Stopping and removing containers..."
 docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker stop
-docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker rm
+docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker rm -v
 
 # Remove all associated directories
 echo "Removing directories and logs..."
@@ -22,9 +22,7 @@ rm -f $BASE_DIR/BotMasterComms/funded_node.txt
 rm -f $BASE_DIR/BotMasterComms/CC_address_list.txt
 rm -rf $BASE_DIR/NodeManagerComms/logs/cc_log*
 rm -rf $BASE_DIR/NodeManagerComms/logs/noise_log*
-rm -rf $BASE_DIR/NodeManagerComms/status/cc_currentMessage*
-rm -rf $BASE_DIR/NodeManagerComms/status/cc_messageLog_*
-rm -rf $BASE_DIR/NodeManagerComms/status/status_CC*
+rm -rf $BASE_DIR/NodeManagerComms/status/*
 rm -f $BASE_DIR/NodeManagerComms/CC_address_list.txt
 
 echo "Cleanup complete."
