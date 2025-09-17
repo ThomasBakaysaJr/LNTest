@@ -98,10 +98,8 @@ def main(starting_cc_num, starting_active_node_num, mode):
     
     if mode == '1':
         test_cc_iteration(starting_active_node_num, starting_cc_num, CC_ITERATION_NUM_MAX)
-        kill_nodes()
     elif mode == '2':
         test_active_nodes_iteration(50, starting_active_node_num, ACTIVE_NODES_MAX_NUM)
-        kill_nodes()
     elif mode == '3':
         MAX_MESSAGES = 10
         test_cc_iteration(4, 1, 1)
@@ -110,8 +108,8 @@ def main(starting_cc_num, starting_active_node_num, mode):
         test_active_nodes_iteration(ACTIVE_NODES_NUM_CC, ACTIVE_NODES_MIN_NUM, ACTIVE_NODES_MAX_NUM)
         test_cc_iteration(CC_ITERATION_NUM_ACTIVE_NODES, CC_ITERATION_MIN_NUM, CC_ITERATION_NUM_MAX)
 
-    print(f'Testing finished. Exiting.')
     kill_nodes()
+    print(f'Testing finished. Exiting.')
 
 def test_cc_iteration(active_nodes, starting_iteration, end):
     '''
@@ -123,8 +121,8 @@ def test_cc_iteration(active_nodes, starting_iteration, end):
     mode = '1'
     starting_iteration = int(starting_iteration)
     for iteration in range(starting_iteration, end + 1):
+        cleanup_shm()
         init_bitcoin_server()
-        kill_nodes()
         success = False
         total_nodes = iteration * 10
         total_nodes += total_nodes % int(active_nodes)
@@ -203,8 +201,8 @@ def test_active_nodes_iteration(num_cc, active_nodes_start, active_nodes_end):
         starting_iteration = 1
 
     for active_nodes in range(starting_iteration, active_nodes_end + 1):
+        cleanup_shm()
         init_bitcoin_server()
-        kill_nodes()
         success = False
         total_nodes = num_cc
         total_nodes += active_nodes - (total_nodes % int(active_nodes))
@@ -274,6 +272,7 @@ def init_bitcoin_server():
     and restart the bitcoinminer as well.
     '''
     stop_bitcoinminer()
+    time.sleep(0.5)
     restart_bitcoind()
     
     balance = 0.0
@@ -483,9 +482,7 @@ def kill_nodes():
     Cleanup nodes and unlink the shared memory
     '''
     cleanup_shm()
-    subprocess.run(
-        [KILL_NODES_BASH]
-    )
+    subprocess.run([KILL_NODES_BASH])
 
 def restart_bitcoind():
     '''
@@ -673,7 +670,8 @@ def cleanup_shm():
             shm = shared_memory.SharedMemory(name=node_name)
             shm.unlink()
         except Exception as e:
-            print(f'cleanup_shm: ERROR in cleaning up memory. Error: {e}')
+            pass
+            # print(f'cleanup_shm: ERROR in cleaning up memory. Error: {e}')
 
 def fund_nodes():
     try:

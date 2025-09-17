@@ -35,8 +35,8 @@ CC_ADDRESS_LIST = None
 BLACKLISTED_NODES = {}# Nodes blacklisted for fundchannel
 
 outbound_channels = set()
-innocent_channel_closed = False
-channels_created = False
+INNOCENT_CHANNEL_CLOSED = False
+CHANNELS_CREATED = False
 # for channels that need to restart
 CHANNEL_OPENING_TIMES = {}
 
@@ -102,7 +102,9 @@ def main(max_active_nodes):
 
     logging.warning(f'For node {HOST_NAME}, active nodes is {MAX_ACTIVE_NODES} and max peers is {MAX_PEERS}')
 
-    load_this_node() # retrieve vital information and wait for node to sync
+    if not load_this_node(): # retrieve vital information and wait for node to sync, also determine if this node should do anything
+        logging.warning(f'Node tried to start with saturated nodes. Aborting start.')
+        return
 
     for attempt in range(attempt_max):
         try:
@@ -130,7 +132,7 @@ def main(max_active_nodes):
     balance_counter = 0
     connect_to_innocent()
 
-    while ln_checker.has_channel_with(INNOCENT_NODE_ID) or not channels_created or balance_counter == 0:
+    while ln_checker.has_channel_with(INNOCENT_NODE_ID) or not CHANNELS_CREATED or balance_counter == 0:
         try:
             create_channels()
             if balance_counter >= CHANNEL_BALANCE_COUNTER:
@@ -161,22 +163,22 @@ def connect_to_innocent():
     """
     Connect to the Innocent node but do not fund a channel
     """
-    global channels_created
-    global innocent_channel_closed
+    global CHANNELS_CREATED
+    global INNOCENT_CHANNEL_CLOSED
 
     # the innocent channel was closed, we shouldn't open it again
-    if innocent_channel_closed:
+    if INNOCENT_CHANNEL_CLOSED:
         return
 
     if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
         logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
         run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
     # logging.info(f"Inno node peers are {run_lightning_cli(['listchannels', 'null', INNOCENT_NODE_ID])}")
-    time.sleep(0)
+    time.sleep(20)
 
 def fund_innocent_channel():
-    global innocent_channel_closed
-    global channels_created
+    global INNOCENT_CHANNEL_CLOSED
+    global CHANNELS_CREATED
     
 
     if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
@@ -184,7 +186,7 @@ def fund_innocent_channel():
         run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
 
     # Check if we already have a channel with the Innocent Node
-    if not channels_created:
+    if not CHANNELS_CREATED:
         # Calculate funding amount based on the discovery rule
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
 
@@ -207,8 +209,8 @@ def fund_innocent_channel():
                 result = run_lightning_cli(["fundchannel", INNOCENT_NODE_ID, str(funding_amount)])
                 logging.info(f'Channel created with innocent node. Stopping channel creation.')
                 if result:
-                    innocent_channel_closed = False
-                    channels_created = True # we are done creating channels
+                    INNOCENT_CHANNEL_CLOSED = False
+                    CHANNELS_CREATED = True # we are done creating channels
         except Exception as e:
             logging.error(f"Funding failed: {e}")
 
@@ -216,10 +218,10 @@ def close_and_disconnect_innocent():
     """
     Close the channel with the Innocent node and disconnect.
     """
-    global innocent_channel_closed
+    global INNOCENT_CHANNEL_CLOSED
     if not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
         logging.warning('close_and_disconnect_innocent: Tried to disconnect/close with inno node when already disconnected/closed')
-        innocent_channel_closed = True
+        INNOCENT_CHANNEL_CLOSED = True
         return
     
     try:
@@ -227,7 +229,7 @@ def close_and_disconnect_innocent():
         run_lightning_cli(["close", f"id={INNOCENT_NODE_ID}"])
         logging.info(f"Disconnecting from Innocent Node: {INNOCENT_NODE_ID}")
         run_lightning_cli(["disconnect", INNOCENT_NODE_ID])    
-        innocent_channel_closed = True
+        INNOCENT_CHANNEL_CLOSED = True
     except Exception as e:
         logging.warning(f'close_and_disconnect_innocent: Error {e}')
     
@@ -385,7 +387,7 @@ def demoGetAddressAndConnect(node_ID):
 #     This should happen organically as nodes come online, since once we have the max channels we
 #     disconnect from the innocent node. Checks and failsafes make sure this is the case.
 #     """
-#     global innocent_channel_closed
+#     global INNOCENT_CHANNEL_CLOSED
 #     global outbound_channels
 #     global CHANNEL_OPENING_TIMES
 #     # logging.info("create_channels: Starting channel creation process.")
@@ -406,7 +408,7 @@ def demoGetAddressAndConnect(node_ID):
         
 #         extra_channels = len(peers_with_channels_excl_innocent)  - MAX_PEERS # in case we went over the limit
         
-#         if not innocent_channel_closed:
+#         if not INNOCENT_CHANNEL_CLOSED:
 #             logging.info("create_channels: Max channels reached. Disconnecting from innocent node.")
 #             close_and_disconnect_innocent()
 #             return
@@ -426,10 +428,10 @@ def demoGetAddressAndConnect(node_ID):
 #                 return
 
 #     # checks for outbound connections. Each node should only make MAX_ACTIVE_NODES connections out
-#     if len(outbound_channels) >= MAX_ACTIVE_NODES and not innocent_channel_closed: # CHANGE: we don't care about outbound nodes right now
+#     if len(outbound_channels) >= MAX_ACTIVE_NODES and not INNOCENT_CHANNEL_CLOSED: # CHANGE: we don't care about outbound nodes right now
 #         logging.info("create_channels: Max outbound channels reached, no more channels will be created. Still connected to innocent node")
 #         return
-#     elif len(peers_with_channels_excl_innocent) < MAX_PEERS and innocent_channel_closed: # CHANGE: this was an elif before
+#     elif len(peers_with_channels_excl_innocent) < MAX_PEERS and INNOCENT_CHANNEL_CLOSED: # CHANGE: this was an elif before
 #         logging.info(f'create_channels: Number of channels ({len(peers_with_channels_excl_innocent)}) below threshold, re-opening channel to innocent node.')
 #         connect_to_innocent()
 
@@ -447,7 +449,7 @@ def demoGetAddressAndConnect(node_ID):
 #         if len(peers_with_channels_excl_innocent) >= MAX_PEERS:
 #             logging.info("create_channels: Reached maximum peers with channels while processing nodes.")
 #             # Close the channel with the Innocent node and disconnect
-#             if not innocent_channel_closed:
+#             if not INNOCENT_CHANNEL_CLOSED:
 #                 close_and_disconnect_innocent()
 #             break
     
@@ -549,16 +551,16 @@ def create_channels():
     This should happen organically as nodes come online, since once we have the max channels we
     disconnect from the innocent node. Checks and failsafes make sure this is the case.
     """
-    global innocent_channel_closed
+    global INNOCENT_CHANNEL_CLOSED
     global outbound_channels
     global CHANNEL_OPENING_TIMES
     # logging.info("create_channels: Starting channel creation process.")
 
-    if is_max_inbound_channels() and not innocent_channel_closed:
+    if is_max_inbound_channels() and not INNOCENT_CHANNEL_CLOSED:
         logging.info(f'create_channels: We have reached incoming node saturation. Disconnecting from innocent node')
         close_and_disconnect_innocent()
         return
-    elif channels_created:
+    elif CHANNELS_CREATED:
         return
 
 
@@ -882,20 +884,23 @@ def load_this_node ():
     node_synced = False
     node_info = None
 
-    # logging.info(f'Waiting for node to sync with blockchain')
-    
-    # time.sleep(15)
+    logging.info(f'Waiting for node to sync with blockchain')
 
-    # while not node_synced:
-    #     output = run_lightning_cli(['getinfo'])
-    #     node_info = json.loads(output) if output else None
+    while not node_synced:
+        output = run_lightning_cli(['getinfo'])
+        node_info = json.loads(output) if output else None
 
-    #     if node_info and ln_checker.check_blockchain_height(node_info.get('blockheight')):
-    #         node_synced = True
-    #     else:
-    #         time.sleep(1)
+        if node_info and ln_checker.check_blockchain_height(node_info.get('blockheight')):
+            node_synced = True
+        else:
+            time.sleep(1)
     
-    # logging.info(f'Node has synced successfully.')
+    if len(list_peers_with_channels()) >= MAX_PEERS:
+        close_and_disconnect_innocent()
+        return False
+
+    logging.info(f'Node has synced successfully.')
+    return True
 
 
 if __name__ == "__main__":
