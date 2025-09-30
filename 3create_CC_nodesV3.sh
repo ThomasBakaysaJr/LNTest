@@ -3,18 +3,15 @@
 
 set -e
 
-BITCOIND_RPC="http://bitcoinuser:bitcoinpassword@127.0.0.1:8332"
+source config.env
 
 # Base directories for lightning and Bitcoin
-BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot" # Change this to the directory accordingly to your setup
-LIGHTNING_DIR="/home/thomas/.lightning"
-BITCOIN_DIR="/home/thomas/.bitcoin"
-PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"
-STARTUP_SCRIPT="$BASE_DIR/node_start.sh"
+PLUGIN_SCRIPT="$LNBOT_DIR/bootstrap.sh"
+STARTUP_SCRIPT="$LNBOT_DIR/node_start.sh"
 
 # Directories for NodeManagerComms and BotMasterComms
-NODE_MANAGER_DIR="$BASE_DIR/NodeManagerComms"
-BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
+NODE_MANAGER_DIR="$LNBOT_DIR/NodeManagerComms"
+BOT_MASTER_DIR="$LNBOT_DIR/BotMasterComms"
 
 # Address list files for NodeManagerComms and BotMasterComms
 NODE_MANAGER_ADDRESS_LIST="$NODE_MANAGER_DIR/CC_address_list.txt"
@@ -36,7 +33,7 @@ else
 fi
 
 # ln_checker file
-LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
+LN_CHECKER_FILE="$LNBOT_DIR/ln_checker.py"
 
 # Ensure bootstrap script is executable
 chmod +x $PLUGIN_SCRIPT
@@ -72,7 +69,7 @@ curl -s --user bitcoinuser:bitcoinpassword \
 # Function to create a node
 create_node() {
     NODE_NAME=$1
-    NODE_LIGHTNING_DIR="$BASE_DIR/lightning-$NODE_NAME"
+    NODE_LIGHTNING_DIR="$LNBOT_DIR/lightning-$NODE_NAME"
     NODE_PORT=$2
     NODE_GRPC_PORT=$3
     NUM_ACTIVE_NODES=$4

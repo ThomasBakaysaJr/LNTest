@@ -4,17 +4,16 @@
 set -e
 
 # Base directories for lightning and Bitcoin
-BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"    #Change this to the directory accordingly to your setup
-LIGHTNING_DIR="/home/thomas/.lightning"
-BITCOIN_DIR="/home/thomas/.bitcoin"
-PLUGIN_SCRIPT="$BASE_DIR/bootstrap.sh"
+source config.env
+
+PLUGIN_SCRIPT="$LNBOT_DIR/bootstrap.sh"
 
 # Directory for BotMaster scripts
-BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
+BOT_MASTER_DIR="$LNBOT_DIR/BotMasterComms"
 BOT_MASTER_CONTAINER_DIR="/root/botmaster"
 
 # ln_checker file
-LN_CHECKER_FILE="$BASE_DIR/ln_checker.py"
+LN_CHECKER_FILE="$LNBOT_DIR/ln_checker.py"
 
 # Ensure bootstrap script is executable
 chmod +x $PLUGIN_SCRIPT
@@ -23,7 +22,7 @@ chmod +x $PLUGIN_SCRIPT
 create_botmaster_node() {
     NODE_NAME="BM"
     NODE_PORT=19848
-    NODE_LIGHTNING_DIR="$BASE_DIR/lightning-$NODE_NAME"
+    NODE_LIGHTNING_DIR="$LNBOT_DIR/lightning-$NODE_NAME"
 
     # Create a directory for the node
     mkdir -p $NODE_LIGHTNING_DIR

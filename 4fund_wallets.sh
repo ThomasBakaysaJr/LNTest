@@ -4,7 +4,7 @@
 set -e
 
 # RPC details for Bitcoin Core
-BITCOIND_RPC="http://bitcoinuser:bitcoinpassword@127.0.0.1:8332"
+source config.env
 
 # Discover all CC and BM containers dynamically
 CC_CONTAINERS=$(docker ps --filter "name=CC" --format "{{.Names}}")

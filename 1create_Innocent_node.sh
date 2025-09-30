@@ -4,15 +4,13 @@
 set -e
 
 # Base directories for lightning and Bitcoin 
-BASE_DIR="/home/thomas/Documents/LNBot_research_project/LNBot"    #Change this to the directory accordingly to your setup
-LIGHTNING_DIR="/home/thomas/.lightning"
-BITCOIN_DIR="/home/thomas/.bitcoin"
-BOOT_SCRIPT="$BASE_DIR/inno_bootstrap.sh"
+source config.env
 
 # Directories for NodeManagerComms and BotMasterComms
-NODE_MANAGER_DIR="$BASE_DIR/NodeManagerComms"
-BOT_MASTER_DIR="$BASE_DIR/BotMasterComms"
-INNO_MANAGER_DIR="$BASE_DIR/InnocentManager"
+NODE_MANAGER_DIR="$LNBOT_DIR/NodeManagerComms"
+BOT_MASTER_DIR="$LNBOT_DIR/BotMasterComms"
+INNO_MANAGER_DIR="$LNBOT_DIR/InnocentManager"
+BOOT_SCRIPT="$LNBOT_DIR/inno_bootstrap.sh"
 
 # Files to store the address and ID
 NODE_ADDRESS_FILE="$NODE_MANAGER_DIR/innocentAddress.txt"
@@ -23,7 +21,7 @@ BOT_ID_FILE="$BOT_MASTER_DIR/innocentID.txt"
 # Function to create the Innocent Node
 create_innocent_node() {
     NODE_NAME="InnocentNode"
-    NODE_LIGHTNING_DIR="$BASE_DIR/lightning-$NODE_NAME"
+    NODE_LIGHTNING_DIR="$LNBOT_DIR/lightning-$NODE_NAME"
     NODE_PORT=19847
 
     # Create a directory for the node

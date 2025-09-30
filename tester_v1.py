@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import time
 import subprocess
 import glob
@@ -9,9 +8,15 @@ import re
 import docker
 import sys
 import os
+from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
 import pandas as pd
+
+load_dotenv('config.env')
+
+BITCOIND_DIR = os.getenv('BITCOIND_PATH')
+BITCOIND_DATA_DIR = os.getenv('BITCOIN_DIR')
 
 BM_PATH = '/root/botmaster'
 BM_SCRIPT = 'BM.py'
@@ -278,7 +283,8 @@ def init_bitcoin_server():
     balance = 0.0
     while balance <= 0.0:
         time.sleep(5)
-        balance = subprocess.run(['/home/thomas/Documents/LNBot_research_project/bitcoin/bin/bitcoin-cli', '-regtest', 'getbalance'], capture_output=True)
+        balance = subprocess.run([BITCOIND_DIR, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
+        print(f'Balance is {balance.stdout} with stuff being {balance}')
         balance = balance.stdout.strip().decode()
         if balance == '':
             balance = 0
