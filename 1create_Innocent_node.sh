@@ -10,7 +10,6 @@ source config.env
 NODE_MANAGER_DIR="$LNBOT_DIR/NodeManagerComms"
 BOT_MASTER_DIR="$LNBOT_DIR/BotMasterComms"
 INNO_MANAGER_DIR="$LNBOT_DIR/InnocentManager"
-BOOT_SCRIPT="$LNBOT_DIR/inno_bootstrap.sh"
 
 # Files to store the address and ID
 NODE_ADDRESS_FILE="$NODE_MANAGER_DIR/innocentAddress.txt"
@@ -31,7 +30,6 @@ create_innocent_node() {
     docker run -d --restart unless-stopped --network host --name $NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
-        -v $BOOT_SCRIPT:/root/bootstrap.sh \
         -v $INNO_MANAGER_DIR:/root/ \
         elementsproject/lightningd:latest \
         --network=regtest \

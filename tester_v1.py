@@ -284,7 +284,6 @@ def init_bitcoin_server():
     while balance <= 0.0:
         time.sleep(5)
         balance = subprocess.run([BITCOIND_DIR, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
-        print(f'Balance is {balance.stdout} with stuff being {balance}')
         balance = balance.stdout.strip().decode()
         if balance == '':
             balance = 0

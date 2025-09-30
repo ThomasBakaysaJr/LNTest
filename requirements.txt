@@ -1,0 +1,4 @@
+docker_py==1.10.6
+pandas==2.3.3
+python-dotenv==1.1.1
+rich==14.1.0
