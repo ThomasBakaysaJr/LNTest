@@ -20,5 +20,4 @@ sudo -u $USER_NAME "$BITCOIND" -datadir="$BITCOIN_DIR"
 sleep 1
 sudo -u $USER_NAME "$BITCOIN_CLI" -datadir="$BITCOIN_DIR" --regtest createwallet ''
 
-export PATH="$BITCOIN_CORE_DIR:$PATH"
-python3 "$MINER_SCRIPT" "$RPC_USER" "$RPC_PASSWORD"
+python3 "$MINER_SCRIPT" "$RPC_USER" "$RPC_PASSWORD" "$BITCOIN_CLI"

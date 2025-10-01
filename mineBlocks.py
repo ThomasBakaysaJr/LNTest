@@ -5,11 +5,13 @@ import time
 import sys
 import subprocess
 
+BITCOIN_CLI = ''
+
 # Function to get a new address
 def get_new_address(user, password):
     try:
         address = subprocess.check_output(
-            f"bitcoin-cli -rpcuser={user} -rpcpassword={password} getnewaddress",
+            f"{BITCOIN_CLI} -rpcuser={user} -rpcpassword={password} getnewaddress",
             shell=True,
             text=True
         ).strip()
@@ -19,6 +21,8 @@ def get_new_address(user, password):
         return None
 
 def main(user, password):
+    if BITCOIN_CLI == '':
+        print(f'mineBlocks: Path to bitcoin-cli not available. Exiting.')
     # Get an initial valid address
     address = get_new_address(user, password)
     if not address:
@@ -28,9 +32,9 @@ def main(user, password):
     # Generate the required 100 blocks first then
     # Run the command every 2 seconds
     try:
-        command = [f"bitcoin-cli", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "201", f"{address}"]
+        command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "201", f"{address}"]
         while True:        
-            command = [f"bitcoin-cli", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "12", f"{address}"]
+            command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "12", f"{address}"]
             subprocess.run(command, stdout=subprocess.DEVNULL)
             # print("Command executed successfully.")
             time.sleep(5)  # Wait for 2 seconds
@@ -38,7 +42,19 @@ def main(user, password):
         print("\nProcess interrupted by user. Exiting...")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2:
+    if len(sys.argv) > 3:
+        BITCOIN_CLI = sys.argv[3]
         main(sys.argv[1], sys.argv[2])
+    if len(sys.argv) > 2:
+        print(f'mineBlocks: No path to bitcoin-cli given. attempting to load from config.env')
+        try:
+            import os
+            from dotenv import load_dotenv
+            load_dotenv('config.env')
+            BITCOIN_CLI = os.getenv('BITCOIND_PATH')
+            print(f'mineBlocks: Loading success. Starting bitcoin miner')
+            main(sys.argv[1], sys.argv[2])
+        except Exception as  e:
+            print(f'mineBlocks: ERROR: {e}')
     else:
         print(f'mineBlocks: ERROR: Not enough arguments. Please provide an rpc username and password for bitcoin-core')

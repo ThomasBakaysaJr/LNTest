@@ -5,8 +5,6 @@ set -e
 
 source config.env
 
-# Base directories for lightning and Bitcoin
-PLUGIN_SCRIPT="$LNBOT_DIR/bootstrap.sh"
 STARTUP_SCRIPT="$LNBOT_DIR/node_start.sh"
 
 # Directories for NodeManagerComms and BotMasterComms
@@ -35,8 +33,6 @@ fi
 # ln_checker file
 LN_CHECKER_FILE="$LNBOT_DIR/ln_checker.py"
 
-# Ensure bootstrap script is executable
-chmod +x $PLUGIN_SCRIPT
 
 # Function to fund a node's wallet
 fund_node() {
@@ -82,7 +78,6 @@ create_node() {
         -e CONTAINER_NAME=$NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
-        -v $PLUGIN_SCRIPT:/root/bootstrap.sh \
         -v $NODE_MANAGER_DIR:/root/nodemanager \
         -v $LN_CHECKER_FILE:/root/nodemanager/ln_checker.py \
         -v $STARTUP_SCRIPT:/root/nodemanager/node_start.sh \
@@ -92,11 +87,6 @@ create_node() {
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=$NODE_GRPC_PORT
-
-    # Run the bootstrap script inside the container
-    echo "Running BOOTSTRAP for $NODE_NAME..."
-    docker exec $NODE_NAME bash /root/bootstrap.sh
-    echo "Bootstrap for $NODE_NAME finished"
 
     # give the node some time to spin up before we try to fund it
     sleep 2

@@ -35,7 +35,6 @@ create_innocent_node() {
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=10010
-    docker exec $NODE_NAME bash /root/bootstrap.sh
     # echo "Starting REST server on innocent node"
     # docker exec $NODE_NAME python3 /root/REST_server.py &
 }
