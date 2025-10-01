@@ -841,6 +841,8 @@ mode = 1: Test iterations of number of CC servers, starting at starting_cc_numbe
 mode = 2: Test iterations of number of active nodes, starting at starting_active nodes and stopping at 6
 mode = 3: Test mode 1 and 2 with only 12 CC nodes, 10 messages, 4 active nodes. Use to quickly test script behavior.
 mode = 4: Full testing.
+
+NOTE: starting_cc_number is in multiples of 10 i.e. 1 = 10 starting CC nodes
 '''
 
     if len(sys.argv) > 3:
