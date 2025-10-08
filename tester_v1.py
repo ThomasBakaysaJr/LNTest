@@ -836,7 +836,7 @@ if __name__ == "__main__":
     warning_text = '''
 Invalid arguments. tester_v1 starting_cc_number starting_active_nodes mode
 mode = 0: no testing.   with arguments 0 0, print topology and message progress;
-                        with arguements 0 1 save the current topology as a json file 
+                        with arguments 0 1 save the current topology as a json file 
 mode = 1: Test iterations of number of CC servers, starting at starting_cc_number (will be mult. by 10) and stopping at 100 
 mode = 2: Test iterations of number of active nodes, starting at starting_active nodes and stopping at 6
 mode = 3: Test mode 1 and 2 with only 12 CC nodes, 10 messages, 4 active nodes. Use to quickly test script behavior.

@@ -25,7 +25,6 @@ with open('CC_address_list.txt', 'r') as id_file:
 
 DISCOVERY_RULE_DIVISOR = 19  # Discovery rule divisor
 BM_CONNECTED_NODES = set()  # To track already connected nodes
-MAX_BM_CHANNELS = 1  # Maximum number of channels BM can fund
 UNIQUE_FUNDING_AMOUNT = 12312300  # A fixed, unrelated amount for BM funding
 COUNTER_FILE = "counter.txt"  # File to store the counter
 FUNDED_NODE_FILE = "funded_node.txt"
@@ -33,8 +32,10 @@ AUTO_TEST_COUNT = 10 # How many commands for auto_test, default is 100
 
 THIS_NODE = None
 
+RETRY_MAX = 3
+
 # Global variable for the node BM funded a channel with
-FUNDED_NODE_ID = None
+FUNDED_NODE_IDS = []
 # The TLV record type used for standard text messages in keysend.
 MESSAGE_TLV_TYPE = "34349334"
 
@@ -223,83 +224,170 @@ def discover_cc_nodes():
 
         return valid_nodes
     except Exception as e:
-            logging.error(f"demoGetAddressAndConnect: Exception occurred: {e}")
+            logging.error(f"discover_cc_nodes: Exception occurred: {e}")
             return set()
 
 
-def fund_single_channel():
-    """
-    Discover a valid CC node and fund a channel with it.
-    """
-    global FUNDED_NODE_ID
+def fund_channels(num_channels = 1, entry_point = -1.0):
+    '''
+    Discover valid CC nodes and fund channels.
+    Parameters:
+        num_channels: number of channels to create (default is 1)
+        entry_point: percentage of where in the network to make these channels.
+                    negative = random, 0 = first nodes, 1 = last nodes. (default is -1.0)
+    '''
+    # Load funded nodes if we have this saved
+    funded_nodes = []
 
-    # Check if we have this saved already
-    if os.path.exists(FUNDED_NODE_FILE):
-        logging.info(f'Found funded node file, loading.')
-        with open(FUNDED_NODE_FILE, 'r') as file:
-            FUNDED_NODE_ID = file.read().strip()
-        # make sure we have a open channel with this node
-        if ln_checker.has_channel_with(FUNDED_NODE_ID):
-            logging.info(f"Channel found from \n{THIS_NODE}\nto\n{FUNDED_NODE_ID}")
-            return
-        else:
-            # IF NO channel is found, continue and lets find a different node (or just fund this one)
-            logging.info(f"Channel NOT FOUND from\n{THIS_NODE}\nto\n{FUNDED_NODE_ID}")
-            FUNDED_NODE_ID = None
-    else:
-        logging.info(f'No funded file found, finding node to connect to.')
-
-    if len(BM_CONNECTED_NODES) >= MAX_BM_CHANNELS:
-        logging.info(f"Maximum BM channels ({MAX_BM_CHANNELS}) reached. Skipping funding.")
+    if len(funded_nodes) == num_channels:
         return
-
+    elif len(funded_nodes) > num_channels:
+        logging.debug(f'fund_channels: Loaded {len(funded_nodes)} nodes when {num_channels} is required. Disconnecting {num_channels - len(funded_nodes)} nodes.')
+        # something something disconnect additional nodes here
+        return
+    
+    # if we get to this point, then we need additional nodes to channel to, or we just haven't channeled to any
+    # same behavior either way
     valid_cc_nodes = discover_cc_nodes()
     while not valid_cc_nodes:
-        logging.info("No valid CC nodes found for funding. Retrying")
+        logging.info("No valid CC nodes found for funding. Retrying in 10 seconds")
         time.sleep(10)
         valid_cc_nodes = discover_cc_nodes()
 
-    # Pick one node to fund a channel with
-    valid_cc_nodes = list(valid_cc_nodes)
-    random.shuffle(valid_cc_nodes)
-    target_node = valid_cc_nodes[0]
 
-    # Ensure the target is not the Innocent node (extra safeguard)
-    if target_node == INNOCENT_NODE_ID:
-        logging.error("Attempt to fund a channel with Innocent node detected! Aborting.")
-        return
+    valid_cc_nodes = valid_cc_nodes - INNOCENT_NODE_ID # this should eliminate the inno node from being a possible selection
+    valid_cc_nodes = valid_cc_nodes - funded_nodes # make sure we're eliminating nodes we've already funded
 
-    # Retrieve the address and port for the target node
-    # Uncomment this for TESTNET/MAINNET
-    # address, port = get_node_address(target_node)
-    # if not address or not port:
-    #     logging.error(f"Could not retrieve address or port for node {target_node}. Skipping.")
-    #     return
+    for retry_count in range(RETRY_MAX):
+        new_nodes = pick_nodes(num_channels, entry_point, valid_cc_nodes)
+    
+        for node in new_nodes:
 
-    # Connect to the target node (Uncomment for TESTNET/MAINNET)
-    # logging.info(f"Connecting to node {target_node} at {address}:{port}.")
-    # run_lightning_cli(["connect", f"{target_node}@{address}:{port}"])
+            # first check if we have a channel with this node, if we do, then we can skip everything
+            if ln_checker.has_channel_with(node):
+                logging.warning(f'fund_channels: Trying to fund a channel with {node} but channel already exists.')
+                funded_nodes.append(node)
+                continue
 
-    #this will allow the CCs to connect to each other by themselves instead of having to mesh connect before hand
-    if not FUNDED_NODE_ID:
-        demoGetAddressAndConnect(target_node)
+            # no channel with the node
+            demoGetAddressAndConnect(node)
+            logging.info(f"fund_channels: Funding channel with node {node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
+            ln_checker.check_funds()
+            run_lightning_cli(["fundchannel", node, str(UNIQUE_FUNDING_AMOUNT)])
+            logging.info(f'funds_channels: Funding channel with {node}')
+            # make sure channel is ready to receive
+            ln_checker.wait_node_activated(node)
+
+            if not ln_checker.has_channel_with(node):
+                logging.error(f'fund_channels: ERROR: Could not connect to node.')
+                print(f'Error: Could not open channel with {node}')
+                continue
+            else:
+                print(f'Successfully opened channel with {node}')
+                logging.info(f'Successfully opened channel with {node}')
+                funded_nodes.append(node)
         
-        logging.info(f"Funding channel with node {target_node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
-        ln_checker.check_funds()
-        run_lightning_cli(["fundchannel", target_node, str(UNIQUE_FUNDING_AMOUNT)])
-    print(f'Funding channel with {target_node}')
-    # make sure channel is ready to receive
-    ln_checker.wait_node_activated(target_node)
+        # check to see if we channeled with the correct number of nodes (get out if we have)
+        if len(funded_nodes) == num_channels:
+            print(f'BM node has channeled with {num_channels} nodes successfully.')
+            logging.info(f'fund_channels: BM node has channeled with {num_channels} nodes successfully.')
+            break
+    
+    if len(funded_nodes) != num_channels:
+        print(f'BM has failed to channel with {num_channels} nodes. Aborting')
+        logging.error(f'fund_channels: Only channels with {len(funded_nodes)} instead of {num_channels} nodes. Returning None')
+        return None
+    else:
+        return funded_nodes
 
-    if not ln_checker.has_channel_with(target_node):
-        print(f'Could not connect to node.')
-        return
+def pick_nodes(num_nodes, entry_point, valid_nodes):
+    '''
+    Pick num_nodes nodes from a set of nodes,
+    using entry_point as a guide of where to pick the nodes.
+    '''
+    if num_nodes > len(valid_nodes):
+        logging.error(f'pick_nodes: Trying to select more nodes than exists in valid nodes. Aborting.')
+        return None
+    
+    # cap entry points or return random nodes if its negative
+    if entry_point < 0:
+        return pick_random_nodes(num_nodes, valid_nodes)
+    elif entry_point > 1.0:
+        entry_point = 1.0
+        logging.error(f'pick_nodes: ERROR: Entry point has value {entry_point} which is above the max of 1.0. Setting to 1.0')
 
-    logging.info(f'Connected to {target_node}.')
-    BM_CONNECTED_NODES.add(target_node)
-    FUNDED_NODE_ID = target_node  # Save the funded node ID
+    starting_ind = round(len(valid_nodes) * entry_point)
+
+    # get how many nodes from the 'center' node do we look for
+    deviation = (num_nodes - 1) // 2
+    left = deviation
+    right = deviation
+    if num_nodes % 2 == 0:
+        # if its even
+        right += 1
+
+    # Make sure we're not out of bounds
+    if (margin := starting_ind - left) < 0:
+        right += abs(margin)
+        left += margin
+    # keeping in mind, starting ind of 0
+    elif (margin := (len(valid_nodes) - 1) - (starting_ind + right)) < 0:
+        left += abs(margin)
+        right += margin
+
+    # we return the slice of nodes to connect to
+    return valid_nodes[starting_ind - left: starting_ind + right + 1]
+
+def pick_random_nodes(num_nodes, valid_nodes):
+    '''
+    Pick num_nodes random nodes from a set of nodes.
+    Returns a set.
+    '''
+    return random.sample(valid_nodes, num_nodes)
+    
+
+def save_funded_nodes(nodes):
+    '''
+    Save the funded nodes into a file. 
+    Comma delineated.
+    '''
+    nodes_text = ",".join(nodes)
+
     with open(FUNDED_NODE_FILE, 'w') as file:
-        file.write(target_node)
+        file.write(nodes_text)
+    
+    logging.debug(f'save_funded_nodes: Funded nodes saved')
+
+
+def load_funded_nodes() -> list:
+    '''
+    Load the funded nodes from a file.
+    '''
+    funded_nodes = []
+    if os.path.exists(FUNDED_NODE_FILE):
+        # load funded nodes from the saved text file, which should be comma delineated
+        logging.info(f'Found funded node file, loading.')
+        try:
+            with open(FUNDED_NODE_FILE, 'r') as file:
+                file_output = file.read().strip()
+                funded_nodes = file_output.split(',')
+                logging.debug(f'load_funded_nodes: Funded nodes are {funded_nodes}')
+        except Exception as e:
+            # something wrong happened, log it and return an empty array
+            logging.error(f'load_funded_nodes: ERROR: {e}')
+            return []
+        # we check if we have a channel with each of these nodes
+        verified_nodes = []
+        for node in funded_nodes:
+            if ln_checker.has_channel_with(node):
+                verified_nodes.append(node)
+            else:
+                logging.warning(f'load_funded_nodes: Warning: Node {node} is saved but BM has no channel with it.')
+        funded_nodes = verified_nodes
+    else:
+        logging.debug(f'load_funded_nodes: No files found at {FUNDED_NODE_FILE}.')
+
+    return funded_nodes
 
 def interactive_command_sender():
     """
@@ -332,13 +420,13 @@ def send_msg(message, counter):
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
     # amount = 5  # Minimal msat for sending a message
 
-    # check to make sure FUNDED_NODE_ID exists
-    while not FUNDED_NODE_ID:
+    # check to make sure FUNDED_NODE_IDS exists
+    while not FUNDED_NODE_IDS:
         fund_single_channel()
 
     # Construct the lightning-cli command
     command = ["lightning-cli", "--regtest", "keysend",
-    f"destination={FUNDED_NODE_ID}",
+    f"destination={FUNDED_NODE_IDS}",
     f"amount_msat=1",
     f"extratlvs={tlv_json}"]
 
@@ -346,8 +434,8 @@ def send_msg(message, counter):
         try:
             # Execute the command using shell=True to process the quotes correctly
                     
-            if not ln_checker.is_node_active(FUNDED_NODE_ID):
-                logging.info(f'No active channel with {FUNDED_NODE_ID} - finding new active channel')
+            if not ln_checker.is_node_active(FUNDED_NODE_IDS):
+                logging.info(f'No active channel with {FUNDED_NODE_IDS} - finding new active channel')
                 print('Channel disconneted, retrying connection.')
                 fund_single_channel()
                 
@@ -357,13 +445,13 @@ def send_msg(message, counter):
                                     text=True,
                                     check=True)
             if result.returncode == 0:
-                print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_ID} successfully.")
+                print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_IDS} successfully.")
                 print(f"Response: {result.stdout}")
                 save_counter(counter + 1)  # Save the updated counter after a successful send
                 return
             else:
-                print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
-                logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_ID}: {result.stderr}")
+                print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
+                logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
         except Exception as e:
                 print(f"Exception occurred while sending command: {e}")
                 logging.error(f"Exception occurred while sending command: {e}\nRetrying . . .")
@@ -384,7 +472,7 @@ def main(goal, message):
     logging.info("Funding single channel")
     # Fund a single channel with a valid CC node
     fund_single_channel()
-    if not FUNDED_NODE_ID:
+    if not FUNDED_NODE_IDS:
         print("No node has been funded yet. Retrying.")
         fund_single_channel()
     # Allow interactive command sending
@@ -394,10 +482,8 @@ def main(goal, message):
         counter = load_counter()
         send_msg(message, counter)
 
-
-
-
 if __name__ == "__main__":
+    # add an option to take in "clear" to disconnect all channels and start fresh
     if len(sys.argv) > 1:
         main(2, sys.argv[1])
     else:
