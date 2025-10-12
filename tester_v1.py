@@ -7,13 +7,11 @@ import csv
 import json
 import re
 import docker
-import sys
 import shlex
 import os
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
-import pandas as pd
 
 load_dotenv('config.env')
 
