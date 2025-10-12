@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import time
 import subprocess
 import glob
@@ -7,6 +8,7 @@ import json
 import re
 import docker
 import sys
+import shlex
 import os
 from dotenv import load_dotenv
 from datetime import datetime
@@ -27,9 +29,9 @@ STATUS_JSON_PREFIX = 'status/status_CC*'
 
 DATA_DIR = 'data/'
 
-TIMES_CSV = 'time_data_'
-RUNTIMES_CSV = 'runtime_data.csv'
-SETUPTIMES_CSV = 'setuptime_data.csv'
+TIMES_JSON = 'time_data.json'
+RUNTIMES_JSON = 'runtime_data.json'
+SETUPTIMES_JSON = 'setuptime_data.json'
 TOPO_JSON = 'topology_data.json'
 
 # scripts to use
@@ -43,6 +45,8 @@ BITCOIN_MINER_PY = 'mineBlocks.py'
 
 CC_TEST_PREFIX = f'{DATA_DIR}CC_ITERATION_'
 ACTIVE_NODE_TEST_PREFIX = f'{DATA_DIR}ACTIVE_NODE_ITERATION_'
+BM_CC_TEST_PREFIX = f'{DATA_DIR}BM_CC_ITERATION_'
+BM_POS_TEST_PREFIX = f'{DATA_DIR}BM_POS_ITERATION_'
 
 MASTER_LOG_PATH = ''
 COUNTER = 3 # index of the counter variable for time keeping
@@ -50,21 +54,32 @@ TIME = 0 # index of the time variable for time keeping
 
 CHANNEL_NORMAL = 'CHANNELD_NORMAL'
 
-# Variables that govern how much data to gather for full testing
-ACTIVE_NODES_MIN_NUM = 1 # For active node testing
-CC_ITERATION_MIN_NUM = 1 # For cc iteration testing
+# # Variables that govern how much data to gather for full testing
+# ACTIVE_NODES_MIN_NUM = 1 # For active node testing
+# CC_ITERATION_MIN_NUM = 1 # For cc iteration testing
 
 
-MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
-ACTIVE_NODES_NUM_CC = 50 # default is 50; number of CCs for active node tests
-CC_ITERATION_NUM_ACTIVE_NODES = 4 # default is 4; number of active nodes for CC tests
+# MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
+# ACTIVE_NODES_NUM_CC = 50 # default is 50; number of CCs for active node tests
+# CC_ITERATION_NUM_ACTIVE_NODES = 4 # default is 4; number of active nodes for CC tests
 
-# Variables for active node iteration tests
-ACTIVE_NODES_MAX_NUM = 6 # default is 6
-CC_ITERATION_NUM_MAX = 10 # each iteration increases the number of CC servers by 10
+# # constants for active node iteration tests
+# ACTIVE_NODES_MAX_NUM = 6 # default is 6
+# CC_ITERATION_NUM_MAX = 10 # each iteration increases the number of CC servers by 10
+
+# # constant for the botmaster instructions
+# BM_CC_VALUES = [1, 2, 4, 8]
+# BM_POS_VALUES = [0.0, 0.5, 1.0]
+
+# constant names for the variables we use
+TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
+NUM_CC = 'num_cc'
+ACTIVE_NODES = 'active_nodes'
+BM_CC = 'bm_cc'
+BM_POS = 'bm_pos'
 
 # Unless the script isn't working properly, best to leave these values alone
-MAX_WAIT = 900 # max wait for propagation before we move on (default = 300)
+MAX_WAIT = 450 # max wait for propagation before we move on (default = 450)
 WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
 FM_WAIT = 120 # how long to wait before trying to send the first message (to let the nodes create channels) (default = 120) #OUTDATED
@@ -73,7 +88,67 @@ SLEEP_CHANNEL_INTERVAL = 10
 
 DOCKER_CONTAINERS = set()
 
-def main(starting_cc_num, starting_active_node_num, mode):
+# configurations for the tests
+TEST_CONFIGS = {
+    '1' : {
+        'description': 'increasing number of C&C nodes',
+        'var_key' : NUM_CC,
+        'start': 10,
+        'range' : (100, 10),
+        'multiplier': 1,
+        'max_messages' : 100,
+        'parameters': {
+            NUM_CC: 10,
+            ACTIVE_NODES: 4,
+            BM_CC: 1,
+            BM_POS: 50
+        }
+    },
+    '2' : {
+        'description': 'increasing number of active nodes',
+        'var_key' : ACTIVE_NODES,
+        'start' : 1,
+        'range' : (6, 1),
+        'multiplier': 1,
+        'max_messages' : 100,
+        'parameters': {
+            NUM_CC: 50,
+            ACTIVE_NODES: 4,
+            BM_CC: 1,
+            BM_POS: 50
+        }
+    },
+    '3' : {
+        'description': 'increasing number of channels the botmaster makes',
+        'var_key' : BM_CC,
+        'start' : 1,
+        'range' : (8, 2),
+        'multiplier': 1,
+        'max_messages' : 100,
+        'parameters': {
+            NUM_CC: 50,
+            ACTIVE_NODES: 4,
+            BM_CC: 1,
+            BM_POS: 50
+        }
+    },
+    '4' : {
+        'description': 'different botmaster channel connection locations',
+        'var_key' : BM_POS,
+        'start' : 0,
+        'range' : (100, 50),
+        'multiplier': 1,
+        'max_messages' : 100,
+        'parameters': {
+            NUM_CC: 50,
+            ACTIVE_NODES: 4,
+            BM_CC: 1,
+            BM_POS: 0
+        }
+    }
+}
+
+def main():
     global MAX_MESSAGES
     '''
     Args:
@@ -82,71 +157,119 @@ def main(starting_cc_num, starting_active_node_num, mode):
         2 = number of active nodes iterations
     '''
 
-    if mode == '1':
-        print(f'Starting at {int(starting_cc_num) * 10} CC servers going to {CC_ITERATION_NUM_MAX * 10} CC servers with {starting_active_node_num} active nodes.')
-    elif mode == '2':
-        print(f'Starting at {starting_active_node_num} actives nodes and going to {ACTIVE_NODES_MAX_NUM} active nodes with {ACTIVE_NODES_NUM_CC} CC servers.')
-    elif mode == '3':
-        print(f'Starting small tester.')
-    elif mode =='4':
-        print(f'Starting full testing. All tests with {MAX_MESSAGES} messages.')
-        print(f'Then will start at {ACTIVE_NODES_MIN_NUM} active nodes and going to {ACTIVE_NODES_MAX_NUM} active nodes with {ACTIVE_NODES_NUM_CC} CC servers.')
-        print(f'Starting at {CC_ITERATION_MIN_NUM * 10} CC servers going to {CC_ITERATION_NUM_MAX * 10} CC servers with {CC_ITERATION_NUM_ACTIVE_NODES} active nodes.')
-    else:
-        print(f'Error. Invalid mode argument. Mode is {mode} which is neither 1, 2 nor 3.')
+    parser = argparse.ArgumentParser(description="LNBot Testing Orchestrator.",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+
+    mode = parser.add_mutually_exclusive_group(required = True)
+    mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite.')
+    mode.add_argument('--small', action = 'store_true', help = 'Run a small testing suite to make sure everything works.')
+    mode.add_argument('--test', choice = TEST_CONFIGS.keys(), help = 'Run tests on individual factors.')
+
+    # Define optional arguments for starting values
+    parser.add_argument('--num_cc', type = int, default = None, 
+                        help='Starting number of CC servers.')
+    parser.add_argument('--active_nodes', type = int, default = None, 
+                        help='Starting number of active nodes.')
+    parser.add_argument('--bm_cc', type = int, default = None,
+                        help = 'Number of nodes the botmaster will send commands to')
+    parser.add_argument('--bm_pos', type = float, default = None,
+                        help = '''
+                        Where in the botnet to connect as a percentage of the network.
+                        <0  : Random
+                        0.0 : Oldest nodes
+                        0.5 : Middle of the network
+                        1.0 : Youngest Nodes
+                        ''')
     
-    if not confirm_execution('Run testing script script.'):
-        print('Exiting . . .')
-        return
-    else:
-        print('Starting testing script')
+    args = parser.parse_args()
+
+    if args.full or args.small:
+        test_order = TEST_CONFIGS.keys()
+
+        for test_mode in test_order:
+            # if we're doing small test, we change the values here
+            config = TEST_CONFIGS[test_mode].copy()
+            parameters = config['parameters']
+            if args.small:
+                config['max_messages'] = 10
+                parameters[NUM_CC] = 1
+                parameters[ACTIVE_NODES] = 4
+                parameters[BM_CC] = 1
+                parameters[BM_POS] = 0
+
+                if config['var_key'] == NUM_CC:
+                    config['range'] = (20, 10)
+                elif config['var_key'] == ACTIVE_NODES:
+                    config['range'] = (5, 1)
+                elif config['var_key'] == BM_CC:
+                    config['range'] = (2, 1)
+                elif config['var_key'] == BM_POS:
+                    config['range'] = (50, 50)
+
+            config['parameters'] = parameters
+            run_test(config)
     
-    if mode == '1':
-        test_cc_iteration(starting_active_node_num, starting_cc_num, CC_ITERATION_NUM_MAX)
-    elif mode == '2':
-        test_active_nodes_iteration(50, starting_active_node_num, ACTIVE_NODES_MAX_NUM)
-    elif mode == '3':
-        MAX_MESSAGES = 10
-        test_cc_iteration(4, 1, 1)
-        test_active_nodes_iteration(12, 4, 4)
-    elif mode == '4':
-        test_active_nodes_iteration(ACTIVE_NODES_NUM_CC, ACTIVE_NODES_MIN_NUM, ACTIVE_NODES_MAX_NUM)
-        test_cc_iteration(CC_ITERATION_NUM_ACTIVE_NODES, CC_ITERATION_MIN_NUM, CC_ITERATION_NUM_MAX)
+    elif args.test:
+        config = TEST_CONFIGS[args.test].copy()
+        parameters = config['parameters']
+        if args.num_cc is not None:
+            print(f'num_cc is set to {args.num_cc}')
+            parameters[NUM_CC] = args.num_cc
+        if args.active_nodes is not None:
+            print(f'active nodes is set to {args.active_nodes}')
+            parameters[ACTIVE_NODES] = args.active_nodes
+        if args.bm_cc is not None:
+            print(f'bm_cc is set to {args.bm_cc}')
+            parameters[BM_CC] = args.bm_cc
+        if args.bm_pos is not None:
+            print(f'bm_pos is set to {args.bm_pos}')
+            parameters[BM_POS] = args.bm_pos
+
+        config['parameters'] = parameters
+        run_test(config)
 
     kill_nodes()
     print(f'Testing finished. Exiting.')
 
-def test_cc_iteration(active_nodes, starting_iteration, end):
+def run_test(in_config):
     '''
-    Testing function for different number of CC servers.
-    Number of active nodes is constant.
+    Testing function. Runs test based on the configuration.
+    Returns true is successful, false if something fails.
     '''
-    main_start_time = time.time()
+    config = in_config.copy()
+    overall_test_time = time.time()
     attempt = 0
-    mode = '1'
-    starting_iteration = int(starting_iteration)
-    for iteration in range(starting_iteration, end + 1):
+    testing = config['var_key']
+    
+    parameters = config['parameters']
+    start = config['start']
+    end, step = config['range']
+
+    test_data = []
+
+    for test_value in range(start, end + 1, step):
         cleanup_shm()
         init_bitcoin_server()
         success = False
-        total_nodes = iteration * 10
-        total_nodes += total_nodes % int(active_nodes)
+        # change the value we're testing for.
+        parameters[testing] = test_value
+
+        # calc how many nodes we need to spin up (active nodes needs to divide into it)
+        total_nodes = parameters[NUM_CC]
+        total_nodes += parameters[ACTIVE_NODES] - (total_nodes % int(parameters[ACTIVE_NODES]))
 
         while not success:
-            # fail safe so it doesn't just keep failing over and over
             if attempt > MAX_TRY:
-                print(f"Could not run {MAX_MESSAGES} messages for {total_nodes} CC nodes after {attempt} attempts. Shutting down.")
+                print(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds")
                 kill_nodes()
                 return
             
             cc_start_time = time.time()
-            record_create(total_nodes, active_nodes, mode)
             
-            print(f'\n\n\nRunning init for a total of {total_nodes}')
-            channels_created = setup_test(int(total_nodes), int(active_nodes))
+            print(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.')
+            channels_created = setup_test(int(total_nodes), int(parameters[ACTIVE_NODES]))
 
             print(f'Setup finished at {get_time()}')
-            record_setup_total_time(cc_start_time, total_nodes, active_nodes, mode)
             fund_nodes()
             # checkpoint, if channels aren't created then we start again.
             if not channels_created:
@@ -155,28 +278,34 @@ def test_cc_iteration(active_nodes, starting_iteration, end):
                 continue            
 
             update_containers()
-            print(f'Channels created in {time.time() - cc_start_time} seconds.')
+            total_setup_time = time.time() - cc_start_time
+            print(f'Channels created in {total_setup_time} seconds.')
 
             print(f'Waiting done, proceeding to testing.')
+            message_start_time = time.time()
             # ACTUAL SENDING OF MESSAGES
-            for y in range(1, MAX_MESSAGES + 1):
+            for y in range(1, config['max_messages'] + 1):
                 # another wait, just in case we got nodes disconnecting or something
                 are_channels_ready()
 
-                send_msg(y)
+                send_msg(y, parameters[BM_CC], parameters[BM_POS])
                 send_time, success = wait_for_propagation(y)
                 
                 if not success:
                     break
-                
+
+                # add the record of this data
+                record = config.get('parameters').copy()
+                record['message'] = y
+                record['time_elapsed'] = send_time
+                test_data.append(record)
+
                 print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds.')
                 print(f'Time: {get_time()}')
-                entry = [total_nodes, active_nodes, y, send_time]
-                record_test(entry, total_nodes, active_nodes, mode)
             # record the test and set reset attempts
+            total_send_time = time.time() - message_start_time
+            record_test(config, test_data, total_setup_time, total_send_time)
             if success:
-                record_cc_total_time(cc_start_time, total_nodes, active_nodes, mode)
-                record_topology(total_nodes, active_nodes, mode)
                 untrack_containers()
                 attempt = 0
             # if not a succes, add to the attempt
@@ -184,92 +313,10 @@ def test_cc_iteration(active_nodes, starting_iteration, end):
                 attempt += 1
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
                 untrack_containers()
-                record_topology(total_nodes, active_nodes, mode)
-                record_cc_total_time(cc_start_time, total_nodes, active_nodes, mode)
 
     now_time = time.time()
-    print(f'FINISHED testing for message propagtion different number of CC servers.')
-    print(f'Testing with: {starting_iteration * 10} - {end * 10} CC servers at {MAX_MESSAGES}  \
-                    messsages each, finished in {now_time - main_start_time} seconds.')
-    
-def test_active_nodes_iteration(num_cc, active_nodes_start, active_nodes_end):
-    '''
-    Testing function for different number of active nodes.
-    Number of CC servers is constant.
-    '''
-    main_start_time = time.time()
-    mode = '2'
-    attempt = 0
-    starting_iteration = int(active_nodes_start)
-    # just in case, never have the number of active nodes be less than 1
-    if starting_iteration < 1:
-        starting_iteration = 1
-
-    for active_nodes in range(starting_iteration, active_nodes_end + 1):
-        cleanup_shm()
-        init_bitcoin_server()
-        success = False
-        total_nodes = num_cc
-        total_nodes += active_nodes - (total_nodes % int(active_nodes))
-
-        while not success:
-            # fail safe so it doesn't just keep failing over and over
-            if attempt > MAX_TRY:
-                print(f"Could not run {MAX_MESSAGES} messages for {active_nodes} active nodes after {attempt} attempts. Shutting down.")
-                kill_nodes()
-                return
-            
-            cc_start_time = time.time()
-            record_create(total_nodes, active_nodes, mode)
-            
-            print(f'\n\n\nRunning init for {total_nodes} CC servers with {active_nodes} active nodes.')
-            channels_created = setup_test(int(total_nodes), int(active_nodes))
-
-            print(f'Setup finished at {get_time()}')
-            record_setup_total_time(cc_start_time, total_nodes, active_nodes, mode)
-            fund_nodes()
-            # checkpoint, if channels aren't created then we start again.
-            if not channels_created:
-                attempt += 1
-                print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
-                continue            
-
-            update_containers()
-            print(f'Channels created in {time.time() - cc_start_time} seconds.')
-
-            print(f'Waiting done, proceeding to testing.')
-            # ACTUAL SENDING OF MESSAGES
-            for y in range(1, MAX_MESSAGES + 1):
-                # another wait, just in case we got nodes disconnecting or something
-                are_channels_ready()
-
-                send_msg(y)
-                send_time, success = wait_for_propagation(y)
-                
-                if not success:
-                    break
-                
-                print(f'Command {y} is finished. Propagation time is {send_time} seconds.')
-                print(f'Time: {get_time()}')
-                entry = [total_nodes, active_nodes, y, send_time]
-                record_test(entry, total_nodes, active_nodes, mode)
-            # record the test and set reset attempts
-            if success:
-                record_cc_total_time(cc_start_time, total_nodes, active_nodes, mode)
-                record_topology(total_nodes, active_nodes, mode)
-                untrack_containers()
-                attempt = 0
-            # if not a succes, add to the attempt
-            else:
-                attempt += 1
-                print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
-                untrack_containers()
-                record_cc_total_time(cc_start_time, total_nodes, active_nodes, mode)
-                record_topology(total_nodes, active_nodes, mode)
-
-    now_time = time.time()
-    print(f'FINISHED testing for different number of active_nodes.')
-    print(f'Testing with: {starting_iteration} - {active_nodes_end} active nodes with {num_cc} CC servers at {MAX_MESSAGES} messsages each, finished in {now_time - main_start_time} seconds.')
+    print(f'FINISHED at {overall_test_time - now_time} testing for {config['description']}.')
+    print(f'Testing with: \n{config}')
 
 def init_bitcoin_server():
     '''
@@ -289,7 +336,6 @@ def init_bitcoin_server():
             balance = 0
         else:
             balance = float(balance)
-    
 
 def confirm_execution(message):
     confirmation = ['y','yes','ye']
@@ -305,47 +351,81 @@ def confirm_execution(message):
         else:
             print(f'{user_input} is an invalid option')
 
-def record_create(cc_num, active_num, mode):
-
-    variable = '#CCs' if mode == '1' else 'Num Active Nodes'
-    constant = 'Num Active Nodes' if mode == '1' else '#CCs'
-
-    meta_blurb = f'''
-# ---
-# LNBot Simulation Experiment.
-# Description: This file contains the individual propagation times for messages being distributed across the simulated network.
-# Variable being tested: {variable}
-# Constant being tracked: {constant}
-# Data Generated on {get_date()}
-# Author: Prof. Kurt Ahmet; Thomas Bakaysa; Erdin, Enes ; Cebe, Mumin ; Akkaya, Kemal ; Selcuk Uluagac, A.
-# ---
-# Column Definitions
-# 1. CCs: Number of CC servers for this test.
-# 2. Active_nodes: Number of active nodes for this test.
-# 3. Message: Message being propagated.
-# 4. Time: Total time taken for message to propagte through the total number of CC servers.
-# ---
-
-##CCs,Active_Nodes,Message,Time_Taken\n
-'''
-
-    prefix = test_record_name(cc_num, active_num, mode)
-    csv_name = f'{prefix}{TIMES_CSV}.csv'
-    with open(csv_name, 'w', newline='') as f:
-        f.write(meta_blurb)
-
-def record_test(record, cc_num, active_num, mode):
-    prefix = test_record_name(cc_num, active_num, mode)
-    csv_name = f'{prefix}{TIMES_CSV}.csv'
-    with open(csv_name, 'a', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(record)
-
-def test_record_name(cc_num, active_num, mode):
+def record_test(config, test_data, setup_time, total_send_time):
     '''
-    Return a file name containing the relevant info, ready to be appended to whatever is needed.
+    Add a record for the current test.
+    Creates the file if it doesn't exist.
+    Parameters:
+        config : The config for this test
+        test_data : A list of test_data records
+        setup_time : Total time taken by nodes to setup channels
+        total_send_time : Total time taken to send all messages
     '''
-    filename = f'{CC_TEST_PREFIX}{cc_num}_' if mode == '1' else f'{ACTIVE_NODE_TEST_PREFIX}{active_num}_'
+
+    file_name = get_record_name(config)
+    total_times = {
+        'total_setup_time' : setup_time,
+        'total_send_time' : total_send_time
+    }
+
+    data = {
+        'meta_data' : create_meta_data(config),
+        'total_times' :  total_times,
+        'test_data' : test_data
+        }
+
+    # we save this one and the topology 
+    record_topology(config)
+    with open(file_name, 'w') as f:
+        json.dump(data, f, indent = 4)
+    
+
+def create_meta_data(config):
+    '''
+    Create the record for the recording test data.
+    Write the meta_data to the file and then return 
+    that to the calling function.
+    '''
+    variable = config['var_key']
+    constants = [param for param in config['parameters'].keys() if param != variable]  
+
+    meta_data = {
+        'experiment' : 'LNBot Simulation Experiment',
+        'description' : 'This file contains the individual propagation times for messages being distributed across the simulated network.',
+        'testing': config['description'],
+        'variable' : variable,
+        'constants' : constants,
+        'authors' : [
+            'Professor Kurt, Ahmet',
+            'Bakaysa, Thomas',
+            'Erdin, Enes',
+            'Cebe, Mumin',
+            'Akkaya, Kemal',
+            'Selcuk Uluagac, A.'
+        ]
+    }
+
+    return meta_data
+
+def record_topology(config):
+    cur_top = retrieve_all_status()
+    top_name = get_record_name(config)
+    top_name += TOPO_JSON
+
+    with open(top_name, 'w') as f:
+        json.dump(cur_top, f, indent=4)
+    
+    print(f'Topology data for {len(cur_top)} nodes saved as {top_name}')
+    
+
+def get_record_name(config):
+    '''
+    Return a file name containing the relevant info for individual runs.
+    '''
+    values = config.get('parameters')
+    var_key = config['var_key']
+    filename = f'{DATA_DIR}{var_key}_{values[var_key]}_'
+
     return filename
 
 def retrieve_all_status():
@@ -370,118 +450,6 @@ def retrieve_all_status():
             continue
     return all_status
 
-
-def record_cc_total_time(start_time, cc_num, active_nodes, mode):
-    '''
-    Records the time elapsed from the BM connecting and sending the first message to the last message.
-    Record the topology of the lightning network.
-    '''
-
-    meta_blurb = f'''
-# ---
-# LNBot Simulation Experiment.
-# Description: This file contains the total time it took to send all {MAX_MESSAGES} messages to certain number of CC nodes with a certain number of active nodes.
-# Data Generated on {get_date()}
-# Author: Prof. Kurt Ahmet; Thomas Bakaysa; Erdin, Enes ; Cebe, Mumin ; Akkaya, Kemal ; Selcuk Uluagac, A.
-# ---
-# Column Definitions
-# 1. CCs: Number of CC servers for this test.
-# 2. Active_nodes: Number of active nodes for this test.
-# 3. Time: Total time taken for {MAX_MESSAGES} messages to propagte through the total number of CC servers.
-# ---\n
-'''
-    # we want to read the csv file already there (or create it if it doesn't exist)
-    elapsed_time = time.time() - start_time
-
-    headers = ['#CCs', 'Active_nodes', 'Time_Taken']
-    entry = pd.DataFrame({headers[0]: [cc_num], headers[1] : active_nodes, headers[2]: elapsed_time})
-    df = pd.DataFrame()
-
-    # we should have different file names for the different tests
-    if mode == '1':
-        file_name = f'{CC_TEST_PREFIX}_'
-        header_idx = 0
-    elif mode == '2':
-        file_name = f'{ACTIVE_NODE_TEST_PREFIX}_'
-        header_idx = 1
-    file_name += RUNTIMES_CSV
-
-    try:
-        df = pd.read_csv(file_name, names = headers, comment='#')
-        # delete old values if they exist
-        if cc_num in df[headers[header_idx]].values:
-            df = df[df[headers[header_idx]] != cc_num]
-        df = pd.concat([df, entry], ignore_index=True)
-    except (FileNotFoundError, pd.errors.EmptyDataError):
-        df = entry
-
-    df = df.sort_values(by=[headers[0]]).reset_index(drop=True)
-
-    with open(file_name, 'w') as f:
-        f.write(meta_blurb)
-        df.to_csv(f, index=False)
-    print(f'Total time saved at {file_name}')
-
-def record_setup_total_time(start_time, cc_num, active_nodes, mode):
-    '''
-    Record the time take to create and channel all the nodes for this iteration.
-    '''
-    meta_blurb = f'''
-# ---
-# LNBot Simulation Experiment.
-# Description: This file contains the times it took for CC servers to spin up and finish creating channels with designated number of active nodes.
-# Data Generated on {get_date()}
-# Author: Prof. Kurt Ahmet; Thomas Bakaysa; Erdin, Enes ; Cebe, Mumin ; Akkaya, Kemal ; Selcuk Uluagac, A.
-# ---
-# Column Definitions
-# 1. CCs: Number of CC servers for this test.
-# 2. Active_nodes: Number of active nodes for this test.
-# 3. Time: Total time taken for the CC servers to spin up and finish channeling with each other.
-# --- \n
-'''
-    # we want to read the csv file already there (or create it if it doesn't exist)
-    elapsed_time = time.time() - start_time
-    num_rows = len(meta_blurb.splitlines())
-
-    headers = ['#CCs', 'Active_nodes', 'Time_Taken']
-    entry = pd.DataFrame({headers[0]: [cc_num], headers[1] : active_nodes, headers[2]: elapsed_time})
-    df = pd.DataFrame()
-
-    # we should have different file names for the different tests
-    if mode == '1':
-        file_name = f'{CC_TEST_PREFIX}_'
-        header_idx = 0
-    elif mode == '2':
-        file_name = f'{ACTIVE_NODE_TEST_PREFIX}_'
-        header_idx = 1
-    file_name += SETUPTIMES_CSV
-
-    try:
-        df = pd.read_csv(file_name, names = headers, comment='#')
-        # delete old values if they exist
-        if cc_num in df[headers[header_idx]].values:
-            df = df[df[headers[header_idx]] != cc_num]
-        df = pd.concat([df, entry], ignore_index=True)
-    except (FileNotFoundError, pd.errors.EmptyDataError):
-        df = entry
-
-    df = df.sort_values(by=[headers[0]]).reset_index(drop=True)
-    with open(file_name, 'w') as f:
-        f.write(meta_blurb)
-        df.to_csv(f, index=False)
-    print(f'Setup times saved at {file_name}')
-
-def record_topology(cc_num, active_nodes, mode):
-    cur_top = retrieve_all_status()
-
-    top_name = f'{CC_TEST_PREFIX}{cc_num}_' if mode == '1' else f'{ACTIVE_NODE_TEST_PREFIX}{active_nodes}_'
-    top_name += TOPO_JSON
-
-    with open(top_name, 'w') as f:
-        json.dump(cur_top, f, indent=4)
-    
-    print(f'Topology data for {len(cur_top)} nodes saved as {top_name}')
-    
 def kill_nodes():
     '''
     Cleanup nodes and unlink the shared memory
@@ -582,8 +550,10 @@ def is_kill_time(start_time, wait_time):
     else:
         return False
 
-def send_msg(message):
-    command = ["docker", "exec", "-w", BM_PATH, BM_CONT, "python3", "-u", BM_SCRIPT, str(message)]
+def send_msg(message, num_cc, where_cc):
+    command_str = (f"docker exec -w {BM_PATH} {BM_CONT} python3 -u {BM_SCRIPT} "
+                    f"--msg {message} --cc {num_cc} --init {where_cc}")
+    command = shlex.split(command_str)
     print(f'Time: {get_time()}. Sending message {message} . . .')
     result = subprocess.run(command, capture_output=True, text=True)
     if result.stderr:
@@ -833,33 +803,4 @@ def get_date():
     return datetime.now().date()
 
 if __name__ == "__main__":
-    warning_text = '''
-Invalid arguments. tester_v1 starting_cc_number starting_active_nodes mode
-mode = 0: no testing.   with arguments 0 0, print topology and message progress;
-                        with arguments 0 1 save the current topology as a json file 
-mode = 1: Test iterations of number of CC servers, starting at starting_cc_number (will be mult. by 10) and stopping at 100 
-mode = 2: Test iterations of number of active nodes, starting at starting_active nodes and stopping at 6
-mode = 3: Test mode 1 and 2 with only 12 CC nodes, 10 messages, 4 active nodes. Use to quickly test script behavior.
-mode = 4: Full testing.
-
-NOTE: starting_cc_number is in multiples of 10 i.e. 1 = 10 starting CC nodes
-'''
-
-    if len(sys.argv) > 3:
-        if sys.argv[3] == '4':
-            main('1', '4', '4')
-        elif sys.argv[3] == '3':
-            main('1', '4', '3')
-        elif sys.argv[1] > '0' and sys.argv[2] > '0' and (sys.argv[3] in ['1', '2']):
-            main(sys.argv[1], sys.argv[2], sys.argv[3])
-        elif sys.argv[1] == '0' and sys.argv[2] == '0' and sys.argv[3] == '0':
-            print_topology()
-            print_messages()
-            print_container_counters()
-        elif sys.argv[1] == '0' and sys.argv[2] == '1' and sys.argv[3] == '0':
-            # record_topology()
-            pass
-        else:
-            print(warning_text)
-    else:
-        print(warning_text)
+    main()
