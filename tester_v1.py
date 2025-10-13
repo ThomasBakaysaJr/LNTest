@@ -658,13 +658,12 @@ def cleanup_shm():
     '''
     cc_containers = get_cc_containers()
     for cont in cc_containers:
-        node_name = cont.name
+        node_name = f'{cont.name}_status'
         try:
             shm = shared_memory.SharedMemory(name=node_name)
             shm.unlink()
         except Exception as e:
-            pass
-            # print(f'cleanup_shm: ERROR in cleaning up memory. Error: {e}')
+            print(f'cleanup_shm: ERROR in cleaning up memory. Error: {e}')
 
 def fund_nodes():
     try:
