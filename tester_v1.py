@@ -192,16 +192,17 @@ def main():
             # Implement changes to full testings
             # like if the user wants to change the number of bm_cc connections
             if args.full:
-                if args.num_cc is not None:
+                testing = config['var_key']
+                if testing != NUM_CC and args.num_cc is not None:
                     print(f'num_cc is set to {args.num_cc}')
                     parameters[NUM_CC] = args.num_cc
-                if args.active_nodes is not None:
+                if testing != ACTIVE_NODES and args.active_nodes is not None:
                     print(f'active nodes is set to {args.active_nodes}')
                     parameters[ACTIVE_NODES] = args.active_nodes
-                if args.bm_cc is not None:
+                if testing != BM_CC and args.bm_cc is not None:
                     print(f'bm_cc is set to {args.bm_cc}')
                     parameters[BM_CC] = args.bm_cc
-                if args.bm_pos is not None:
+                if testing != BM_POS and args.bm_pos is not None:
                     print(f'bm_pos is set to {args.bm_pos}')
                     parameters[BM_POS] = args.bm_pos
                 if args.max_msg is not None:
