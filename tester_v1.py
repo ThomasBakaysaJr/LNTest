@@ -64,7 +64,6 @@ TEST_CONFIGS = {
     '1' : {
         'description': 'increasing number of C&C nodes',
         'var_key' : NUM_CC,
-        'start': 10,
         'range' : (100, 10),
         'multiplier': 1,
         'max_messages' : 100,
@@ -78,13 +77,12 @@ TEST_CONFIGS = {
     '2' : {
         'description': 'increasing number of active nodes',
         'var_key' : ACTIVE_NODES,
-        'start' : 1,
         'range' : (6, 1),
         'multiplier': 1,
         'max_messages' : 100,
         'parameters': {
             NUM_CC: 50,
-            ACTIVE_NODES: 4,
+            ACTIVE_NODES: 1,
             BM_CC: 1,
             BM_POS: 50
         }
@@ -92,7 +90,6 @@ TEST_CONFIGS = {
     '3' : {
         'description': 'increasing number of channels the botmaster makes',
         'var_key' : BM_CC,
-        'start' : 1,
         'range' : (8, 2),
         'multiplier': 1,
         'max_messages' : 100,
@@ -106,7 +103,6 @@ TEST_CONFIGS = {
     '4' : {
         'description': 'different botmaster channel connection locations',
         'var_key' : BM_POS,
-        'start' : 0,
         'range' : (50, 50),
         'multiplier': 1,
         'max_messages' : 100,
@@ -132,7 +128,7 @@ def main():
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter )
 
     mode = parser.add_mutually_exclusive_group(required = True)
-    mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite.')
+    mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite. Add options to change the defaults for each run.')
     mode.add_argument('--small', action = 'store_true', help = 'Run a small testing suite to make sure everything works.')
     mode.add_argument('--test', choices = TEST_CONFIGS.keys(), 
                       help = '''
@@ -177,6 +173,7 @@ def main():
             # if we're doing small test, we change the values here
             config = TEST_CONFIGS[test_mode].copy()
             parameters = config['parameters']
+            # specific changes for small tester
             if args.small:
                 config['max_messages'] = 10
                 parameters[NUM_CC] = 10
@@ -192,6 +189,25 @@ def main():
                     config['range'] = (2, 1)
                 elif config['var_key'] == BM_POS:
                     config['range'] = (50, 50)
+            # Implement changes to full testings
+            # like if the user wants to change the number of bm_cc connections
+            if args.full:
+                if args.num_cc is not None:
+                    print(f'num_cc is set to {args.num_cc}')
+                    parameters[NUM_CC] = args.num_cc
+                if args.active_nodes is not None:
+                    print(f'active nodes is set to {args.active_nodes}')
+                    parameters[ACTIVE_NODES] = args.active_nodes
+                if args.bm_cc is not None:
+                    print(f'bm_cc is set to {args.bm_cc}')
+                    parameters[BM_CC] = args.bm_cc
+                if args.bm_pos is not None:
+                    print(f'bm_pos is set to {args.bm_pos}')
+                    parameters[BM_POS] = args.bm_pos
+                if args.max_msg is not None:
+                    print(f'max_msg is set to {args.max_msg}')
+                    config['max_messages'] = args.max_msg
+                        
             config['parameters'] = parameters
             run_test(config)
     elif args.test:
@@ -242,7 +258,7 @@ def run_test(in_config):
     testing = config['var_key']
     
     parameters = config['parameters']
-    start = config['start']
+    start = parameters[testing]
     end, step = config['range']
 
     test_data = []
@@ -363,7 +379,7 @@ def record_test(config, test_data, setup_time, total_send_time):
         total_send_time : Total time taken to send all messages
     '''
 
-    file_name = get_record_name(config)
+    file_name = f'{get_record_name(config)}{TIMES_JSON}'
     total_times = {
         'total_setup_time' : setup_time,
         'total_send_time' : total_send_time
