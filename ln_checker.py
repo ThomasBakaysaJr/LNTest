@@ -405,7 +405,7 @@ def check_blockchain_height(in_height):
     except ValueError:
         logging.warning(f'check_blockchain_height: Could not convert blockheight {output} to int')
 
-    # logging.info(f'Blockchain height is {height} against incoming height of {in_height}')
+    logging.info(f'Blockchain height is {height} against incoming height of {in_height}')
     return height == in_height
 
 def get_short_id(in_node_id):

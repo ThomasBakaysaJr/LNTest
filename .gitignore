@@ -14,3 +14,4 @@ NodeManagerComms/*
 !NodeManagerComms/noiseManager_REST.py
 master_log.log
 setuptime_data.csv
+venv/*

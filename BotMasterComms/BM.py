@@ -309,11 +309,11 @@ def pick_nodes(num_nodes, entry_point, valid_nodes):
     # cap entry points or return random nodes if its negative
     if entry_point < 0:
         return pick_random_nodes(num_nodes, valid_nodes)
-    elif entry_point > 1.0:
-        entry_point = 1.0
-        logging.error(f'pick_nodes: ERROR: Entry point has value {entry_point} which is above the max of 1.0. Setting to 1.0')
+    elif entry_point > 100:
+        entry_point = 100
+        logging.error(f'pick_nodes: ERROR: Entry point has value {entry_point} which is above the max of 100. Setting to 100')
 
-    starting_ind = round(len(valid_nodes) * entry_point)
+    starting_ind = round(len(valid_nodes) * (entry_point / 100.0))
 
     # get how many nodes from the 'center' node do we look for
     deviation = (num_nodes - 1) // 2
@@ -331,6 +331,8 @@ def pick_nodes(num_nodes, entry_point, valid_nodes):
     elif (margin := (len(valid_nodes) - 1) - (starting_ind + right)) < 0:
         left += abs(margin)
         right += margin
+
+    logging.info(f'slice is {starting_ind - left} : {starting_ind + right + 1}')
 
     # we return the slice of nodes to connect to
     return valid_nodes[starting_ind - left: starting_ind + right + 1]
@@ -417,14 +419,14 @@ def send_msg(message, counter, funded_nodes):
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
     # amount = 5  # Minimal msat for sending a message
 
-    # Construct the lightning-cli command
-    command = ["lightning-cli", "--regtest", "keysend",
-    f"destination={FUNDED_NODE_IDS}",
-    f"amount_msat=1",
-    f"extratlvs={tlv_json}"]
-
     while load_counter() == counter:
         for node in funded_nodes:
+            # Construct the lightning-cli command
+            command = ["lightning-cli", "--regtest", "keysend",
+            f"destination={node}",
+            f"amount_msat=1",
+            f"extratlvs={tlv_json}"]
+
             try:
                 # Execute the command using shell=True to process the quotes correctly
                 for _ in range(RETRY_MAX):
@@ -539,8 +541,8 @@ if __name__ == "__main__":
                         Where in the botnet to connect as a percentage of the network.
                         <0  : Random
                         0.0 : Oldest nodes
-                        0.5 : Middle of the network
-                        1.0 : Youngest Nodes'''
+                        50.0 : Middle of the network
+                        100.0 : Youngest Nodes'''
                         )
     parser.add_argument('--fresh', action = 'store_true',
                         help = '''

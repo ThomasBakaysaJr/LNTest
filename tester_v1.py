@@ -134,7 +134,7 @@ TEST_CONFIGS = {
         'description': 'different botmaster channel connection locations',
         'var_key' : BM_POS,
         'start' : 0,
-        'range' : (100, 50),
+        'range' : (50, 50),
         'multiplier': 1,
         'max_messages' : 100,
         'parameters': {
@@ -161,7 +161,13 @@ def main():
     mode = parser.add_mutually_exclusive_group(required = True)
     mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite.')
     mode.add_argument('--small', action = 'store_true', help = 'Run a small testing suite to make sure everything works.')
-    mode.add_argument('--test', choice = TEST_CONFIGS.keys(), help = 'Run tests on individual factors.')
+    mode.add_argument('--test', choices = TEST_CONFIGS.keys(), 
+                      help = '''
+                      Run tests on individual factors.
+                      1: Changing number of cc nodes
+                      2: Changing number of active nodes
+                      3: Changing number of cc nodes the botmaster will connect to
+                      4: Changing nubmer of locations the botmaster will connect to (fixed to top, middle and bottom)''')
 
     # Define optional arguments for starting values
     parser.add_argument('--num_cc', type = int, default = None, 
@@ -175,22 +181,32 @@ def main():
                         Where in the botnet to connect as a percentage of the network.
                         <0  : Random
                         0.0 : Oldest nodes
-                        0.5 : Middle of the network
-                        1.0 : Youngest Nodes
+                        50.0 : Middle of the network
+                        100.0 : Youngest Nodes
                         ''')
+    parser.add_argument('--max_msg', type = int, default = None,
+                        help = 'Number of messages for this test.')
     
     args = parser.parse_args()
 
     if args.full or args.small:
         test_order = TEST_CONFIGS.keys()
-
+        if args.full:
+            print(f'Running full testing suite.')
+        else:
+            print(f'Running small testing suite.')
+        if not confirm_test():
+            print(f'Exiting tester.')
+            return
+        else:
+            print(f'Continuing')
         for test_mode in test_order:
             # if we're doing small test, we change the values here
             config = TEST_CONFIGS[test_mode].copy()
             parameters = config['parameters']
             if args.small:
                 config['max_messages'] = 10
-                parameters[NUM_CC] = 1
+                parameters[NUM_CC] = 10
                 parameters[ACTIVE_NODES] = 4
                 parameters[BM_CC] = 1
                 parameters[BM_POS] = 0
@@ -203,10 +219,8 @@ def main():
                     config['range'] = (2, 1)
                 elif config['var_key'] == BM_POS:
                     config['range'] = (50, 50)
-
             config['parameters'] = parameters
             run_test(config)
-    
     elif args.test:
         config = TEST_CONFIGS[args.test].copy()
         parameters = config['parameters']
@@ -222,12 +236,27 @@ def main():
         if args.bm_pos is not None:
             print(f'bm_pos is set to {args.bm_pos}')
             parameters[BM_POS] = args.bm_pos
+        if args.max_msg is not None:
+            print(f'max_msg is set to {args.max_msg}')
+            config['max_messages'] = args.max_msg
 
         config['parameters'] = parameters
+        print(f'Running test with:\n{parameters}')
+        if not confirm_test():
+            print(f'Exiting tester.')
+            return
+        else:
+            print(f'Continuing')
         run_test(config)
 
     kill_nodes()
     print(f'Testing finished. Exiting.')
+
+def confirm_test():
+    if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
+        return True
+    else:
+        return False
 
 def run_test(in_config):
     '''
@@ -293,7 +322,7 @@ def run_test(in_config):
                     break
 
                 # add the record of this data
-                record = config.get('parameters').copy()
+                record = parameters.copy()
                 record['message'] = y
                 record['time_elapsed'] = send_time
                 test_data.append(record)
