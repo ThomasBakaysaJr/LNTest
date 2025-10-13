@@ -41,33 +41,8 @@ CLEANUP_NODES_BASH = './cleanup_lightning_nodes.sh'
 KILL_NODES_BASH = './kill_nodes.sh'
 BITCOIN_MINER_PY = 'mineBlocks.py'
 
-CC_TEST_PREFIX = f'{DATA_DIR}CC_ITERATION_'
-ACTIVE_NODE_TEST_PREFIX = f'{DATA_DIR}ACTIVE_NODE_ITERATION_'
-BM_CC_TEST_PREFIX = f'{DATA_DIR}BM_CC_ITERATION_'
-BM_POS_TEST_PREFIX = f'{DATA_DIR}BM_POS_ITERATION_'
-
-MASTER_LOG_PATH = ''
 COUNTER = 3 # index of the counter variable for time keeping
 TIME = 0 # index of the time variable for time keeping
-
-CHANNEL_NORMAL = 'CHANNELD_NORMAL'
-
-# # Variables that govern how much data to gather for full testing
-# ACTIVE_NODES_MIN_NUM = 1 # For active node testing
-# CC_ITERATION_MIN_NUM = 1 # For cc iteration testing
-
-
-# MAX_MESSAGES = 100 # number of messages to test (Prof wants 100)
-# ACTIVE_NODES_NUM_CC = 50 # default is 50; number of CCs for active node tests
-# CC_ITERATION_NUM_ACTIVE_NODES = 4 # default is 4; number of active nodes for CC tests
-
-# # constants for active node iteration tests
-# ACTIVE_NODES_MAX_NUM = 6 # default is 6
-# CC_ITERATION_NUM_MAX = 10 # each iteration increases the number of CC servers by 10
-
-# # constant for the botmaster instructions
-# BM_CC_VALUES = [1, 2, 4, 8]
-# BM_POS_VALUES = [0.0, 0.5, 1.0]
 
 # constant names for the variables we use
 TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
@@ -80,9 +55,7 @@ BM_POS = 'bm_pos'
 MAX_WAIT = 450 # max wait for propagation before we move on (default = 450)
 WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
-FM_WAIT = 120 # how long to wait before trying to send the first message (to let the nodes create channels) (default = 120) #OUTDATED
 SLEEP_INTERVAL = 1
-SLEEP_CHANNEL_INTERVAL = 10
 
 DOCKER_CONTAINERS = set()
 
@@ -283,7 +256,8 @@ def run_test(in_config):
 
         # calc how many nodes we need to spin up (active nodes needs to divide into it)
         total_nodes = parameters[NUM_CC]
-        total_nodes += parameters[ACTIVE_NODES] - (total_nodes % int(parameters[ACTIVE_NODES]))
+        if remainder :=  total_nodes % int(parameters[ACTIVE_NODES]):
+            total_nodes += parameters[ACTIVE_NODES] - remainder
 
         while not success:
             if attempt > MAX_TRY:
@@ -451,7 +425,7 @@ def get_record_name(config):
     '''
     values = config.get('parameters')
     var_key = config['var_key']
-    filename = f'{DATA_DIR}{var_key}_{values[var_key]}_'
+    filename = f'{DATA_DIR}{var_key}_{values[var_key]}'
 
     return filename
 
