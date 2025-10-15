@@ -103,7 +103,7 @@ TEST_CONFIGS = {
     '4' : {
         'description': 'different botmaster channel connection locations',
         'var_key' : BM_POS,
-        'range' : (50, 50),
+        'range' : (50, 100),
         'multiplier': 1,
         'max_messages' : 100,
         'parameters': {
@@ -262,9 +262,8 @@ def run_test(in_config):
     start = parameters[testing]
     end, step = config['range']
 
-    test_data = []
-
     for test_value in range(start, end + 1, step):
+        test_data = []
         cleanup_shm()
         init_bitcoin_server()
         success = False
