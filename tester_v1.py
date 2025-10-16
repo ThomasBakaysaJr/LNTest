@@ -9,6 +9,7 @@ import re
 import docker
 import shlex
 import os
+import textwrap
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
@@ -90,7 +91,7 @@ TEST_CONFIGS = {
     '3' : {
         'description': 'increasing number of channels the botmaster makes',
         'var_key' : BM_CC,
-        'range' : (8, 2),
+        'range' : (6, 1),
         'multiplier': 1,
         'max_messages' : 100,
         'parameters': {
@@ -103,7 +104,7 @@ TEST_CONFIGS = {
     '4' : {
         'description': 'different botmaster channel connection locations',
         'var_key' : BM_POS,
-        'range' : (50, 100),
+        'range' : (100, 50),
         'multiplier': 1,
         'max_messages' : 100,
         'parameters': {
@@ -131,12 +132,12 @@ def main():
     mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite. Add options to change the defaults for each run.')
     mode.add_argument('--small', action = 'store_true', help = 'Run a small testing suite to make sure everything works.')
     mode.add_argument('--test', choices = TEST_CONFIGS.keys(), 
-                      help = '''
+                      help = textwrap.dedent('''
                       Run tests on individual factors.
                       1: Changing number of cc nodes
                       2: Changing number of active nodes
                       3: Changing number of cc nodes the botmaster will connect to
-                      4: Changing nubmer of locations the botmaster will connect to (fixed to top, middle and bottom)''')
+                      4: Changing nubmer of locations the botmaster will connect to (fixed to top, middle and bottom)'''))
 
     # Define optional arguments for starting values
     parser.add_argument('--num_cc', type = int, default = None, 
@@ -146,13 +147,13 @@ def main():
     parser.add_argument('--bm_cc', type = int, default = None,
                         help = 'Number of nodes the botmaster will send commands to')
     parser.add_argument('--bm_pos', type = float, default = None,
-                        help = '''
+                        help = textwrap.dedent('''
                         Where in the botnet to connect as a percentage of the network.
                         <0  : Random
                         0.0 : Oldest nodes
                         50.0 : Middle of the network
                         100.0 : Youngest Nodes
-                        ''')
+                        '''))
     parser.add_argument('--max_msg', type = int, default = None,
                         help = 'Number of messages for this test.')
     
