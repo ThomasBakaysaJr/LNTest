@@ -380,7 +380,7 @@ def record_test(config, test_data, setup_time, total_send_time):
         total_send_time : Total time taken to send all messages
     '''
 
-    file_name = f'{get_record_name(config)}{TIMES_JSON}'
+    file_name = f'{get_record_name(config)}_{TIMES_JSON}'
     total_times = {
         'total_setup_time' : setup_time,
         'total_send_time' : total_send_time
@@ -427,8 +427,7 @@ def create_meta_data(config):
 
 def record_topology(config):
     cur_top = retrieve_all_status()
-    top_name = get_record_name(config)
-    top_name += TOPO_JSON
+    top_name = f'{get_record_name(config)}_{TOPO_JSON}'
 
     with open(top_name, 'w') as f:
         json.dump(cur_top, f, indent=4)
@@ -442,7 +441,11 @@ def get_record_name(config):
     '''
     values = config.get('parameters')
     var_key = config['var_key']
-    filename = f'{DATA_DIR}{var_key}_{values[var_key]}'
+    
+    # get a unique code to distinguish this run
+    parts = map(str, values.values())
+    id = ''.join(parts)
+    filename = f'{DATA_DIR}{var_key}_{values[var_key]}_{id}'
 
     return filename
 
