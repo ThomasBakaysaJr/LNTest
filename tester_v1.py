@@ -104,14 +104,14 @@ TEST_CONFIGS = {
     '4' : {
         'description': 'different botmaster channel connection locations',
         'var_key' : BM_POS,
-        'range' : (100, 50),
+        'range' : (150, 50),
         'multiplier': 1,
         'max_messages' : 100,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
             BM_CC: 1,
-            BM_POS: 0
+            BM_POS: -50
         }
     }
 }
@@ -156,10 +156,17 @@ def main():
                         '''))
     parser.add_argument('--max_msg', type = int, default = None,
                         help = 'Number of messages for this test.')
+    parser.add_argument('--max_range', type = int, default = None,
+                        help = 'Change the max range for this test. ONLY works with mode --test')
     
     args = parser.parse_args()
 
     if args.full or args.small:
+
+        # print out warning that max_range does nothing with this test
+        if args.max_range:
+            print(f'WARNING: --max_range cannot be changed for --full or --small.')
+
         test_order = TEST_CONFIGS.keys()
         if args.full:
             print(f'Running full testing suite.')
@@ -230,6 +237,11 @@ def main():
         if args.max_msg is not None:
             print(f'max_msg is set to {args.max_msg}')
             config['max_messages'] = args.max_msg
+        if args.max_range is not None:
+            print(f'max_range is set to {args.max_range}')
+            temp_range = list(config['range'])
+            temp_range[-1] = args.max_range
+            config['range'] = temp_range
 
         config['parameters'] = parameters
         print(f'Running test with:\n{parameters}')

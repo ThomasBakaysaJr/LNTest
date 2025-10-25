@@ -299,20 +299,34 @@ def fund_channels(num_channels = 1, entry_point = -1.0):
 
 def pick_nodes(num_nodes, entry_point, valid_nodes):
     '''
-    Pick num_nodes nodes from a set of nodes,
+    Top level function for picking nodes.
+    entry_point:
+        <0 : random
+        0-100 : position in the network
+        >0 : bottom, middle and top of the network
+    '''
+    if entry_point < 0:
+        return pick_random_nodes(num_nodes, valid_nodes)
+    if entry_point > 100:
+        # we want nodes from all three sections of the network
+        return_nodes = set()
+        for pos in range(0, 101, 50):
+            return_nodes.update(select_nodes_from_list(num_nodes, pos, valid_nodes))
+        return list(return_nodes)
+    else:
+        # normal behavior, pick nodes from the designated position
+        return select_nodes_from_list(num_nodes, entry_point, valid_nodes)
+
+def select_nodes_from_list(num_nodes, entry_point, valid_nodes):
+    '''
+    Helper function to pick nodes from a set of nodes,
     using entry_point as a guide of where to pick the nodes.
+    This should only be called by pick nodes.
     '''
     if num_nodes > len(valid_nodes):
         logging.error(f'pick_nodes: Trying to select more nodes than exists in valid nodes. Aborting.')
-        return None
+        return []
     
-    # cap entry points or return random nodes if its negative
-    if entry_point < 0:
-        return pick_random_nodes(num_nodes, valid_nodes)
-    elif entry_point > 100:
-        entry_point = 100
-        logging.error(f'pick_nodes: ERROR: Entry point has value {entry_point} which is above the max of 100. Setting to 100')
-
     starting_ind = round(len(valid_nodes) * (entry_point / 100.0))
 
     # get how many nodes from the 'center' node do we look for
