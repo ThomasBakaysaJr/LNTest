@@ -146,7 +146,7 @@ def main():
                         help='Starting number of active nodes.')
     parser.add_argument('--bm_cc', type = int, default = None,
                         help = 'Number of nodes the botmaster will send commands to')
-    parser.add_argument('--bm_pos', type = float, default = None,
+    parser.add_argument('--bm_pos', type = int, default = None,
                         help = textwrap.dedent('''
                         Where in the botnet to connect as a percentage of the network.
                         <0  : Random
