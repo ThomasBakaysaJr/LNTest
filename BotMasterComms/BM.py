@@ -176,35 +176,6 @@ def demoGetAddressAndConnect(node_ID):
     except Exception as e:
         logging.error(f"demoGetAddressAndConnect: Exception occurred: {e}")
 
-
-# def discover_cc_nodes():
-#     """
-#     Discover CC nodes that satisfy the discovery rule.
-#     """
-#     logging.info("Discovering CC nodes.")
-#     output = run_lightning_cli(["listchannels"])
-#     if not output:
-#         logging.warning("Failed to retrieve channel list.")
-#         return []
-
-#     channels = json.loads(output).get("channels", [])
-#     valid_nodes = []
-#     for channel in channels:
-#         capacity = int(channel.get("amount_msat", 0)) // 1000
-#         node_id = channel["destination"]
-
-#         # Exclude Innocent node and nodes already connected
-#         if node_id == INNOCENT_NODE_ID:
-#             logging.info(f"Skipping Innocent node {INNOCENT_NODE_ID} during discovery.")
-#             continue
-
-#         valid_nodes.append(node_id)
-#         # if capacity % DISCOVERY_RULE_DIVISOR == 0 and node_id not in BM_CONNECTED_NODES:
-#         #     valid_nodes.append(node_id)
-
-#     logging.info(f"Valid CC nodes discovered: {valid_nodes}")
-#     return valid_nodes
-
 # This assumes that the BM node knows the address of every CC node, and so can just connect at random
 def discover_cc_nodes():
     """
@@ -241,13 +212,15 @@ def fund_channels(num_channels = 1, entry_point = -1.0):
     # Load funded nodes if we have this saved
     funded_nodes = load_funded_nodes()
 
-    if len(funded_nodes) == num_channels:
-        return funded_nodes
-    elif len(funded_nodes) > num_channels:
-        logging.debug(f'fund_channels: Loaded {len(funded_nodes)} nodes when {num_channels} is required. Disconnecting {num_channels - len(funded_nodes)} nodes.')
-        # something something disconnect additional nodes here
-        # funded_nodes = FUNCTION TO CLEAR OUT NONE-CHANNELED NODES HERE
+    if entry_point > 100:
+        final_num_channels = num_channels * 3
+    else:
+        final_num_channels = num_channels
 
+    # if the nodes are alreadyh funded then just return those.
+    if len(funded_nodes) == final_num_channels:
+        return funded_nodes
+    
     # if we get to this point, then we need additional nodes to channel to, or we just haven't channeled to any
     # same behavior either way
     discovered_nodes = discover_cc_nodes()
@@ -290,10 +263,10 @@ def fund_channels(num_channels = 1, entry_point = -1.0):
             logging.info(f'fund_channels: BM node has channeled with {num_channels} nodes successfully.')
             break
     
-    if len(funded_nodes) != num_channels:
+    if len(funded_nodes) != final_num_channels:
         print(f'BM has failed to channel with {num_channels} nodes. Aborting')
         logging.error(f'fund_channels: Only channels with {len(funded_nodes)} instead of {num_channels} nodes. Returning None')
-        return None
+        return []
     else:
         return funded_nodes
 
@@ -556,7 +529,8 @@ if __name__ == "__main__":
                         <0  : Random
                         0.0 : Oldest nodes
                         50.0 : Middle of the network
-                        100.0 : Youngest Nodes'''
+                        100.0 : Youngest Nodes
+                        >0 : Oldest, middle and youngest nodes'''
                         )
     parser.add_argument('--fresh', action = 'store_true',
                         help = '''
