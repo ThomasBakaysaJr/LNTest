@@ -554,7 +554,7 @@ def save_status(status):
     '''
     Saves status as a json file to disk
     '''
-    logging.log(f'save_status: Writing to disk: \n{status}')
+    logging.info(f'save_status: Writing to disk: \n{status}')
     with open(CURRENT_MESSAGE_FILE, 'w') as f:
         json.dump(status, f)
 
