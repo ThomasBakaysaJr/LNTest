@@ -245,17 +245,17 @@ def get_channels():
         return None
     return node_channels
 
-def set_state(state):
+def set_status(status):
     '''
-    set state to 'state'
-    write immediately to json file
+    Use the incoming status to set this node's state in shared memory
     '''
-    node_data = create_state(state)
+    node_data = create_shared_status(status)
     write_state(node_data)
 
 def get_status_data():
     '''
-    Returns the entirety of the static status data 
+    Load and return status data stored in shared memory
+    Returns an empty dict if no valid shm file 
     '''
     node_name = f'{HOST_NAME}_status'
     data = {}
@@ -294,42 +294,51 @@ def get_capacity(node):
     else:
         return None
         
-def create_state(state):
+def create_shared_status(status, state):
     '''
-    Wrapper to get a dictionary containing all the info required for the tracker.
-    state is the state we're changing it to (online, sending, down, etc)
-    this state is different (abstracted from) than the actual channel state
+    Trimming status and adding relevant info to be stored in shared memory
     '''
     channels = get_channels()
-    this_id = get_node_id()
-    # going to save this as a json
-    node_data = {
-        'name' : HOST_NAME,
-        'id' : this_id,
-        'short id' : get_short_id(this_id),
+    node_data = status.copy()
+
+    '''
+    incoming status by default have attributes
+    ------------------------------------------
+    time
+    short_id
+    host-name
+    counter
+    message
+    state
+    tracking_dict
+    sent_messages
+    '''
+
+    # updates state, adds receiver and channels
+    node_data.update({
         'state' : state,
         'receiver' : 'not sending',
         'channels' : channels
-    }
+    })
     return node_data
 
-def set_sending(target_node):
+def set_sending(status, target_node):
     '''
     used to set this node to sending when propogating messages
     '''
-    node_data = create_state('sending')
+    node_data = create_shared_status(status, 'sending')
     node_data['receiver'] = get_short_id(target_node)
-    write_state(node_data)
+    write_status(node_data)
 
-def write_state(data):
+def write_status(status):
     '''
     Write the state to a shared memory buffer.
     '''
     block_size = 5012 # give ourselves a little wiggle room (each status can get to roughly 1.5KB)
-    status = json.dumps(data).encode('utf-8')
+    status = json.dumps(status).encode('utf-8')
 
     if len(status) >= block_size:
-        logging.error(f'write_data: Status is greater than block_size {block_size}. Aborting write to memory.')
+        logging.error(f'write_status: Status is greater than block_size {block_size}. Aborting write to memory.')
         return
     
     # Memory blocks are created by the tester_v1 script
@@ -339,9 +348,9 @@ def write_state(data):
         shm.buf[len(status):] = b'\x00' * (block_size - len(status))
         shm.close()
     except FileNotFoundError:
-        logging.error(f'write_state: Error: Shared memory block for {HOST_NAME} not found.')
+        logging.error(f'write_status: Error: Shared memory block for {HOST_NAME} not found.')
     except Exception as e:
-        logging.error(f'write_state: Error: {e}')
+        logging.error(f'write_status: Error: {e}')
 
 
 
