@@ -10,6 +10,7 @@ import docker
 import shlex
 import os
 import textwrap
+import random
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
@@ -58,6 +59,7 @@ WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
 SLEEP_INTERVAL = 1
 
+# a list of all the currently running docker containers
 DOCKER_CONTAINERS = set()
 
 # configurations for the tests
@@ -67,7 +69,7 @@ TEST_CONFIGS = {
         'var_key' : NUM_CC,
         'range' : (100, 10),
         'multiplier': 1,
-        'max_messages' : 100,
+        'max_messages' : 30,
         'parameters': {
             NUM_CC: 10,
             ACTIVE_NODES: 4,
@@ -80,7 +82,7 @@ TEST_CONFIGS = {
         'var_key' : ACTIVE_NODES,
         'range' : (6, 1),
         'multiplier': 1,
-        'max_messages' : 100,
+        'max_messages' : 30,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 1,
@@ -93,7 +95,7 @@ TEST_CONFIGS = {
         'var_key' : BM_CC,
         'range' : (6, 1),
         'multiplier': 1,
-        'max_messages' : 100,
+        'max_messages' : 30,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
@@ -106,9 +108,23 @@ TEST_CONFIGS = {
         'var_key' : BM_POS,
         'range' : (150, 50),
         'multiplier': 1,
-        'max_messages' : 100,
+        'max_messages' : 30,
         'parameters': {
             NUM_CC: 50,
+            ACTIVE_NODES: 4,
+            BM_CC: 1,
+            BM_POS: -50
+        }
+    },
+    '5' : {
+        'description': '100 CC nodes with takedown at 10%',
+        'var_key' : NUM_CC,
+        'takedown' : True,
+        'range' : (100, 10),
+        'multiplier': 1,
+        'max_messages' : 30,
+        'parameters': {
+            NUM_CC: 100,
             ACTIVE_NODES: 4,
             BM_CC: 1,
             BM_POS: -50
@@ -126,7 +142,7 @@ def main():
     '''
 
     parser = argparse.ArgumentParser(description="LNBot Testing Orchestrator.",
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+                                     formatter_class=argparse.RawDescriptionHelpFormatter )
 
     mode = parser.add_mutually_exclusive_group(required = True)
     mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite. Add options to change the defaults for each run.')
@@ -158,6 +174,10 @@ def main():
                         help = 'Number of messages for this test.')
     parser.add_argument('--max_range', type = int, default = None,
                         help = 'Change the max range for this test. ONLY works with mode --test')
+    parser.add_argument('--step', type = int, default = None,
+                        help = 'Change the step used between tests. Only works with mode --test')
+    parser.add_argument('--takedown', action = 'store_true', 
+                        help = 'Takedown 10% of nodes for this test')
     
     args = parser.parse_args()
 
@@ -240,8 +260,16 @@ def main():
         if args.max_range is not None:
             print(f'max_range is set to {args.max_range}')
             temp_range = list(config['range'])
-            temp_range[-1] = args.max_range
+            temp_range[0] = args.max_range
             config['range'] = temp_range
+        if args.step is not None:
+            print(f'step is set to {args.step}')
+            temp_range = list(config['range'])
+            temp_range[1] = args.max_range
+            config['range'] = temp_range
+        if args.takedown:
+            print(f'Takedown test is True')
+            config['takedown'] = True
 
         config['parameters'] = parameters
         print(f'Running test with:\n{parameters}')
@@ -300,17 +328,31 @@ def run_test(in_config):
             channels_created = setup_test(int(total_nodes), int(parameters[ACTIVE_NODES]))
 
             print(f'Setup finished at {get_time()}')
-            fund_nodes()
+
             # checkpoint, if channels aren't created then we start again.
             if not channels_created:
                 attempt += 1
                 print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
                 continue            
-
+            
+            fund_nodes()
             update_containers()
             total_setup_time = time.time() - cc_start_time
+            
             print(f'Channels created in {total_setup_time} seconds.')
 
+            if config.get('takedown', False):
+                # find the 10% of nodes we're taking down
+                num_nodes_kill = int(total_nodes * 0.1)
+                nodes_to_kill = random.sample(DOCKER_CONTAINERS, num_nodes_kill)
+                # disconnect the nodes here
+                shutdown_nodes(nodes_to_kill)
+                # add the nodes we shut down to the config
+                config['takendown_nodes'] = nodes_to_kill
+
+            # record topology now
+            record_topology(config)
+            
             print(f'Waiting done, proceeding to testing.')
             message_start_time = time.time()
             # ACTUAL SENDING OF MESSAGES
@@ -334,6 +376,7 @@ def run_test(in_config):
                 print(f'Time: {get_time()}')
             # record the test and set reset attempts
             total_send_time = time.time() - message_start_time
+
             record_test(config, test_data, total_setup_time, total_send_time)
             if success:
                 untrack_containers()
@@ -403,9 +446,7 @@ def record_test(config, test_data, setup_time, total_send_time):
         'total_times' :  total_times,
         'test_data' : test_data
         }
-
-    # we save this one and the topology 
-    record_topology(config)
+    
     with open(file_name, 'w') as f:
         json.dump(data, f, indent = 4)
     
@@ -417,7 +458,8 @@ def create_meta_data(config):
     that to the calling function.
     '''
     variable = config['var_key']
-    constants = [param for param in config['parameters'].keys() if param != variable]  
+    constants = [param for param in config['parameters'].keys() if param != variable]
+    is_takedown = config.get('takedown', False)
 
     meta_data = {
         'experiment' : 'LNBot Simulation Experiment',
@@ -425,6 +467,7 @@ def create_meta_data(config):
         'testing': config['description'],
         'variable' : variable,
         'constants' : constants,
+        'takedown' : is_takedown,
         'authors' : [
             'Professor Kurt, Ahmet',
             'Bakaysa, Thomas',
@@ -435,16 +478,27 @@ def create_meta_data(config):
         ]
     }
 
+    # add the takendown nodes - if they exist
+    if is_takedown:
+        meta_data['takendown_nodes'] = config['takendown_nodes']
+
     return meta_data
 
 def record_topology(config):
-    cur_top = retrieve_all_status()
+    cur_topo = retrieve_all_status()
     top_name = f'{get_record_name(config)}_{TOPO_JSON}'
 
+    meta_data = create_meta_data(config)
+
+    data = {
+        'meta_data' : meta_data,
+        'topology' : cur_topo
+    }
+
     with open(top_name, 'w') as f:
-        json.dump(cur_top, f, indent=4)
+        json.dump(data, f, indent=4)
     
-    print(f'Topology data for {len(cur_top)} nodes saved as {top_name}')
+    print(f'Topology data for {len(cur_topo)} nodes saved as {top_name}')
     
 
 def get_record_name(config):
@@ -489,6 +543,20 @@ def kill_nodes():
     '''
     cleanup_shm()
     subprocess.run([KILL_NODES_BASH])
+
+def shutdown_nodes(nodes):
+    '''
+    Shutdown these nodes for a takedown test. 
+    Remove them from the tracker so that the tester won't
+    wait for them.
+    notes:
+    -- maybe unlink them from memory? Might not be required
+    since the cleanup scripts should catch them anyway.
+    '''
+    print(f'Shutting down nodes for takedown test. Nodes being shut down are:\n\
+          {[node.name for node in nodes]}')
+    for node in nodes:
+        node.stop()
 
 def restart_bitcoind():
     '''
@@ -584,10 +652,13 @@ def is_kill_time(start_time, wait_time):
         return False
 
 def send_msg(message, num_cc, where_cc):
+    # create the command and use shelx to breakdown the command to an array
     command_str = (f"docker exec -w {BM_PATH} {BM_CONT} python3 -u {BM_SCRIPT} "
                     f"--msg {message} --cc {num_cc} --init {where_cc}")
     command = shlex.split(command_str)
     print(f'Time: {get_time()}. Sending message {message} . . .')
+
+    # actually send out the command
     result = subprocess.run(command, capture_output=True, text=True)
     if result.stderr:
         print(f'Errors are {result.stderr}')
@@ -748,7 +819,7 @@ def untrack_containers():
 
 def get_cc_containers():
     '''
-    Get the set of all CC server docker containers
+    Get the set of all currently running CC server docker containers
     '''
     try:
         client = docker.from_env()
