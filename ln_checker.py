@@ -250,7 +250,7 @@ def set_status(status):
     Use the incoming status to set this node's state in shared memory
     '''
     node_data = create_shared_status(status)
-    write_state(node_data)
+    write_status(node_data)
 
 def get_status_data():
     '''
