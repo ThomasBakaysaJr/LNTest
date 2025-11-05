@@ -20,7 +20,6 @@ HOST_NAME = os.getenv("CONTAINER_NAME")
 CURRENT_COMMAND_COUNTER = 0
 DISCOVERY_RULE_DIVISOR = [19, 1231]
 
-
 RETRY_INT = 5
 SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
 CONNECT_SLEEP = 10 # timer specifically for initialization of channels
@@ -38,8 +37,9 @@ CREATED_CHANNELS = False
 # The TLV record type used for standard text messages in keysend.
 MESSAGE_TLV_TYPE = "34349334"
 # to keep track of what has been sent where (if we need to resend it.)
-MESSAGE_TRACKING_DICT = {} # this is going to a be a dict of sets
-SENT_MESSAGES = set()
+# WILL BE MOVING THIS TO THE STATUS JSON IN MAIN
+# MESSAGE_TRACKING_DICT = {} # this is going to a be a dict of sets
+# SENT_MESSAGES = set()
 LAST_INVOICE_INDEX = -1
 
 LOG_DIR = Path('logs')
@@ -47,7 +47,6 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 STATUS_DIR = Path('status')
 STATUS_DIR.mkdir(parents=True, exist_ok=True)
 
-MESSAGE_LOG_FILE = STATUS_DIR / f'cc_messageLog_{HOST_NAME}.csv'
 CURRENT_MESSAGE_FILE = STATUS_DIR / f'cc_currentMessage_{HOST_NAME}.csv'
 log_file_path = LOG_DIR / f'noise_log_{HOST_NAME}.log'
 
@@ -283,12 +282,12 @@ def get_connected_nodes():
 #         else:
 #             logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
 
-def send_message_to_connected_nodes(message, counter):
+def send_message_to_connected_nodes(status, message, counter):
     """
     Send a message to all nodes connected to this node via channels and display the message content.
     """
     global SENDING
-    global MESSAGE_TRACKING_DICT
+    
 
     connected_nodes = get_connected_nodes()
     if not connected_nodes:
@@ -299,9 +298,9 @@ def send_message_to_connected_nodes(message, counter):
     for target_node in connected_nodes:
 
         # we check first, no need to resend a message to a node that has already received it
-        if target_node in MESSAGE_TRACKING_DICT.keys() and counter in MESSAGE_TRACKING_DICT[target_node]:
+        if target_node in status.get('tracking_dict').keys() and counter in status.get('tracking_dict')[target_node]:
             logging.info(f'Message {counter} has already been sent to {target_node}. Aborting send.')
-            logging.info(MESSAGE_TRACKING_DICT)
+            logging.info(status.get('tracking_dict'))
             continue
 
         SENDING = True
@@ -324,14 +323,14 @@ def send_message_to_connected_nodes(message, counter):
                                 text=True,
                                 check=True)
             if result.returncode == 0: # success
-                if target_node in MESSAGE_TRACKING_DICT.keys(): # make a new entry for the first messages
-                    MESSAGE_TRACKING_DICT[target_node].add(counter) # tracking invidual sends in case it drops
+                if target_node in status.get('tracking_dict').keys(): # make a new entry for the first messages
+                    status.get('tracking_dict')[target_node].add(counter) # tracking invidual sends in case it drops
                 else:
-                    MESSAGE_TRACKING_DICT[target_node] = {counter}
-                logging.info(f'Message: "{message}" sent to {target_node} successfully. Counter is {MESSAGE_TRACKING_DICT[target_node]}')
+                    status.get('tracking_dict')[target_node] = {counter}
+                logging.info(f'Message: "{message}" sent to {target_node} successfully. Counter is {status.get('tracking_dict')[target_node]}')
                 continue
             else:
-                logging.error(f'{MESSAGE_TRACKING_DICT}')
+                logging.error(f'{status.get('tracking_dict')}')
                 logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Error sending message to {target_node}: {e}")
@@ -364,68 +363,69 @@ def process_message(message):
     except Exception as e:
         logging.error(f"Error processing message: {e}")
 
-def write_to_csv(message, counter):
-    global CURRENT_COMMAND_COUNTER
+# def write_to_csv(message, counter):
+#     global CURRENT_COMMAND_COUNTER
     
-            #'time_stamp', 'first 5 of the node id', 'CC container', 'Message Counter', 'Message'
-    entry = [time.time(), THIS_NODE[:5], HOST_NAME, counter, message]
-    logging.info(entry)
-    if int(counter) > CURRENT_COMMAND_COUNTER:
-        print(f'write_to_csv: incrementing counter')
-        with open(CURRENT_MESSAGE_FILE, 'w') as f:
-            csvwriter = csv.writer(f)
-            csvwriter.writerow(entry)
-        CURRENT_COMMAND_COUNTER = int(counter)
+#             #'time_stamp', 'first 5 of the node id', 'CC container', 'Message Counter', 'Message'
+#     entry = [time.time(), THIS_NODE[:5], HOST_NAME, counter, message]
+#     logging.info(entry)
+#     if int(counter) > CURRENT_COMMAND_COUNTER:
+#         print(f'write_to_csv: incrementing counter')
+#         with open(CURRENT_MESSAGE_FILE, 'w') as f:
+#             csvwriter = csv.writer(f)
+#             csvwriter.writerow(entry)
+#         CURRENT_COMMAND_COUNTER = int(counter)
 
-    with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
-        csvwriter = csv.writer(f)
-        csvwriter.writerow(entry)
+#     with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
+#         csvwriter = csv.writer(f)
+#         csvwriter.writerow(entry)
 
-def get_processed_counters():
+def get_processed_counters(status):
     '''
     Get a current set of processed counters
     Only returns an intersection of all counters
     Moves counter to one global set when its been sent to all channels
     '''
-    global MESSAGE_TRACKING_DICT
-    global SENT_MESSAGES
 
-    prun_msg_dict()
-    if MESSAGE_TRACKING_DICT:
-        first_value = next(iter(MESSAGE_TRACKING_DICT.values()))
+    prun_msg_dict(status)
+    if status.get('tracking_dict'):
+        first_value = next(iter(status.get('tracking_dict').values()))
         processed_counters = first_value.copy()
     else:
         return set()
     
-    for counter_set in MESSAGE_TRACKING_DICT.values():
+    for counter_set in status.get('tracking_dict').values():
         processed_counters = processed_counters & counter_set
 
     # Clean up, remove processed counters from the dictionary into one global set 
     # to save on memory
-    for counter_set in MESSAGE_TRACKING_DICT.values():
+    for counter_set in status.get('tracking_dict').values():
         counter_set.difference_update(processed_counters)
 
-    SENT_MESSAGES = SENT_MESSAGES | processed_counters
+    new_sent_messages = status.get('sent_message') | processed_counters
+    status.update({
+        'sent_messages': new_sent_messages
+    })
 
     return processed_counters
 
-def prun_msg_dict():
+def prun_msg_dict(status):
     '''
     Look at our channels - remove from the dictionary if
     something happened to them (the node died or something)
     that way we resend messages in case they got dropped.
     '''
-    global MESSAGE_TRACKING_DICT
+    
 
     channels = ln_checker.get_channels()
     to_remove = set()
-    for node in MESSAGE_TRACKING_DICT:
+    for node in status.get('tracking_dict'):
         if node not in channels:
             logging.warning(f'Node {node} has no/broken channel. Removing from tracker.')
             to_remove.add(node)
             
     for node in to_remove:
-        MESSAGE_TRACKING_DICT.pop(node)
+        status.get('tracking_dict').pop(node)
 
 def load_this_node ():
     """
@@ -440,7 +440,7 @@ def load_this_node ():
     output = result.stdout.strip()
     THIS_NODE = json.loads(output).get('id')
 
-def is_node_ready():
+def is_node_ready(status):
     '''
     Check if channels are still being created and balanced
     Return False if a single channel is still connecting and nodes are not balanced
@@ -465,20 +465,98 @@ def is_node_ready():
             #     set_state('balancing')
             #     return True
             if ln_checker.evaluate_discovery_rule(int(info.get("capacity", 0)) // 1000) and info.get('state') in ln_checker.NOT_CONNECTING:
-                ln_checker.set_state('connected')
+                set_state(status,'connected')
                 CREATED_CHANNELS = True
                 return True
             elif info.get('state') not in ln_checker.NOT_CONNECTING:
                 is_connecting = True
         if CREATED_CHANNELS and not is_connecting:
-            ln_checker.set_state('connected')
+            set_state(status,'connected')
             return True # channel is normal and balanced
         else:
-            ln_checker.set_state('connecting')
+            set_state(status,'connecting')
             return False
     except Exception as e:
         logging.info(f'Exception {e}')
         return True
+
+def set_state(status, state):
+    '''
+    Update current status state to state
+    Save the current state to shared memory for tester_v1 to use.
+    DOES NOT save to disk - call update_stats or save_status instead
+    '''
+    # just in case we somehow send this an empty status
+    if not status:
+        logging.warning(f'set_state: WARNING: Received an empty status. Attempting to load from disk.')
+        status = load_status()
+
+    #update the status
+    status.update({
+        'state': state
+    })
+    
+    # save to shm
+    ln_checker.set_status(status)
+
+    
+
+def update_status(status, message, counter):
+    '''
+    Update the status to reflect new changes.
+    An empty status will be updated.
+    Save updated status to disk.
+    '''
+    # check if we were given an empty status
+    if not status:
+        status = load_status()
+
+    if int(counter) > status.get('counter'):
+        logging.info(f'update_status: incrementing counter')
+        status.update({
+        'counter' : counter,
+        'message' : message
+        })
+        save_status(status)
+
+
+def load_status():
+    '''
+    Load the last saved status.
+    Returns the default status if there is no saved status.
+    '''
+    status = {}
+    # try opening a past version
+    try:
+        with open(CURRENT_MESSAGE_FILE, 'r') as f:
+            status = json.load(f)
+    except Exception as e:
+        logging.warning(f'load_status: Exception. {e}')
+    
+    # If no status was loaded, create a default status
+    # and save that to file.
+    if not status:
+        status = {
+            'time' : time.time(),
+            'short_id' : THIS_NODE[:5],
+            'host_name' : HOST_NAME,
+            'counter' : 0,
+            'message' : 'node online',
+            'state' : 'initializing',
+            'tracking_dict' : {},
+            'sent_messages' : set()
+        }
+        save_status(status)
+    
+    return status
+
+def save_status(status):
+    '''
+    Saves status as a json file to disk
+    '''
+    logging.log(f'save_status: Writing to disk: \n{status}')
+    with open(CURRENT_MESSAGE_FILE, 'w') as f:
+        json.dump(status, f)
 
 def main():
     """
@@ -488,25 +566,32 @@ def main():
     global CONNECTING
     # connect_to_server()  # Register this bot with the REST server on startup
     load_this_node()
+
+    # this is old method of writing to csv files
     # Create csv file with headers
-    with open(MESSAGE_LOG_FILE, 'w', newline = '') as f:
-        csvwriter = csv.writer(f)
-        csvwriter.writerow(['Time', 'Short_ID', 'CC container', 'Message Counter', 'Message'])
-        # put initial message that this node is online (more for the tracker than anthing else.)
-        csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, 0, 'node online'])
-    with open(CURRENT_MESSAGE_FILE, 'w') as f:
-        csvwriter = csv.writer(f)
-        csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, '0', '0'])
+    # with open(MESSAGE_LOG_FILE, 'w', newline = '') as f:
+    #     csvwriter = csv.writer(f)
+    #     csvwriter.writerow(['Time', 'Short_ID', 'CC container', 'Message Counter', 'Message'])
+    #     # put initial message that this node is online (more for the tracker than anthing else.)
+    #     csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, 0, 'node online'])
+    # with open(CURRENT_MESSAGE_FILE, 'w') as f:
+    #     csvwriter = csv.writer(f)
+    #     csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, '0', '0'])
+
+    # this will either load a saved status to recover from a crash
+    # or it will return a new default status, which is automatically saved
+    # to disk.
+    status = load_status()
 
     # Wait until we've finished creating channels with other nodes
     # Sleep time here is different since it takes a little to find nodes and then
     # try to connect to them.
     
-    ln_checker.set_state('initializing')
+    set_state(status,'initializing')
     while not ln_checker.get_channels(): # need to make sure we're returning stuff
         time.sleep(CONNECT_SLEEP)
     while len(ln_checker.get_channels()) < 1:
-        ln_checker.set_state('initializing')
+        set_state(status,'initializing')
         time.sleep(CONNECT_SLEEP)
     logging.info('Channels have started being created.')
 
@@ -521,19 +606,21 @@ def main():
         if messages and len(messages) > 0:
             for message in messages:
                 command, command_counter = process_message(message)  # seperate the command and counter
-                processed_counters = get_processed_counters() | SENT_MESSAGES # combine it with the global tracker 
+                processed_counters = get_processed_counters(status) | status.get('sent_messages') # combine it with already sent messages 
                 if command_counter and command_counter not in processed_counters:
                     if command_counter not in written_commands: # this way we only write it once
                         written_commands.add(command_counter)
-                        write_to_csv(command, command_counter)
+                        # update_status will handle already sent commands itself
+                        # status should persist, even if written_commands does not
+                        update_status(status, command, command_counter)
                     processed_counters.add(command_counter)
                     logging.info(f'Sending message {message} to connected nodes.')
-                    send_message_to_connected_nodes(message, command_counter)
+                    send_message_to_connected_nodes(status, message, command_counter)
                     logging.info(f'Sent {message} to all connected nodes.')
 
         time.sleep(SLEEP_INT)
         if SENDING or CONNECTING or update_counter > max_counter: # detect state
-            if is_node_ready(): # is_node_ready automatically sets the state
+            if is_node_ready(status): # is_node_ready automatically sets the state
                 CONNECTING = False
             elif ln_checker.get_state() != 'connected':
                 CONNECTING = True
@@ -541,7 +628,7 @@ def main():
             update_counter = 0
             SENDING = False
         elif update_counter > max_counter:
-            if is_node_ready():
+            if is_node_ready(status):
                 CONNECTING = True
         else:
             update_counter += 1
