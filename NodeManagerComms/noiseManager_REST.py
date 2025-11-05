@@ -327,7 +327,7 @@ def send_message_to_connected_nodes(status, message, counter):
                     status.get('tracking_dict')[target_node].add(counter) # tracking invidual sends in case it drops
                 else:
                     status.get('tracking_dict')[target_node] = {counter}
-                logging.info(f'Message: "{message}" sent to {target_node} successfully. Counter is {status.get('tracking_dict')[target_node]}')
+                logging.info(f"Message: [{message}] sent to {target_node} successfully. Counter is {status.get('tracking_dict')[target_node]}")
                 continue
             else:
                 logging.error(f'{status.get('tracking_dict')}')
