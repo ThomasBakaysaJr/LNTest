@@ -402,9 +402,9 @@ def get_processed_counters(status):
     for counter_set in status.get('tracking_dict').values():
         counter_set.difference_update(processed_counters)
 
-    new_sent_messages = status.get('sent_message') | processed_counters
+    new_sent_messages = set(status.get('sent_message')) | processed_counters
     status.update({
-        'sent_messages': new_sent_messages
+        'sent_messages': list(new_sent_messages)
     })
 
     return processed_counters
@@ -545,7 +545,7 @@ def load_status():
             'message' : 'node online',
             'state' : 'initializing',
             'tracking_dict' : {},
-            'sent_messages' : set()
+            'sent_messages' : {}
         }
         save_status(status)
     
@@ -610,7 +610,7 @@ def main():
         if messages and len(messages) > 0:
             for message in messages:
                 command, command_counter = process_message(message)  # seperate the command and counter
-                processed_counters = get_processed_counters(status) | status.get('sent_messages') # combine it with already sent messages 
+                processed_counters = get_processed_counters(status) | set(status.get('sent_messages')) # combine it with already sent messages 
                 if command_counter and command_counter not in processed_counters:
                     if command_counter not in written_commands: # this way we only write it once
                         written_commands.add(command_counter)
