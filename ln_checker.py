@@ -315,7 +315,7 @@ def create_shared_status(status, state = None):
     '''
 
     # only change the state of status if one is provided
-    state = state if state else status.state
+    state = state if state else status.get('state')
 
     # updates state, adds receiver and channels
     node_data.update({
