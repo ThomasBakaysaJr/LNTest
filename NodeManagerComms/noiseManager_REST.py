@@ -47,7 +47,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 STATUS_DIR = Path('status')
 STATUS_DIR.mkdir(parents=True, exist_ok=True)
 
-CURRENT_MESSAGE_FILE = STATUS_DIR / f'cc_currentMessage_{HOST_NAME}.csv'
+CURRENT_MESSAGE_FILE = STATUS_DIR / f'cc_currentMessage_{HOST_NAME}.json'
 log_file_path = LOG_DIR / f'noise_log_{HOST_NAME}.log'
 
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
@@ -514,8 +514,9 @@ def update_status(status, message, counter):
     if int(counter) > status.get('counter'):
         logging.info(f'update_status: incrementing counter')
         status.update({
-        'counter' : counter,
-        'message' : message
+            'time' : time.time(),
+            'counter' : counter,
+            'message' : message
         })
         save_status(status)
 
@@ -555,8 +556,11 @@ def save_status(status):
     Saves status as a json file to disk
     '''
     logging.info(f'save_status: Writing to disk: \n{status}')
-    with open(CURRENT_MESSAGE_FILE, 'w') as f:
-        json.dump(status, f)
+    try:
+        with open(CURRENT_MESSAGE_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception as e:
+        logging.warning(f'load_status: Exception. {e}')
 
 def main():
     """

@@ -485,20 +485,20 @@ def create_meta_data(config):
     return meta_data
 
 def record_topology(config):
-    cur_topo = retrieve_all_status()
+    all_status = retrieve_all_status()
     top_name = f'{get_record_name(config)}_{TOPO_JSON}'
 
     meta_data = create_meta_data(config)
 
     data = {
         'meta_data' : meta_data,
-        'topology' : cur_topo
+        'topology' : all_status
     }
 
     with open(top_name, 'w') as f:
         json.dump(data, f, indent=4)
     
-    print(f'Topology data for {len(cur_topo)} nodes saved as {top_name}')
+    print(f'Topology data for {len(all_status)} nodes saved as {top_name}')
     
 
 def get_record_name(config):
@@ -516,6 +516,10 @@ def get_record_name(config):
     return filename
 
 def retrieve_all_status():
+    '''
+    Retrieve all running CC container statuses from shared memory
+    Returns all statuses in a list
+    '''
     cc_containers = get_cc_containers()
     all_status = list()
 
@@ -598,15 +602,15 @@ def are_channels_ready():
     
     while True:
         time.sleep(SLEEP_INTERVAL)
-        cur_top = retrieve_all_status()
+        all_status = retrieve_all_status()
         update_containers()
 
         if is_kill_time(start_time, MAX_WAIT * WAIT_MULT):
             return False
-        if len(get_cc_containers()) == len(cur_top) and cur_top:
+        if len(get_cc_containers()) == len(all_status) and all_status:
             channels_created = True
             # if a single channel is not online, then channels create will be false and we sleep
-            for status in cur_top:
+            for status in all_status:
                 if status.get('state') != 'connected':
                     channels_created = False
                     break
@@ -620,7 +624,7 @@ def wait_for_propagation(command):
     start_time = time.time()
     success = None
     while sending:
-        data = update_data()
+        data = retrieve_all_status()
         update_containers()
         if data:
             time_interval, done = get_time_interval(data, command)
@@ -766,6 +770,9 @@ def fund_nodes():
         print(f"tester: Exception occurred: {e}")
         return None
     
+# Need to change this to use the new status in the shared memory
+# This is will easier I think, building all_data should be a lot
+# simpler than this guessing game I was doing
 def update_data():
     msg_files = sort_files(glob.glob(CC_CUR_MESSAGE_PREFIX))
     all_data = []
@@ -779,13 +786,24 @@ def update_data():
                 all_data.append(data[-1])
     return all_data
 
-def get_time_interval(data, counter):
-    top_count = str(counter)
-    top_data = [row for row in data if row[COUNTER] == top_count]
+def get_time_interval(data, top_count):
+    '''
+    Retrive the time interval of all statuses in data that match top_count.
+    Parameters:
+        data: List of statuses
+        top_count: counter we are waiting for
+    Returns:
+        interval, is_done
+        interval: time between youngest and oldest status
+        id_done: All status have the same counter as top_count
+    '''
+    # Retrieve the status of all nodes with their counter at top count
+    top_data = [status for status in data if status.get('counter') == top_count]
 
+    # propagation is done when all of statuses have the same counter
     is_done = len(top_data) == len(data)
 
-    times = [float(row[TIME]) for row in top_data]
+    times = [status.get('time') for status in top_data]
     if times:
         interval = max(times) - min(times)
     else:
@@ -793,6 +811,8 @@ def get_time_interval(data, counter):
 
     if is_done:
         print(f'done with counter at {top_count}')
+
+    print(f'Debug: get_time_interval: returning {interval} and \n{top_data}')
 
     return interval, is_done
 
@@ -846,22 +866,22 @@ def get_containers():
     return containers
 
 def print_topology():
-    topology = retrieve_all_status()
-    if topology:
-        for node in topology:
+    all_status = retrieve_all_status()
+    if all_status:
+        for node in all_status:
             print(f'{node.get('name')} : {node.get('short id')} : {node.get('state')} : channel count = {len(node.get('channels'))}')
             for channel in node.get('channels'):
                 print(node.get('channels')[channel])
             print('')
 
-def print_messages():
-    messages = update_data()
-    for msg in messages:
-        print(f'{msg}')
+# def print_messages():
+#     messages = retrieve_all_status()
+#     for msg in messages:
+#         print(f'{msg}')
 
-def print_container_counters():
-    containers = get_containers()
-    print(f'Total of {len(containers)} active containers.')
+# def print_container_counters():
+#     containers = get_containers()
+#     print(f'Total of {len(containers)} active containers.')
 
 def sort_files(in_files):
     '''
