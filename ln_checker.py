@@ -350,12 +350,11 @@ def write_status(status):
         shm.buf[:len(status)] = status
         shm.buf[len(status):] = b'\x00' * (block_size - len(status))
         shm.close()
+        logging.info(f'write_status: Status written. \n {status}')
     except FileNotFoundError:
         logging.error(f'write_status: Error: Shared memory block for {HOST_NAME} not found.')
     except Exception as e:
         logging.error(f'write_status: Error: {e}')
-
-
 
 def get_node_id():
     """

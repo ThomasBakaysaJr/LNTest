@@ -722,11 +722,12 @@ def setup_shm(suffix):
     if 'status' not in f'{suffix}':
         # this will be creating the first memory buffer
         node_name = f'CC{suffix}_status'
-        print(f'Creating shared memeory buffer for {node_name}')
+        print(f'Creating shared memory buffer for {node_name}')
     else:
         # this will be recreating it if the shm dies for some reason; silent
         node_name = suffix
 
+    # CHANGE this to scale off how many nodes we putting in
     block_size = 5012
 
     try:
@@ -734,9 +735,9 @@ def setup_shm(suffix):
         shm.close()
     except FileExistsError:
         # Found a block by this name still, probably from bad cleanup. Clear and prepare it again
-        print(f'setup_shm: Shared memory block found for {node_name}. Clearing. . .')
-        temp_shm = shared_memory.SharedMemory(name=node_name)
-        temp_shm.unlink()
+        print(f'setup_shm: Shared memory block found for {node_name}.')
+        # temp_shm = shared_memory.SharedMemory(name=node_name)
+        # temp_shm.unlink()
 
         # recreate memory block
         shm = shared_memory.SharedMemory(name=node_name, create=True, size=block_size)
@@ -773,6 +774,7 @@ def fund_nodes():
 # Need to change this to use the new status in the shared memory
 # This is will easier I think, building all_data should be a lot
 # simpler than this guessing game I was doing
+# DEFUNCT FUNCTION
 def update_data():
     msg_files = sort_files(glob.glob(CC_CUR_MESSAGE_PREFIX))
     all_data = []
