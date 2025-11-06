@@ -294,7 +294,7 @@ def get_capacity(node):
     else:
         return None
         
-def create_shared_status(status, state):
+def create_shared_status(status, state = None):
     '''
     Trimming status and adding relevant info to be stored in shared memory
     '''
@@ -313,6 +313,9 @@ def create_shared_status(status, state):
     tracking_dict
     sent_messages
     '''
+
+    # only change the state of status if one is provided
+    state = state if state else status.state
 
     # updates state, adds receiver and channels
     node_data.update({
