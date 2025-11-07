@@ -321,7 +321,7 @@ def create_shared_status(status, state = None):
     node_data.update({
         'state' : state,
         'receiver' : 'not sending',
-        'channels' : channels
+        'channels' : list(channels)
     })
     return node_data
 
@@ -338,8 +338,12 @@ def write_status(status):
     Write the state to a shared memory buffer.
     '''
     block_size = 5012 # give ourselves a little wiggle room (each status can get to roughly 1.5KB)
-    status = json.dumps(status).encode('utf-8')
-
+    
+    try:
+        status = json.dumps(status, default=json_set_converter).encode('utf-8')
+    except Exception as e:
+        logging.info(f'Trying to dumps status \n{status}')
+        logging.info(f'write_status: Error: {e}')
     if len(status) >= block_size:
         logging.error(f'write_status: Status is greater than block_size {block_size}. Aborting write to memory.')
         return
@@ -350,7 +354,7 @@ def write_status(status):
         shm.buf[:len(status)] = status
         shm.buf[len(status):] = b'\x00' * (block_size - len(status))
         shm.close()
-        logging.info(f'write_status: Status written. \n {status}')
+#        logging.info(f'write_status: Status written. \n {status}')
     except FileNotFoundError:
         logging.error(f'write_status: Error: Shared memory block for {HOST_NAME} not found.')
     except Exception as e:
@@ -430,3 +434,7 @@ def evaluate_discovery_rule(capacity):
     Check if the given capacity satisfies the discovery rule.
     """
     return capacity % DISCOVERY_RULE_DIVISOR == 0
+    
+def json_set_converter(obj):
+    if isinstance(obj, set):
+        return list(obj)

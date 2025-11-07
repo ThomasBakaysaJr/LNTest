@@ -304,7 +304,7 @@ def send_message_to_connected_nodes(status, message, counter):
             continue
 
         SENDING = True
-        ln_checker.set_sending(target_node) # for the status tracker
+        ln_checker.set_sending(status, target_node) # for the status tracker
         sendmsg_command = ["lightning-cli", "--regtest", "keysend",
             f"destination={target_node}",
             f"amount_msat=1",
@@ -402,7 +402,7 @@ def get_processed_counters(status):
     for counter_set in status.get('tracking_dict').values():
         counter_set.difference_update(processed_counters)
 
-    new_sent_messages = set(status.get('sent_message')) | processed_counters
+    new_sent_messages = set(status.get('sent_messages')) | processed_counters
     status.update({
         'sent_messages': list(new_sent_messages)
     })
@@ -493,6 +493,7 @@ def set_state(status, state):
 
     #update the status
     status.update({
+        'time': time.time(),
         'state': state
     })
     
@@ -510,11 +511,14 @@ def update_status(status, message, counter):
     # check if we were given an empty status
     if not status:
         status = load_status()
-
+        
+    logging.info(f"update_status: status counter: {status.get('counter')} and new counter: {counter}")
+    counter = int(counter)
     if int(counter) > status.get('counter'):
         logging.info(f'update_status: incrementing counter')
         status.update({
             'time' : time.time(),
+            'last_msg_time': time.time(),
             'counter' : counter,
             'message' : message
         })
@@ -537,12 +541,14 @@ def load_status():
     # If no status was loaded, create a default status
     # and save that to file.
     if not status:
+        logging.info(f'load_status: No status found, creating default status.')
         status = {
             'time' : time.time(),
             'short_id' : THIS_NODE[:5],
             'host_name' : HOST_NAME,
             'counter' : 0,
             'message' : 'node online',
+            'last_msg_time': time.time(),
             'state' : 'initializing',
             'tracking_dict' : {},
             'sent_messages' : {}
@@ -558,7 +564,7 @@ def save_status(status):
     logging.info(f'save_status: Writing to disk: \n{status}')
     try:
         with open(CURRENT_MESSAGE_FILE, 'w') as f:
-            json.dump(status, f)
+            json.dump(status, f, default=ln_checker.json_set_converter)
     except Exception as e:
         logging.warning(f'load_status: Exception. {e}')
 

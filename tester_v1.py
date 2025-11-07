@@ -536,7 +536,7 @@ def retrieve_all_status():
             status = json.loads(data.decode('utf-8'))
             all_status.append(status)
         except Exception as e:
-            # print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
+            print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
             setup_shm(node_name)
             continue
     return all_status
@@ -800,12 +800,12 @@ def get_time_interval(data, top_count):
         id_done: All status have the same counter as top_count
     '''
     # Retrieve the status of all nodes with their counter at top count
-    top_data = [status for status in data if status.get('counter') == top_count]
-
+    top_data = [status for status in data if int(status.get('counter')) == int(top_count)]
+    
     # propagation is done when all of statuses have the same counter
     is_done = len(top_data) == len(data)
 
-    times = [status.get('time') for status in top_data]
+    times = [status.get('last_msg_time') for status in top_data]
     if times:
         interval = max(times) - min(times)
     else:
@@ -814,7 +814,7 @@ def get_time_interval(data, top_count):
     if is_done:
         print(f'done with counter at {top_count}')
 
-    print(f'Debug: get_time_interval: returning {interval} and \n{top_data}')
+#    print(f'Debug: get_time_interval: returning {interval} and \n{top_data}')
 
     return interval, is_done
 
