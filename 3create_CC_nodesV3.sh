@@ -116,7 +116,7 @@ write_address_to_file() {
     NODE_ID=$(echo $NODE_INFO | jq -r '.id')
     NODE_PORT=$(echo $NODE_INFO | jq -r '.binding[0].port')
     NODE_IP=$(echo $NODE_INFO | jq -r '.binding[0].address')
-    NODE_ADDRESS="${NODE_ID}@${NODE_IP}:${NODE_PORT}"
+    NODE_ADDRESS="${NODE_NAME} ${NODE_ID}@${NODE_IP}:${NODE_PORT}"
 
     # Append the address to both address list files
     echo $NODE_ADDRESS >> $NODE_MANAGER_ADDRESS_LIST

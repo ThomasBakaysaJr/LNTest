@@ -9,7 +9,6 @@
 # The script will avoid connecting to nodes that already have a channel with a peer. 
 # The script will also close the channel with the Innocent node and disconnect once the maximum number of peers with channels 
 # is reached, making the CC node no longer discoverable.
-# The script is designed to run in a loop, creating channels with new nodes every 30 seconds. 
 
 import subprocess
 import json
@@ -355,7 +354,8 @@ def demoGetAddressAndConnect(node_ID):
 
         # Find the full address corresponding to the node_ID
         full_address = None
-        for address in CC_ADDRESS_LIST:
+        for line in CC_ADDRESS_LIST:
+            address = line.split()[1]
             if address.startswith(node_ID):
                 full_address = address.strip()
                 break

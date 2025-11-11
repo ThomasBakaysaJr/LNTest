@@ -20,4 +20,4 @@ sudo -u $USER_NAME "$BITCOIND" -datadir="$BITCOIN_DIR"
 sleep 1
 sudo -u $USER_NAME "$BITCOIN_CLI" -datadir="$BITCOIN_DIR" --regtest createwallet ''
 
-python3 "$MINER_SCRIPT" "$RPC_USER" "$RPC_PASSWORD" "$BITCOIN_CLI"
+$BASE_DIR/LNBot/venv/bin/python "$MINER_SCRIPT" "$RPC_USER" "$RPC_PASSWORD" "$BITCOIN_CLI"

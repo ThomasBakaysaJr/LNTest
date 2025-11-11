@@ -425,9 +425,9 @@ def check_blockchain_height(in_height):
 
 def get_short_id(in_node_id):
     '''
-    Return the first 5 characters of the node ID (or any string really)
+    Return the last 8 characters of the node ID (or any string really)
     '''
-    return in_node_id[:5]
+    return in_node_id[-8:]
 
 def evaluate_discovery_rule(capacity):
     """

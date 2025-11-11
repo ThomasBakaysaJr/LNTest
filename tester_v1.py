@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+'''
+Testing manager.
+This is the main script that will handle
+    - Setting up the tests.
+    - Recording the data.
+    - Breaking down the testing environment.
+    - Doing it all over again
+Use -h to see the options available.
+Logs for CC nodes are stored in Node_Manager/logs
+Logs for the Botmaster are in Botmaster/
+Most errors can be solved by crtl+c and then running the script again.
+'''
+
 import argparse
 import time
 import subprocess
@@ -14,6 +27,8 @@ import random
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
+
+VERSION = "0.1.0"
 
 load_dotenv('config.env')
 
@@ -117,17 +132,17 @@ TEST_CONFIGS = {
         }
     },
     '5' : {
-        'description': '100 CC nodes with takedown at 10%',
+        'description': 'takedown test where a random 10% of the topology gets shutdown.',
         'var_key' : NUM_CC,
         'takedown' : True,
-        'range' : (100, 10),
+        'range' : (50, 10),
         'multiplier': 1,
         'max_messages' : 30,
         'parameters': {
-            NUM_CC: 100,
+            NUM_CC: 50,
             ACTIVE_NODES: 4,
             BM_CC: 1,
-            BM_POS: -50
+            BM_POS: 50
         }
     }
 }
@@ -340,22 +355,60 @@ def run_test(in_config):
             total_setup_time = time.time() - cc_start_time
             
             print(f'Channels created in {total_setup_time} seconds.')
-
+            '''
+            TAKEDOWN SECTION
+            '''
+            cc_nodes = []
             if config.get('takedown', False):
                 # find the 10% of nodes we're taking down
                 num_nodes_kill = int(total_nodes * 0.1)
-                nodes_to_kill = random.sample(DOCKER_CONTAINERS, num_nodes_kill)
-                # disconnect the nodes here
-                shutdown_nodes(nodes_to_kill)
-                # add the nodes we shut down to the config
-                config['takendown_nodes'] = nodes_to_kill
+                
+                # get the list of running CC nodes
+                while not cc_nodes:
+                    cc_nodes = [container for container in DOCKER_CONTAINERS if container.name.startswith('CC')]
+                    time.sleep(SLEEP_INTERVAL)
+                
+                # print(f'DEBUG: cc_nodes has length {len(cc_nodes)} and is \n{cc_nodes}')
+                # print(f'DEBUG: DOCKER_CONTAINERS is \n{DOCKER_CONTAINERS}')
+                
+                nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
+
+            # we only need the name and channels of these nodes being shut down
+            try:
+                temp_dead_nodes = [get_node_status(node.name) for node in nodes_to_kill]
+                dead_nodes = [
+                    {element : node.get(element) for element in ['short_id','host_name', 'channels']}
+                    for node in temp_dead_nodes
+                    ]
+            except Exception as e:
+                # something went wrong, count this test run as a failure and start again.
+                print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}")
+                success = False
+                # we stop tracking containers here because we won't be reaching the !success block below
+                untrack_containers()
+                continue
+                
+            # add the nodes we shut down to the config
+            config.update({
+                'takendown_nodes': dead_nodes
+            })
+            # disconnect the nodes here
+            shutdown_nodes(nodes_to_kill)
+            
+
+            '''
+            END TAKEDOWN SECTION
+            '''
 
             # record topology now
             record_topology(config)
             
             print(f'Waiting done, proceeding to testing.')
             message_start_time = time.time()
-            # ACTUAL SENDING OF MESSAGES
+            
+            '''
+            ACTUAL SENDING OF MESSAGES
+            '''
             for y in range(1, config['max_messages'] + 1):
                 # another wait, just in case we got nodes disconnecting or something
                 are_channels_ready()
@@ -381,7 +434,7 @@ def run_test(in_config):
             if success:
                 untrack_containers()
                 attempt = 0
-            # if not a succes, add to the attempt
+            # if not a success, add to the attempt
             else:
                 attempt += 1
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
@@ -448,7 +501,7 @@ def record_test(config, test_data, setup_time, total_send_time):
         }
     
     with open(file_name, 'w') as f:
-        json.dump(data, f, indent = 4)
+        json.dump(data, f, indent = 4, default = json_set_converter)
     
 
 def create_meta_data(config):
@@ -463,6 +516,7 @@ def create_meta_data(config):
 
     meta_data = {
         'experiment' : 'LNBot Simulation Experiment',
+        'version' : VERSION,
         'description' : 'This file contains the individual propagation times for messages being distributed across the simulated network.',
         'testing': config['description'],
         'variable' : variable,
@@ -496,7 +550,7 @@ def record_topology(config):
     }
 
     with open(top_name, 'w') as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, indent=4, default = json_set_converter)
     
     print(f'Topology data for {len(all_status)} nodes saved as {top_name}')
     
@@ -511,6 +565,10 @@ def get_record_name(config):
     # get a unique code to distinguish this run
     parts = map(str, values.values())
     id = ''.join(parts)
+    # a T in the name means that this was a takedown test.
+    if config.get('takedown', False):
+        id += 'T'
+    
     filename = f'{DATA_DIR}{var_key}_{values[var_key]}_{id}'
 
     return filename
@@ -524,23 +582,38 @@ def retrieve_all_status():
     all_status = list()
 
     for cont in cc_containers:
-        node_name = f'{cont.name}_status'
+        node_name = cont.name
         try:
-            shm = shared_memory.SharedMemory(name=node_name)
-            data = shm.buf.tobytes().split(b'\x00', 1)[0]
-            shm.close()
-
-            if not data:
+            status = get_node_status(node_name)
+            if not status:
                 continue
-
-            status = json.loads(data.decode('utf-8'))
             all_status.append(status)
         except Exception as e:
             print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
-            setup_shm(node_name)
+            setup_shm(node_name, True)
             continue
     return all_status
 
+def get_node_status(suffix):
+    '''
+    Get the status of an individual node.
+    If shm doesn't exist or if there is no data stored, returns None
+    '''
+    node_name = f'{suffix}_status'
+    shm = shared_memory.SharedMemory(name=node_name)
+    data = shm.buf.tobytes().split(b'\x00', 1)[0]
+    shm.close()
+    
+    if data:
+        try:
+            status = json.loads(data.decode('utf-8'))
+        except Exception as e:
+            print(f'retrieve_all_status: Error: json data is \n{data} with error: {e}')
+            return None
+        return status
+    else:
+        return None
+        
 def kill_nodes():
     '''
     Cleanup nodes and unlink the shared memory
@@ -552,16 +625,40 @@ def shutdown_nodes(nodes):
     '''
     Shutdown these nodes for a takedown test. 
     Remove them from the tracker so that the tester won't
-    wait for them.
-    notes:
-    -- maybe unlink them from memory? Might not be required
-    since the cleanup scripts should catch them anyway.
+    wait for them. Will also unlink them from shared memory
     '''
     print(f'Shutting down nodes for takedown test. Nodes being shut down are:\n\
           {[node.name for node in nodes]}')
+    
+    # stop nodes and remove them from shared memory.
     for node in nodes:
         node.stop()
-
+        remove_shm(node.name)
+        
+    # ad hoc solution for removing from cc_list
+    # eventually plan to have just one list and then simply mount that
+    # to all containers.
+    # artifact from previous group's  work
+    node_names = [node.name for node in nodes]
+    
+    # Directories for NodeManagerComms and BotMasterComms
+    node_cc_file = "NodeManagerComms/CC_address_list.txt"
+    bm_cc_file = "BotMasterCommsCC_address_list.txt"
+    
+    with open(node_cc_file, 'r') as file:
+        cc_file = file.readlines()
+    
+    new_cc_list = []
+    for line in cc_file:
+        name = line.split()[0]
+        if name not in node_names:
+            new_cc_list.append(line)
+    
+    with open(node_cc_file, 'w') as file:
+        file.write('\n'.join(new_cc_list))
+    with open(bm_cc_file, 'w') as file:
+        file.write('\n'.join(new_cc_list))
+    
 def restart_bitcoind():
     '''
     Shut down and restart bitcoind for a fresh start.
@@ -691,7 +788,7 @@ def setup_test(total_nodes, active_nodes):
     while counter <= total_nodes:
         for i in range(active_nodes):
             try:
-                setup_shm(counter)
+                setup_shm("CC" + str(counter), True)
                 subprocess.run(
                     [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
                 )
@@ -700,7 +797,7 @@ def setup_test(total_nodes, active_nodes):
                 print(f"setup_test failed with exit code {e.returncode}")
                 print(f"  setup_test STDOUT: {e.stdout.strip()}")
                 print(f"  setup_test STDERR: {e.stderr.strip()}") 
-                raise # Re-raise the exception so your calling code can catch it
+                raise
             except Exception as e:
                 print(f"setup_test: Exception occurred: {e}")
                 return None
@@ -714,18 +811,16 @@ def setup_test(total_nodes, active_nodes):
             return False
     return True
 
-def setup_shm(suffix):
+def setup_shm(suffix, first_block = False):
     '''
     Setup the shm block for this node using incoming suffix counter
     Make sure node_name and block_size matches the name and block_size in ln_checker.
     '''
-    if 'status' not in f'{suffix}':
+    
+    node_name = f'{suffix}_status'
+    if first_block:
         # this will be creating the first memory buffer
-        node_name = f'CC{suffix}_status'
         print(f'Creating shared memory buffer for {node_name}')
-    else:
-        # this will be recreating it if the shm dies for some reason; silent
-        node_name = suffix
 
     # CHANGE this to scale off how many nodes we putting in
     block_size = 5012
@@ -736,12 +831,14 @@ def setup_shm(suffix):
     except FileExistsError:
         # Found a block by this name still, probably from bad cleanup. Clear and prepare it again
         print(f'setup_shm: Shared memory block found for {node_name}.')
-        # temp_shm = shared_memory.SharedMemory(name=node_name)
-        # temp_shm.unlink()
-
-        # recreate memory block
-        shm = shared_memory.SharedMemory(name=node_name, create=True, size=block_size)
-        shm.close()
+        if first_block:
+            # if first_block is true, we want this to the first block of memory
+            # so get rid of anything that may be here and re-create it.
+            temp_shm = shared_memory.SharedMemory(name=node_name)
+            temp_shm.unlink()
+            # recreate memory block
+            shm = shared_memory.SharedMemory(name=node_name, create=True, size=block_size)
+            shm.close()
 
 def cleanup_shm():
     '''
@@ -749,12 +846,18 @@ def cleanup_shm():
     '''
     cc_containers = get_cc_containers()
     for cont in cc_containers:
-        node_name = f'{cont.name}_status'
-        try:
-            shm = shared_memory.SharedMemory(name=node_name)
-            shm.unlink()
-        except Exception as e:
-            print(f'cleanup_shm: ERROR in cleaning up memory. Error: {e}')
+        remove_shm(cont.name)
+
+def remove_shm(suffix):
+    node_name = f'{suffix}_status'
+    try:
+        shm = shared_memory.SharedMemory(name=node_name)
+        shm.unlink()
+    except FileNotFoundError:
+        # we don't care if the file doesn't exists, something else probably took care of it
+        pass
+    except Exception as e:
+        print(f'remove_shm: ERROR in cleaning up memory. Error: {e}')
 
 def fund_nodes():
     try:
@@ -822,18 +925,21 @@ def update_containers():
     global DOCKER_CONTAINERS
 
     containers = set(get_containers())
+    if(len(DOCKER_CONTAINERS) != len(containers)):
+        print(f'update containers: {len(DOCKER_CONTAINERS)} and cont is {len(containers)}')
+
     
     if not DOCKER_CONTAINERS:
         DOCKER_CONTAINERS = containers
         print(f'Total of {len(DOCKER_CONTAINERS)} containers/nodes being tracked.')
     else:
-        dead_cont = DOCKER_CONTAINERS - containers
-        DOCKER_CONTAINERS = DOCKER_CONTAINERS - dead_cont
+        dead_cont = DOCKER_CONTAINERS - containers 
+        DOCKER_CONTAINERS = containers
         if dead_cont:
             print(f'The following containers have died. Recorded at {get_time()}')
             for container in dead_cont:
                 print(f'{container.name}')
-
+    
 def untrack_containers():
     global DOCKER_CONTAINERS
 
@@ -926,6 +1032,10 @@ def get_time():
 
 def get_date():
     return datetime.now().date()
+
+def json_set_converter(obj):
+    if isinstance(obj, set):
+        return list(obj)
 
 if __name__ == "__main__":
     main()

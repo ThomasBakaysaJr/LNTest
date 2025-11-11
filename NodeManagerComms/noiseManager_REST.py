@@ -544,7 +544,7 @@ def load_status():
         logging.info(f'load_status: No status found, creating default status.')
         status = {
             'time' : time.time(),
-            'short_id' : THIS_NODE[:5],
+            'short_id' : ln_checker.get_short_id(THIS_NODE),
             'host_name' : HOST_NAME,
             'counter' : 0,
             'message' : 'node online',

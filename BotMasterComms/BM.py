@@ -155,7 +155,8 @@ def demoGetAddressAndConnect(node_ID):
 
         # Find the full address corresponding to the node_ID
         full_address = None
-        for address in CC_ADDRESS_LIST:
+        for line in CC_ADDRESS_LIST:
+            address = line.split()[1]
             if address.startswith(node_ID):
                 full_address = address.strip()
                 break
@@ -186,10 +187,15 @@ def discover_cc_nodes():
         # read the file that contains all the CC adresses
         with open('CC_address_list.txt', 'r') as id_file:
                 address_list = id_file.readlines()
-
+        
+        
+        
         valid_nodes = []
         for node in address_list:
-            address = node.strip()
+            line = node.split()
+            node_name = line[0].strip()
+            
+            address = line[1].strip()
             valid_nodes.append(address.split('@')[0])
         logging.info(f"Valid CC nodes discovered: {valid_nodes}")
 
