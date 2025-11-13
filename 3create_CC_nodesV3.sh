@@ -42,7 +42,7 @@ fund_node() {
     address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
 
     # Send 10 BTC to the node's address           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
-    txid=$(curl -s --user bitcoinuser:bitcoinpassword \
+    txid=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
         --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", 10]}" \
         -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
 
@@ -53,11 +53,11 @@ confirm_funds() {
 # Mine blocks to confirm transactions
 #           you should make sure correct user and password are used according to bitcoin.conf file!!!!!!!!!!
 echo "Mining blocks to confirm transactions..."
-mining_address=$(curl -s --user bitcoinuser:bitcoinpassword \
+mining_address=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
     --data-binary '{"jsonrpc": "1.0", "id": "mining", "method": "getnewaddress", "params": []}' \
     -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
 
-curl -s --user bitcoinuser:bitcoinpassword \
+curl -s --user $RPC_USER:$RPC_PASSWORD \
     --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"mining\", \"method\": \"generatetoaddress\", \"params\": [6, \"$mining_address\"]}" \
     -H 'content-type: text/plain;' $BITCOIND_RPC
 }
