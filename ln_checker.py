@@ -321,7 +321,7 @@ def create_shared_status(status, state = None):
     node_data.update({
         'state' : state,
         'receiver' : 'not sending',
-        'channels' : list(channels)
+        'channels' : channels
     })
     return node_data
 
