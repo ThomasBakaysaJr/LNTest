@@ -328,8 +328,6 @@ def run_test(in_config):
 
         # calc how many nodes we need to spin up (active nodes needs to divide into it)
         total_nodes = parameters[NUM_CC]
-        if remainder :=  total_nodes % int(parameters[ACTIVE_NODES]):
-            total_nodes += parameters[ACTIVE_NODES] - remainder
 
         while not success:
             if attempt > MAX_TRY:
@@ -393,6 +391,7 @@ def run_test(in_config):
                     'takendown_nodes': dead_nodes
                 })
                 # disconnect the nodes here
+                print(f"Takedown test:")
                 shutdown_nodes(nodes_to_kill)
                 
 
@@ -623,11 +622,11 @@ def kill_nodes():
 
 def shutdown_nodes(nodes):
     '''
-    Shutdown these nodes for a takedown test. 
+    Shutdown these nodes. 
     Remove them from the tracker so that the tester won't
     wait for them. Will also unlink them from shared memory
     '''
-    print(f'Shutting down nodes for takedown test. Nodes being shut down are:\n\
+    print(f'Shutting down nodes. Nodes being shut down are:\n\
           {[node.name for node in nodes]}')
     
     # stop nodes and remove them from shared memory.
@@ -783,6 +782,10 @@ def setup_test(total_nodes, active_nodes):
         print(f"setup_test: Exception occurred: {e}")
         return None
     
+    # for shortcut fix, will replace
+    if remainder :=  total_nodes % active_nodes:
+        total_nodes += active_nodes - remainder
+
     # now we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
     counter = 1
     while counter <= total_nodes:
@@ -809,6 +812,17 @@ def setup_test(total_nodes, active_nodes):
         if not are_channels_ready():
             print(f'Channels were not ready in time')
             return False
+    
+    # will fix when code gets refactored.
+    # for now, we kill the extra nodes that get created so that we conform to the max nodes we're supposed to have
+    # get the list of running CC nodes
+    if remainder:
+        cc_nodes = []
+        while not cc_nodes:
+            cc_nodes = [container for container in DOCKER_CONTAINERS if container.name.startswith('CC')]
+            time.sleep(SLEEP_INTERVAL)
+        shutdown_nodes(cc_nodes[-remainder:])
+
     return True
 
 def setup_shm(suffix, first_block = False):
