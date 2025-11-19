@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-import sys
+import re
 import random
 
 # import the ln_checker file
@@ -188,7 +188,7 @@ def discover_cc_nodes():
         with open('CC_address_list.txt', 'r') as id_file:
                 address_list = id_file.readlines()
         
-        
+        address_list.sort(key=lambda x: int(re.search(r'CC(\d+)', x).group(1)))
         
         valid_nodes = []
         for node in address_list:
