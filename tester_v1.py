@@ -373,28 +373,28 @@ def run_test(in_config):
                 
                 nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
 
-            # we only need the name and channels of these nodes being shut down
-            try:
-                temp_dead_nodes = [get_node_status(node.name) for node in nodes_to_kill]
-                dead_nodes = [
-                    {element : node.get(element) for element in ['short_id','host_name', 'channels']}
-                    for node in temp_dead_nodes
-                    ]
-            except Exception as e:
-                # something went wrong, count this test run as a failure and start again.
-                print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}")
-                success = False
-                # we stop tracking containers here because we won't be reaching the !success block below
-                untrack_containers()
-                continue
+                # we only need the name and channels of these nodes being shut down
+                try:
+                    temp_dead_nodes = [get_node_status(node.name) for node in nodes_to_kill]
+                    dead_nodes = [
+                        {element : node.get(element) for element in ['short_id','host_name', 'channels']}
+                        for node in temp_dead_nodes
+                        ]
+                except Exception as e:
+                    # something went wrong, count this test run as a failure and start again.
+                    print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}")
+                    success = False
+                    # we stop tracking containers here because we won't be reaching the !success block below
+                    untrack_containers()
+                    continue
                 
-            # add the nodes we shut down to the config
-            config.update({
-                'takendown_nodes': dead_nodes
-            })
-            # disconnect the nodes here
-            shutdown_nodes(nodes_to_kill)
-            
+                # add the nodes we shut down to the config
+                config.update({
+                    'takendown_nodes': dead_nodes
+                })
+                # disconnect the nodes here
+                shutdown_nodes(nodes_to_kill)
+                
 
             '''
             END TAKEDOWN SECTION
@@ -753,7 +753,7 @@ def is_kill_time(start_time, wait_time):
         return False
 
 def send_msg(message, num_cc, where_cc):
-    # create the command and use shelx to breakdown the command to an array
+    # create the command and use shlex to breakdown the command to an array
     command_str = (f"docker exec -w {BM_PATH} {BM_CONT} python3 -u {BM_SCRIPT} "
                     f"--msg {message} --cc {num_cc} --init {where_cc}")
     command = shlex.split(command_str)
