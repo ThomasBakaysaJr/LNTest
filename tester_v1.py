@@ -363,7 +363,7 @@ def run_test(in_config):
                 
                 # get the list of running CC nodes
                 while not cc_nodes:
-                    cc_nodes = [container for container in DOCKER_CONTAINERS if container.name.startswith('CC')]
+                    cc_nodes = get_cc_containers()
                     time.sleep(SLEEP_INTERVAL)
                 
                 # print(f'DEBUG: cc_nodes has length {len(cc_nodes)} and is \n{cc_nodes}')
@@ -642,7 +642,7 @@ def shutdown_nodes(nodes):
     
     # Directories for NodeManagerComms and BotMasterComms
     node_cc_file = "NodeManagerComms/CC_address_list.txt"
-    bm_cc_file = "BotMasterCommsCC_address_list.txt"
+    bm_cc_file = "BotMasterComms/CC_address_list.txt"
     
     with open(node_cc_file, 'r') as file:
         cc_file = file.readlines()
@@ -654,9 +654,9 @@ def shutdown_nodes(nodes):
             new_cc_list.append(line)
     
     with open(node_cc_file, 'w') as file:
-        file.write('\n'.join(new_cc_list))
+        file.write(''.join(new_cc_list))
     with open(bm_cc_file, 'w') as file:
-        file.write('\n'.join(new_cc_list))
+        file.write(''.join(new_cc_list))
     
 def restart_bitcoind():
     '''
@@ -819,7 +819,7 @@ def setup_test(total_nodes, active_nodes):
     if remainder:
         cc_nodes = []
         while not cc_nodes:
-            cc_nodes = [container for container in DOCKER_CONTAINERS if container.name.startswith('CC')]
+            cc_nodes = get_cc_containers()
             time.sleep(SLEEP_INTERVAL)
         shutdown_nodes(cc_nodes[-remainder:])
 
