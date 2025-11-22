@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
 
-VERSION = "0.1.0"
+VERSION = "0.3.0"
 
 load_dotenv('config.env')
 
