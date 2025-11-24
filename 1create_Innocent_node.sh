@@ -31,7 +31,7 @@ create_innocent_node() {
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $INNO_MANAGER_DIR:/root/ \
-        elementsproject/lightningd:latest \
+        lnbot_node:v25.09 \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=10010

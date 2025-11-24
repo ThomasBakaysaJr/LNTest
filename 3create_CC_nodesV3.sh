@@ -82,7 +82,7 @@ create_node() {
         -v $LN_CHECKER_FILE:/root/nodemanager/ln_checker.py \
         -v $STARTUP_SCRIPT:/root/nodemanager/node_start.sh \
         --entrypoint /root/nodemanager/node_start.sh \
-        elementsproject/lightningd:v25.09 \
+        lnbot_node:v25.09 \
         $NUM_ACTIVE_NODES \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
