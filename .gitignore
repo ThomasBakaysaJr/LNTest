@@ -7,7 +7,6 @@ data/*
 !data/.gitkeep
 BotMasterComms/*
 !BotMasterComms/BM.py
-Dockerfile
 InnocentManager/*
 NodeManagerComms/*
 !NodeManagerComms/CC_Manager.py
@@ -15,4 +14,5 @@ NodeManagerComms/*
 master_log.log
 setuptime_data.csv
 venv/*
+utils/__pycache__
 config.env

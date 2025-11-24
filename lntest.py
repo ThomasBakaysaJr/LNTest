@@ -24,11 +24,13 @@ import shlex
 import os
 import textwrap
 import random
+from utils import docker_utils
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
 
-VERSION = "0.3.0"
+LNTEST_VERSION = "0.3.0"
+LNNODE_VERSION = "lnbot_node:v25.09"
 
 load_dotenv('config.env')
 
@@ -195,6 +197,8 @@ def main():
                         help = 'Takedown 10% of nodes for this test')
     
     args = parser.parse_args()
+
+    docker_utils.ensure_custom_image(LNNODE_VERSION)
 
     if args.full or args.small:
 
@@ -515,7 +519,7 @@ def create_meta_data(config):
 
     meta_data = {
         'experiment' : 'LNBot Simulation Experiment',
-        'version' : VERSION,
+        'version' : LNTEST_VERSION,
         'description' : 'This file contains the individual propagation times for messages being distributed across the simulated network.',
         'testing': config['description'],
         'variable' : variable,
