@@ -24,10 +24,11 @@ import shlex
 import os
 import textwrap
 import random
-from utils import docker_utils
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
+from utils import docker_utils
+from utils import sys_monitor
 
 LNTEST_VERSION = "0.3.0"
 LNNODE_VERSION = "lnbot_node:v25.09"
@@ -317,10 +318,13 @@ def run_test(in_config):
     overall_test_time = time.time()
     attempt = 0
     testing = config['var_key']
-    
+
     parameters = config['parameters']
     start = parameters[testing]
     end, step = config['range']
+
+    monitor = sys_monitor.HardwareMonitor(f"{get_record_name(config)}_system_metrics.csv")
+    monitor.start()
 
     for test_value in range(start, end + 1, step):
         test_data = []
@@ -444,6 +448,7 @@ def run_test(in_config):
                 untrack_containers()
 
     now_time = time.time()
+    monitor.stop()
     print(f'FINISHED at {overall_test_time - now_time} testing for {config['description']}.')
     print(f'Testing with: \n{config}')
 
