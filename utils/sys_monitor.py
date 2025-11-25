@@ -2,10 +2,11 @@ import psutil
 import time
 import csv
 import os
-from datetime import datetime
+import datetime
 
 def monitor_system(output_suffix="system_metrics.csv", interval=1):
-    filename = datetime.now().strftime(f"data/%Y-%m-%d-%H-%M_{output_suffix}")
+    os.makedirs("data", exist_ok=True)
+    filename = datetime.datetime.now().strftime(f"data/%Y-%m-%d-%H-%M_{output_suffix}")
     # Create file and write headers if it doesn't exist
     file_exists = os.path.isfile(filename)
     
