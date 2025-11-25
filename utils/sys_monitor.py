@@ -2,15 +2,14 @@ import psutil
 import time
 import csv
 import os
-import datetime
+import sys
+import subprocess
 
-def monitor_system(output_suffix="system_metrics.csv", interval=1):
-    os.makedirs("data", exist_ok=True)
-    filename = datetime.datetime.now().strftime(f"data/%Y-%m-%d-%H-%M_{output_suffix}")
+def monitor_loop(filename="data/system_metrics.csv", interval=1):
     # Create file and write headers if it doesn't exist
     file_exists = os.path.isfile(filename)
     
-    print(f"Starting generic system monitor. Logging to {filename}...")
+    print(f"Starting generic system monitor. Logging to {filename} ...")
     
     with open(filename, mode='a', newline='') as f:
         writer = csv.writer(f)
@@ -40,7 +39,37 @@ def monitor_system(output_suffix="system_metrics.csv", interval=1):
         except KeyboardInterrupt:
             print("\nMonitoring stopped.")
 
+class HardwareMonitor:
+    def __init__(self, output_file="system_metrics.csv"):
+        self.output_file = output_file
+        self._process = None
+
+    def start(self):
+        """Spawns this script as a separate background process."""
+        if self._process is not None:
+            return # Already running
+
+        # We call THIS file as a script again using sys.executable
+        # This bypasses the GIL by creating a whole new Python instance
+        self._process = subprocess.Popen(
+            [sys.executable, __file__, "--run-worker", self.output_file]
+        )
+        print(f" [Monitor] Started background process (PID: {self._process.pid})")
+
+    def stop(self):
+        """Kills the background process."""
+        if self._process:
+            print(" [Monitor] Stopping...")
+            self._process.terminate()
+            self._process.wait()
+            self._process = None
+
 if __name__ == "__main__":
-    # Run psutil once to initialize the CPU counter (it needs a 'previous' state)
-    psutil.cpu_percent(interval=None) 
-    monitor_system()
+    # Check if we are being called as the worker
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-worker":
+        # We are the child process! Run the loop.
+        filename = sys.argv[2] if len(sys.argv) > 2 else "data/system_metrics.csv"
+        monitor_loop(filename)
+    else:
+        # We are being run manually by the user
+        monitor_loop()
