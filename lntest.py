@@ -419,9 +419,6 @@ def run_test(in_config):
             '''
             END TAKEDOWN SECTION
             '''
-
-            # record topology now
-            record_topology(config)
             
             print(f'Waiting done, proceeding to testing.')
             message_start_time = time.time()
@@ -451,6 +448,8 @@ def run_test(in_config):
             total_send_time = time.time() - message_start_time
 
             record_test(config, test_data, total_setup_time, total_send_time)
+            record_topology(config)
+            
             if success:
                 untrack_containers()
                 attempt = 0
