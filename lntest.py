@@ -202,6 +202,7 @@ def main():
     docker_utils.ensure_custom_image(LNNODE_VERSION)
     # start recording time for total testing
     start_time = time.time()
+    all_configs = []
 
     if args.full or args.small:
 
@@ -260,7 +261,9 @@ def main():
                     config['max_messages'] = args.max_msg
                         
             config['parameters'] = parameters
+            all_configs.append(config)
             run_test(config)
+
     elif args.test:
         config = TEST_CONFIGS[args.test].copy()
         parameters = config['parameters']
@@ -300,11 +303,13 @@ def main():
             return
         else:
             print(f'Continuing')
+
+        all_configs.append(config)
         run_test(config)
 
     # record total time
     total_time = time.time() - start_time
-    record_total_time.record_total_time(total_time, config)
+    record_total_time.record_total_time(total_time, all_configs)
 
     kill_nodes()
     print(f'Testing finished. Exiting.')
