@@ -24,10 +24,11 @@ import shlex
 import os
 import textwrap
 import random
-from utils import docker_utils
 from dotenv import load_dotenv
 from datetime import datetime
 from multiprocessing import shared_memory
+from utils import docker_utils
+from utils import record_total_time
 
 LNTEST_VERSION = "0.3.0"
 LNNODE_VERSION = "lnbot_node:v25.09"
@@ -199,6 +200,8 @@ def main():
     args = parser.parse_args()
 
     docker_utils.ensure_custom_image(LNNODE_VERSION)
+    # start recording time for total testing
+    start_time = time.time()
 
     if args.full or args.small:
 
@@ -298,6 +301,10 @@ def main():
         else:
             print(f'Continuing')
         run_test(config)
+
+    # record total time
+    total_time = time.time() - start_time
+    record_total_time.record_total_time(total_time, config)
 
     kill_nodes()
     print(f'Testing finished. Exiting.')
