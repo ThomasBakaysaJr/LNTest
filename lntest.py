@@ -449,7 +449,7 @@ def run_test(in_config):
 
             record_test(config, test_data, total_setup_time, total_send_time)
             record_topology(config)
-            
+
             if success:
                 untrack_containers()
                 attempt = 0
@@ -459,9 +459,8 @@ def run_test(in_config):
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
                 untrack_containers()
 
-    now_time = time.time()
     monitor.stop()
-    print(f'FINISHED at {overall_test_time - now_time} testing for {config['description']}.')
+    print(f'FINISHED at {time.time() - overall_test_time} testing for {config['description']}.')
     print(f'Testing with: \n{config}')
 
 def init_bitcoin_server():
