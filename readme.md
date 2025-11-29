@@ -81,7 +81,7 @@ sudo apt install git
 Navigate to the Documents directory in your home directory.
 
 ```
-cd ~/Documents
+cd ~\/Documents
 ```
 
 Create a directory for LNBot and Bitcoin core to live in. In our testing environment we named it “LNBot_research_project”. 
@@ -128,8 +128,8 @@ Do not run bitcoin-core just yet.
 We will create a config file for the bitcoin core server to use. This way the bitcoin server will start as a regtest with the same server everytime. Change your directory to */.bitcoin*, if the directory doesn’t exist create it.
 
 ```
-mkdir ~/.bitcoin #if the directory doesn’t exist  
-cd ~/.bitcoin  
+mkdir ~\.bitcoin #if the directory doesn’t exist  
+cd ~\.bitcoin  
 nano bitcoin.conf
 ```
 
@@ -177,11 +177,11 @@ We will create a config file for the lightning daemons to use. We will set the r
 Change your directory to */.lightning*, if the directory doesn’t exist create it.
 
 ```
-mkdir ~/.lightning #if the directory doesn’t exist  
-cd ~/.lightning
+mkdir ~\.lightning #if the directory doesn’t exist  
+cd ~\.lightning
 ```
 
-Here we create the configuration file for lighting. 
+Here we create the configuration file for lighting.
 
 ```
 nano lightning.conf
@@ -212,7 +212,7 @@ We will start the bitcoin server and verify that it is starting as a regtest env
 Change directories to where the bitcoin-core files are located. This assumes you followed the exact same file structure as we did.
 
 ```
-cd ~/Documents/LNBot_research_project/bitcoin/bin  
+cd ~\/Documents\/LNBot_research_project\/bitcoin\/bin  
 ./bitcoind 
 ```
 
@@ -241,7 +241,7 @@ It is important to note that the script uses hard paths to find the necessary fi
 As of 9/30/25 this is a private repo, you will need a private access token (PAT) from Thomas Bakaysa Jr if you wish to clone the repo. First we move into the LNBot_research_project directory and then clone the git repo into this directory.
 
 ```
-cd ~/Documents/LNBot_research_project  
+cd ~\/Documents\/LNBot_research_project  
 git clone https://github.com/ThomasBakaysaJr/LNBot_Research.git 
 ```
 
@@ -273,7 +273,7 @@ nano config.env
 
 USER_NAME : Needs to match the current user account.   
 In this example USER_NAME should be “akurt”.  
-![path-users](images/path-users.png)
+![path-user](images/path-user.png)
 
 RPC_USER: Should match what’s in bitcoin.conf and lightning.conf  
 RPC_PASSWORD: Should match what’s in bitcoin.conf and lightning.conf  
@@ -348,35 +348,50 @@ Optional parameters will affect all tests. All tests will start iterations at th
 Example:  
 Having “--num_cc 30” will start num_cc tests at 30 and will create 30 C&C servers when testing other parameters.
 
-“--num_cc #”
+```
+--num_cc #
+```
 
 - Number of CC nodes for the tests
 
-“--active_nodes #”
+```
+--active_nodes #
+```
 
 - Number of active nodes
 
-“--bm_cc #”
+```
+--bm_cc #
+```
 
 - Number of channels the botmaster will create
 
-“--bm_pos #”
+```
+--bm_pos #
+```
 
 - Position where the botmaster will connect to in the network
 
-“--max_msg #”
+```
+--max_msg #
+```
 
 - Number of messages to send per test
 
-“--max_range”
+```
+--max_range #
+```
 
 - Max range for this test
 
-“--takedown”
+```
+--takedown
+```
 
 - Make this test a takedown test. 10% of the nodes will be forcefully shut down before sending messages
 
 ### kill_nodes.sh
+
 ```
 sudo ./kill_nodes
 ```  
