@@ -292,7 +292,7 @@ def main():
         if args.step is not None:
             print(f'step is set to {args.step}')
             temp_range = list(config['range'])
-            temp_range[1] = args.max_range
+            temp_range[1] = args.step
             config['range'] = temp_range
         if args.takedown:
             print(f'Takedown test is True')
