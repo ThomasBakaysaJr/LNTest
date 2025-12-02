@@ -1,20 +1,16 @@
 import psutil
 import time
 import csv
-import os
 import sys
 import subprocess
 
 def monitor_loop(filename="data/system_metrics.csv", interval=1):
-    # Create file and write headers if it doesn't exist
-    file_exists = os.path.isfile(filename)
     
     print(f"Starting generic system monitor. Logging to {filename} ...")
     
-    with open(filename, mode='a', newline='') as f:
+    with open(filename, mode='w', newline='') as f:
         writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["timestamp", "cpu_percent", "ram_percent", "ram_used_gb"])
+        writer.writerow(["timestamp", "cpu_percent", "ram_percent", "ram_used_gb"])
         
         try:
             while True:
