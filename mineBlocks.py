@@ -35,10 +35,10 @@ def main(user, password):
     try:
         command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "201", f"{address}"]
         while True:        
-            command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "12", f"{address}"]
+            command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", "10", f"{address}"]
             subprocess.run(command, stdout=subprocess.DEVNULL)
             # print("Command executed successfully.")
-            time.sleep(5)  # Wait for 2 seconds
+            time.sleep(2)
     except KeyboardInterrupt:
         print("\nProcess interrupted by user. Exiting...")
 
