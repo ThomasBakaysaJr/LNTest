@@ -7,7 +7,6 @@ import random
 import json
 import time
 import os
-import csv
 import logging
 from pathlib import Path
 
@@ -52,92 +51,6 @@ CURRENT_MESSAGE_FILE = STATUS_DIR / f'cc_currentMessage_{HOST_NAME}.json'
 log_file_path = LOG_DIR / f'noise_log_{HOST_NAME}.log'
 
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
-
-def connect_to_server():
-    """
-    Connect the bot to the REST server by registering its address.
-    """
-    connect_payload = {'address': BOT_ADDRESS}
-
-    """
-    We're going to try to connect to the server 15 times
-    Since I've modified the scripts to run everything all at once, this is going
-    to run at the same time as the REST_server.py, so we need to wait.
-    """
-    attempt_max = 10
-
-    # for attempt in range(10):
-    #     # lets sleep first yeah?
-    #     time.sleep(SLEEP_INT)
-        
-    #     try:
-    #         connect_response = requests.post(f'{SERVER_URL}/v1/connect/', json=connect_payload)
-    #         if connect_response.status_code == 200:
-    #             logging.info("Bot connected to the server successfully.")
-    #             break
-    #         else:
-    #             logging.info(f"Server is not running yet, retrying in {SLEEP_INT} seconds.")
-    #     except Exception as e:
-    #         logging.error(f"Error connecting to the server: {e}")
-        
-    #     if attempt == attempt_max - 1:
-    #         logging.error(f"Cannot connect to server after trying {attempt_max} times, CATASTROPHIC ERROR")
-
-
-def send_command_to_server(command):
-    """
-    Send a command to REST_server to be executed on all connected bots.
-    
-    Args:
-        command (str): The command to execute.
-
-    this is to simulate a CC server communicating with its bots
-    """
-    # control_payload = {'command': command}
-    # try:
-    #     control_response = requests.post(f'{SERVER_URL}/v1/control/', json=control_payload)
-    #     if control_response.status_code == 200:
-    #         response_data = control_response.json()
-    #         logging.info("Command sent to server successfully.")
-    #         logging.info("Output from server:")
-    #         logging.info(f"{response_data.get('responses')}")
-    #         return True
-    #     else:
-    #         logging.error(f"Server responded with error: {control_response.status_code} - {control_response.text}")
-    # except requests.exceptions.Timeout:
-    #     logging.error(f"Request timed out while sending command '{command}' to server.")
-    # except Exception as e:
-    #     logging.error(f"Error sending request to server: {e}")
-
-    return False
-
-# def get_all_messages():
-#     """
-#     Retrieve all messages using lightning-cli and format them for processing.
-
-#     Returns:
-#         list: A list of message bodies retrieved from lightning-cli.
-#     """
-#     try:
-#         result = subprocess.run(
-#             ['lightning-cli', '--regtest', 'allmsgs'],
-#             capture_output=True,
-#             text=True
-#         )
-#         if result.returncode != 0:
-#             logging.error(f"Error executing lightning-cli: {result.stderr}")
-#             return []
-
-#         raw_messages = json.loads(result.stdout)
-#         message_keys = [key for key in raw_messages if key.startswith('message') and 'body' in raw_messages[key]]
-#         message_keys.sort(key=lambda x: int(x[len('message'):]))
-
-#         messages = [raw_messages[key]['body'] for key in message_keys]
-#         # logging.info(f"Retrieved message bodies: {messages}")
-#         return messages
-#     except Exception as e:
-#         logging.error(f"Exception occurred while getting messages: {e}")
-#         return []
 
 def get_new_messages():
     '''
@@ -199,26 +112,6 @@ def get_connected_nodes():
     """
     Retrieve all nodes that have a channel with this node and satisfy the discovery rule.
     """
-    # # Step 1: Get the node's own ID
-    # try:
-    #     own_node_id = THIS_NODE
-    #     if not own_node_id:
-    #         logging.info("Failed to retrieve own node ID from getinfo.")
-    #         return []
-    # except json.JSONDecodeError:
-    #     logging.info("Error parsing getinfo output.")
-    #     return []
-
-    # Step 2: Get the list of channels
-    # listchannels_output = subprocess.run(
-    #     ['lightning-cli', '--regtest', 'listchannels'],
-    #     capture_output=True,
-    #     text=True
-    # )
-    # if listchannels_output.returncode != 0:
-    #     logging.info(f"Error retrieving channels: {listchannels_output.stderr}")
-    #     return []
-
     # get the list of peers and just send to peers that arent the innocent node
     listfunds_output = subprocess.run(
         ['lightning-cli', '--regtest', 'listfunds'],
@@ -252,43 +145,11 @@ def get_connected_nodes():
         logging.error("Error parsing listchannels output.")
         return []
 
-# def send_message_to_connected_nodes(message):
-#     """
-#     Send a message to all nodes connected to this node via channels and display the message content.
-#     """
-#     connected_nodes = get_connected_nodes()
-#     if not connected_nodes:
-#         logging.warning("No connected nodes found.")
-#         return
-
-#     for target_node in connected_nodes:
-#         sendmsg_command = [
-#             'lightning-cli', '--regtest', 'sendmsg',
-#             target_node,
-#             message
-#             #'5'  # Amount in millisatoshis
-#         ]
-#         ln_checker.check_funds()
-#         ln_checker.does_connection_exist(target_node)
-#         ln_checker.wait_node_activated(target_node)
-#         # time.sleep(2) # seeing if a delay fixes the first sending error
-#         #for attempt in range(RETRY_COUNT): # maybe the connections are closing because of the repeated tries
-#         result = subprocess.run(sendmsg_command, 
-#                                 stdout=subprocess.PIPE,
-#                                 stderr=subprocess.PIPE,
-#                                 text=True)
-#         if result.returncode == 0:
-#             logging.info(f'Message: "{message}" sent to {target_node} successfully.')
-#             continue
-#         else:
-#             logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
-
 def send_message_to_connected_nodes(status, message, counter):
     """
     Send a message to all nodes connected to this node via channels and display the message content.
     """
     global SENDING
-    
 
     connected_nodes = get_connected_nodes()
     if not connected_nodes:
@@ -367,23 +228,6 @@ def process_message(message):
     except Exception as e:
         logging.error(f"Error processing message: {e}")
 
-# def write_to_csv(message, counter):
-#     global CURRENT_COMMAND_COUNTER
-    
-#             #'time_stamp', 'first 5 of the node id', 'CC container', 'Message Counter', 'Message'
-#     entry = [time.time(), THIS_NODE[:5], HOST_NAME, counter, message]
-#     logging.info(entry)
-#     if int(counter) > CURRENT_COMMAND_COUNTER:
-#         print(f'write_to_csv: incrementing counter')
-#         with open(CURRENT_MESSAGE_FILE, 'w') as f:
-#             csvwriter = csv.writer(f)
-#             csvwriter.writerow(entry)
-#         CURRENT_COMMAND_COUNTER = int(counter)
-
-#     with open(MESSAGE_LOG_FILE, 'a', newline = '') as f:
-#         csvwriter = csv.writer(f)
-#         csvwriter.writerow(entry)
-
 def get_processed_counters(status):
     '''
     Get a current set of processed counters
@@ -461,13 +305,6 @@ def is_node_ready(status):
         is_connecting = False
         for channel in channels.keys():
             info = channels[channel]
-            # old channel states, now we only care if we're connected to the innnocent node
-            # if info.get('state') not in NOT_CONNECTING: # if its not normal, then we're finalizing channels
-            #     set_state('connecting')
-            #     return True
-            # elif info.get('state') not in DONT_BALANCE and channel_not_balanced(channel): # if channels needs to be balanced then we balance
-            #     set_state('balancing')
-            #     return True
             if ln_checker.evaluate_discovery_rule(int(info.get("capacity", 0)) // 1000) and info.get('state') in ln_checker.NOT_CONNECTING:
                 set_state(status,'connected')
                 CREATED_CHANNELS = True
