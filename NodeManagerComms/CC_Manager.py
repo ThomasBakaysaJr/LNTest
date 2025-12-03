@@ -155,12 +155,12 @@ def fund_innocent_channel():
         logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
         ln_checker.lightning_rpc.connect(INNOCENT_NODE_ADDRESS)
 
-    # Check if we already have a channel with the Innocent Node
+    # Check if we're still creating channels
     if not CHANNELS_CREATED:
         # Calculate funding amount based on the discovery rule
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
-        inno_channels = ln_checker.lightning_rpc.listchannels(source=INNOCENT_NODE_ID)
-        if inno_channels and len(inno_channels) >= MAX_ACTIVE_NODES:
+        inno_channels = ln_checker.lightning_rpc.listchannels(source=INNOCENT_NODE_ID).get('channels')
+        if inno_channels is not None and len(inno_channels) >= MAX_ACTIVE_NODES:
             logging.info(f'Trying to connect to innocent node but it currently has max number of active nodes channeled. Aborting.')
             return
 
