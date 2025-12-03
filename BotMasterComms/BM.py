@@ -423,7 +423,7 @@ def send_msg(message, counter, funded_nodes):
             try:
                 # Execute the command using shell=True to process the quotes correctly
                 for _ in range(RETRY_MAX):
-                    if ln_checker.is_node_active(node):
+                    if ln_checker.wait_node_activated(node):
                         break
                     else:
                         logging.info(f'No active channel with {node} - attempting to re-channel.')
@@ -462,14 +462,20 @@ def connect_and_channel_node(node):
     '''
     Connect and open a channel with a node
     '''
+    if ln_checker.has_channel_with(node):
+        logging.info(f"connect_and_channel_node: Already has channel with {node}")
+        return True
+    
     try:
         logging.info(f"fund_channels: Funding channel with node {node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
         ln_checker.check_funds()
         run_lightning_cli(["fundchannel", node, str(UNIQUE_FUNDING_AMOUNT)])
         logging.info(f'funds_channels: Funding channel with {node}')
+        return True
     except Exception as e:
         logging.error(f'connect_and_channel_node: ERROR: {e}')
-
+        return False
+    
 def disconnect_all_channels(connected_nodes):
     '''
     Disconnect all nodes in connected_nodes
