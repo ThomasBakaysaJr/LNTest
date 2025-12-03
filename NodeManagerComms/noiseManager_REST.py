@@ -3,6 +3,7 @@
 #This script is used to relay commands to all CC nodes it has channels with, it connects to the REST server and passes the commands to the server.   
 
 import subprocess
+import random
 import json
 import time
 import os
@@ -294,6 +295,9 @@ def send_message_to_connected_nodes(status, message, counter):
         logging.warning("No connected nodes found.")
         return
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message)})
+
+    # scramble the list of nodes to randomize sending pattern
+    random.shuffle(connected_nodes)
 
     for target_node in connected_nodes:
 
