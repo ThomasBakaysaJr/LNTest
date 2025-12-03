@@ -60,18 +60,7 @@ def get_new_messages():
     global LAST_INVOICE_INDEX
     messages = []
     try:
-        result = subprocess.run(
-            ['lightning-cli', '--regtest', 'listinvoices'],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        if result.returncode != 0:
-            logging.error(f"Error executing lightning-cli: {result.stderr}")
-            return None
-        # the messages that have been received by this node
-        invoices = json.loads(result.stdout)['invoices']
-
+        invoices = ln_checker.lightning_rpc.listinvoices().get('invoices', [])
         if len(invoices) == 0:
             return []
         
@@ -112,20 +101,9 @@ def get_connected_nodes():
     """
     Retrieve all nodes that have a channel with this node and satisfy the discovery rule.
     """
-    # get the list of peers and just send to peers that arent the innocent node
-    listfunds_output = subprocess.run(
-        ['lightning-cli', '--regtest', 'listfunds'],
-        capture_output=True,
-        text=True
-    )
-    if listfunds_output.returncode != 0:
-        logging.warning(f"Error retrieving listfunds: {listfunds_output.stderr}")
-        return []
-
     try:
         connected_nodes = set()
-        channels = json.loads(listfunds_output.stdout).get("channels", [])
-        
+        channels = ln_checker.lightning_rpc.listfunds().get('channels', [])
         logging.info(f"Total channels retrieved: {len(channels)}")
         
         for channel in channels:
@@ -155,7 +133,7 @@ def send_message_to_connected_nodes(status, message, counter):
     if not connected_nodes:
         logging.warning("No connected nodes found.")
         return
-    tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message)})
+    tlv_json = {MESSAGE_TLV_TYPE : encode_msg(message)}
 
     # scramble the list of nodes to randomize sending pattern
     random.shuffle(connected_nodes)
@@ -170,10 +148,6 @@ def send_message_to_connected_nodes(status, message, counter):
 
         SENDING = True
         ln_checker.set_sending(status, target_node) # for the status tracker
-        sendmsg_command = ["lightning-cli", "--regtest", "keysend",
-            f"destination={target_node}",
-            f"amount_msat=1",
-            f"extratlvs={tlv_json}"]
 
         ln_checker.check_funds()
         # if we've sent more than 1 message, we should be connected so don't check. If we drop the channel, we start at 1 anyways
@@ -182,22 +156,15 @@ def send_message_to_connected_nodes(status, message, counter):
             ln_checker.does_connection_exist(target_node)
             ln_checker.wait_node_activated(target_node)
         try:
-            result = subprocess.run(sendmsg_command, 
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                check=True)
-            if result.returncode == 0: # success
+            result = ln_checker.lightning_rpc.keysend(target_node, 1, extratlvs=tlv_json)
+            if result: # success
                 if target_node in status.get('tracking_dict').keys(): # make a new entry for the first messages
                     status.get('tracking_dict')[target_node].add(counter) # tracking invidual sends in case it drops
                 else:
                     status.get('tracking_dict')[target_node] = {counter}
                 logging.info(f"Message: [{message}] sent to {target_node} successfully. Counter is {status.get('tracking_dict')[target_node]}")
                 continue
-            else:
-                logging.error(f"{status.get('tracking_dict')}")
-                logging.error(f"Error sending message to {target_node}: {result.stdout} || {result.stderr}")
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             logging.error(f"Error sending message to {target_node}: {e}")
 
 
@@ -280,13 +247,7 @@ def load_this_node ():
     Set global THIS_NODE variable
     """
     global THIS_NODE 
-    output = result = subprocess.run(
-            ['lightning-cli', '--regtest', 'getinfo'],
-            capture_output=True,
-            text=True
-        )
-    output = result.stdout.strip()
-    THIS_NODE = json.loads(output).get('id')
+    THIS_NODE = ln_checker.lightning_rpc.getinfo().get('id')
 
 def is_node_ready(status):
     '''
@@ -415,19 +376,7 @@ def main():
     """
     global SENDING
     global CONNECTING
-    # connect_to_server()  # Register this bot with the REST server on startup
     load_this_node()
-
-    # this is old method of writing to csv files
-    # Create csv file with headers
-    # with open(MESSAGE_LOG_FILE, 'w', newline = '') as f:
-    #     csvwriter = csv.writer(f)
-    #     csvwriter.writerow(['Time', 'Short_ID', 'CC container', 'Message Counter', 'Message'])
-    #     # put initial message that this node is online (more for the tracker than anthing else.)
-    #     csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, 0, 'node online'])
-    # with open(CURRENT_MESSAGE_FILE, 'w') as f:
-    #     csvwriter = csv.writer(f)
-    #     csvwriter.writerow([time.time(), THIS_NODE[:5], HOST_NAME, '0', '0'])
 
     # this will either load a saved status to recover from a crash
     # or it will return a new default status, which is automatically saved

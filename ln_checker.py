@@ -1,9 +1,10 @@
 import logging
-from pathlib import Path
 import time
 import subprocess
 import json
 import os
+from pathlib import Path
+from pyln.client import LightningRpc
 from multiprocessing import shared_memory
 
 # how many times the checker will try
@@ -22,29 +23,9 @@ STATUS_FILE = STATUS_DIR / 'status_'
 NOT_CONNECTING = ['CHANNELD_NORMAL', 'ONCHAIN']
 DONT_BALANCE = ['CLOSINGD_COMPLETE', 'ONCHAIN']
 
+# lightning rpc connection
+lightning_rpc = LightningRpc("/root/.lightning/regtest/lightning-rpc")
 
-def run_lightning_cli(command):
-    try:
-        result = subprocess.run(
-            ["lightning-cli", "--regtest"] + command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-        # logging.info(f"run_lightning_cli: stdout: {result.stdout}")
-        # logging.info(f"run_lightning_cli: stderr: {result.stderr}")
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        # This is where the error from lightning-cli lives!
-        logging.error(f"lightning-cli command failed with exit code {e.returncode}")
-        logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
-        logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}")
-        return None
-    except Exception as e:
-        logging.error(f"run_lightning_cli: Exception occurred: {e}")
-        return None
-    
 def run_bitcoin_cli(command):
     try:
         result = subprocess.run(
@@ -77,32 +58,14 @@ def check_funds():
     whether the funds are available or not.
     '''
     for attempt in range(RETRY_INT):
-        try:
-            logging.info(f"checkfunds: Making sure funds are available.")
-            result = subprocess.run(
-                ["lightning-cli", "--regtest"] + ['listfunds'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True
-            )
-        except subprocess.CalledProcessError as e:
-            # This is where the error from lightning-cli lives!
-            logging.error(f"lightning-cli command failed with exit code {e.returncode}")
-            logging.error(f"  lightning-cli STDOUT: {e.stdout.strip()}")
-            logging.error(f"  lightning-cli STDERR: {e.stderr.strip()}") 
-        except Exception as e:
-            logging.error(f"check_funds: Exception occurred: {e}")
-            return None
-        
         # check output if funds are available
-        result_data = json.loads(result.stdout)
+        result_data = lightning_rpc.listfunds()
         if result_data.get('outputs'):
             on_chain_funds_exist = False
             total_on_chain_msat = 0
 
             for output in result_data['outputs']:
-                if output.get('status') == 'confirmed':
+                if output.get('status') == 'confirmed' and not output.get('reserved', False):
                     on_chain_funds_exist = True
                     total_on_chain_msat += output.get('amount_msat', 0)
 
@@ -147,12 +110,9 @@ def does_connection_exist(target_node):
     Returns wether a connection between this node and target_node exists.
     '''
     try:
-        command = ["lightning-cli", f"--network=regtest", "listpeers"]
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        peers_info = json.loads(result.stdout)
-
+        peers_info = lightning_rpc.listpeers()
         for peer in peers_info.get('peers', []):
-            if peer.get('id') == target_node:
+            if peer.get('id') == target_node and peer.get('connected', False):
                 # logging.info(f'Valid peer: {target_node}')
                 return True
     except Exception as e:
@@ -165,14 +125,10 @@ def is_node_active(target_node):
     Check whether the channel with this node is CHANNELD_NORMAL
     '''
     try:
-        command = ["lightning-cli", f"--network=regtest", "listfunds"]
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        peers_info = json.loads(result.stdout)
-
+        peers_info = lightning_rpc.listfunds()
         for channel in peers_info.get('channels', []):
             if channel.get('peer_id') == target_node \
             and channel.get('state') == 'CHANNELD_NORMAL':
-                # logging.info(f'Peer {target_node} is ready to receive')
                 return True
     except Exception as e:
         logging.error(f'is_node_active: Error {e}')
@@ -184,18 +140,12 @@ def has_channel_with(target_node):
     Does not check the state of the channel, just that it exists.
     '''
     try:
-        command = ["lightning-cli", f"--network=regtest", "listfunds"]
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        peers_info = json.loads(result.stdout)
-
+        peers_info = lightning_rpc.listfunds()
         for channel in peers_info.get('channels', []):
             if channel.get('peer_id') == target_node:
-                # logging.info(f'has_channel_with: Channel exists with {target_node}')
                 return True
-                
     except Exception as e:
         logging.error(f'has_channel_with: Error {e}')
-    # logging.info(f"has_channel_with: No channel with {target_node} found")
     return False
 
 def check_channels(channels: set) -> set:
@@ -222,27 +172,21 @@ def get_channels():
             our_amount : our liquidity in this channel
     """
     # Query listchannels with the source set to own_node_id
-    output = run_lightning_cli(["listfunds"])
-    if not output:
-        logging.error("record state: Failed to retrieve channel list.")
-        return None
+    channels = lightning_rpc.listfunds().get('channels')
+    if not channels:
+        return {}
 
     # Parse the output and collect unique destination node IDs
     try:
-        channels = json.loads(output).get("channels", [])
         node_channels = {
             channel['peer_id']: {'short_id' : get_short_id(channel['peer_id']),
                                  'state' : channel['state'],
                                  'capacity' : channel['amount_msat'],
                                  'our_amount' : channel['our_amount_msat'] } for channel in channels
         }
-        # node_funds = {}
-        # for idx, node in enumerate(node_channels.keys()):
-        #     node_channels[node].append({'capacity' : channels[idx].get('amount_msat')})
-        #     node_channels[node].append({'out_amount': channels[idx].get('our_amount_msat')})
-    except json.JSONDecodeError:
-        logging.error("list_peers_with_channels: Failed to parse channel list output.")
-        return None
+    except Exception as e:
+        logging.error(f"list_peers_with_channels: ERROR: {e}.")
+        return {}
     return node_channels
 
 def set_status(status):
@@ -354,7 +298,6 @@ def write_status(status):
         shm.buf[:len(status)] = status
         shm.buf[len(status):] = b'\x00' * (block_size - len(status))
         shm.close()
-#        logging.info(f'write_status: Status written. \n {status}')
     except FileNotFoundError:
         logging.error(f'write_status: Error: Shared memory block for {HOST_NAME} not found.')
     except Exception as e:
@@ -364,9 +307,7 @@ def get_node_id():
     """
     set this node's id
     """
-    output = run_lightning_cli(["getinfo"])
-    
-    return json.loads(output).get('id')
+    return lightning_rpc.getinfo()
 
 def balance_all_channels():
     for channel in get_channels():
@@ -377,7 +318,6 @@ def balance_channel(target_node):
     used to balance out the channels
     can be called at anytime really
     '''
-    # logging.info(f'Balancing channel with node {target_node}')
     if not has_channel_with(target_node):
         logging.warning(f'Trying to balance {target_node} but no channel exists.')
         return
@@ -387,7 +327,7 @@ def balance_channel(target_node):
         if to_balance == 0: # if the channel is balanced, channel_not_balanced returns a 0, the amount to balance otherwise
             return
         if check_funds():
-            run_lightning_cli(["keysend", target_node, str(to_balance)])
+            lightning_rpc.keysend(destination=target_node, amount_msat=to_balance)
     else:
         logging.info(f'balance_channel: Channel with {target_node} is not normal. Moving on.')
 
@@ -406,22 +346,23 @@ def channel_not_balanced(target_node):
 
     return (our_msat - (capacity // 2)) if (our_msat > (capacity * .7)) else 0
     
-def check_blockchain_height(in_height):
+def is_synched():
     '''
-    Test if this blockchain height matches the actual height of the blockchain.
+    Determine if we're synched with the blockchain  height
     '''
-    output = run_bitcoin_cli(['getblockcount'])
-
-    if not output:
+    block_height = run_bitcoin_cli(['getblockcount'])
+    lightning_height = lightning_rpc.getinfo().get('blockheight', False)
+    
+    if not block_height:
         return False
     
     try:
-        height = int(output)
+        height = int(block_height)
     except ValueError:
-        logging.warning(f'check_blockchain_height: Could not convert blockheight {output} to int')
+        logging.warning(f'check_blockchain_height: Could not convert blockheight {block_height} to int')
 
-    logging.info(f'Blockchain height is {height} against incoming height of {in_height}')
-    return height == in_height
+    logging.info(f'Blockchain height is {height} against incoming height of {lightning_height}')
+    return height == lightning_height
 
 def get_short_id(in_node_id):
     '''
