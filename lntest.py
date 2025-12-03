@@ -421,7 +421,8 @@ def run_test(in_config, manager : NodeManager):
             else:
                 attempt += 1
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
-            
+        # out of the while loop
+        monitor.stop()           
 
     print(f'FINISHED at {time.time() - overall_test_time} testing for {config['description']}.')
     print(f'Testing with: \n{config}')

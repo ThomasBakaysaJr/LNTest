@@ -55,7 +55,7 @@ class HardwareMonitor:
     def stop(self):
         """Kills the background process."""
         if self._process:
-            print(" [Monitor] Stopping...")
+            print(f" [Monitor] [PID: {self._process.pid}] Stopping...")
             self._process.terminate()
             self._process.wait()
             self._process = None
