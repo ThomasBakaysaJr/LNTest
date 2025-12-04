@@ -34,6 +34,24 @@ fi
 LN_CHECKER_FILE="$LNBOT_DIR/ln_checker.py"
 
 
+wait_for_node_ready() {
+    local node_name=$1
+    echo "Waiting for $node_name to initialize..."
+    
+    # Try getting info up to 30 times (30 seconds max)
+    for i in {1..30}; do
+        # We check if the command succeeds (exit code 0)
+        if docker exec $node_name lightning-cli --regtest getinfo > /dev/null 2>&1; then
+            echo "$node_name is ready."
+            return 0
+        fi
+        sleep 1
+    done
+    
+    echo "ERROR: $node_name failed to start in time."
+    return 1
+}
+
 # Function to fund a node's wallet
 fund_node() {
     local node=$1
@@ -88,8 +106,9 @@ create_node() {
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=$NODE_GRPC_PORT
 
-    # give the node some time to spin up before we try to fund it
-    sleep 2
+    # wait for the lightning daemon to be up and running
+    wait_for_node_ready "$NODE_NAME"
+
     write_address_to_file "$NODE_NAME"
 
     # we fund and confirm so that we can start connecting already.

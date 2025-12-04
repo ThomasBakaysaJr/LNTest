@@ -15,10 +15,18 @@ echo "Waiting for lightningd to initialize..."
 # Loop until 'lightning-cli getinfo' succeeds
 # '&> /dev/null' silences the command's output so we don't spam the logs
 while ! lightning-cli --regtest getinfo &> /dev/null; do
+    if ! kill -0 $LND_PID 2>/dev/null; then
+        echo "CRITICAL: Lightningd process (PID $LND_PID) died during startup!"
+        # Print the log file if it exists to see why
+        if [ -f /root/.lightning/regtest/log ]; then
+            cat /root/.lightning/regtest/log
+        fi
+        exit 1
+    fi
     echo -n "." # Print a dot to show we are waiting
-    sleep 2
+    sleep 1
 done
-echo
+
 echo "Lightningd is online."
 
 
