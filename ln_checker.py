@@ -213,7 +213,7 @@ def get_status_data():
 
         data = json.loads(data.decode('utf-8'))
     except Exception as e:
-        print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
+        print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}')
 
     return data
 
@@ -243,7 +243,6 @@ def create_shared_status(status, state = None):
     Trimming status and adding relevant info to be stored in shared memory
     '''
     channels = get_channels()
-    node_data = status.copy()
 
     '''
     incoming status by default have attributes
@@ -258,15 +257,19 @@ def create_shared_status(status, state = None):
     sent_messages
     '''
 
-    # only change the state of status if one is provided
-    state = state if state else status.get('state')
-
-    # updates state, adds receiver and channels
-    node_data.update({
-        'state' : state,
+    # lighten node status to add to shm
+    node_data = {
+        'time' : status.get('time'),
+        'short_id' : status.get('short_id'),
+        'host_name' : status.get('host_name'),
+        'counter' : status.get('counter'),
+        'message' : status.get('message'),
+        'last_msg_time' : status.get('last_msg_time'),
+        'state' : state if state else status.get('state'),
         'receiver' : 'not sending',
         'channels' : channels
-    })
+    }
+
     return node_data
 
 def set_sending(status, target_node):
@@ -292,7 +295,11 @@ def write_status(status):
         logging.error(f'write_status: Status is greater than block_size {block_size}. Aborting write to memory.')
         return
     
-    # Memory blocks are created by the tester_v1 script
+    # DEBUG
+    logging.info(f'status size is {len(status)}')
+
+
+    # Memory blocks are created by lntest
     try:
         shm = shared_memory.SharedMemory(name=f'{HOST_NAME}_status')
         shm.buf[:len(status)] = status
