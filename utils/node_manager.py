@@ -127,6 +127,7 @@ class Node:
 
 class NodeManager:
     def __init__(self):
+        self.node_config_path = 'testState/node_config.json'
         self.CC_PREFIX = 'CC'
         self.bm_name = 'BM'
         self.bm_script = 'BM.py'
@@ -134,6 +135,105 @@ class NodeManager:
         self.block_size = 5012  # bytes
         self.nodes: dict[str, Node] = {}
     
+    def setup_test(self, total_nodes, active_nodes):
+        ''''
+        setup the number of CC servers needed
+        returns true when the the cc servers have been made
+        '''
+        try:
+            subprocess.run(
+                [INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}']
+            )
+            inno_node = Node(self.inno_name)
+            bm_node = Node(self.bm_name)
+            self.active_nodes = active_nodes
+            self.max_peers = active_nodes * 2
+            self.block_size = self.calculate_blocksize(active_nodes)
+            self.nodes[inno_node.name] = inno_node
+            self.nodes[bm_node.name] = bm_node
+        except subprocess.CalledProcessError as e:
+            # This is where the error from lightning-cli lives!
+            print(f"testsetup_tester failed with exit code {e.returncode}")
+            print(f"  setup_test STDOUT: {e.stdout.strip()}")
+            print(f"  setup_test STDERR: {e.stderr.strip()}") 
+            raise # Re-raise the exception so your calling code can catch it
+        except Exception as e:
+            print(f"setup_test: Exception occurred: {e}")
+            return None
+        
+        # get remainder nodes that need to be pruned
+        if remainder :=  total_nodes % active_nodes:
+            total_nodes += active_nodes - remainder
+
+        # create the node configs
+        self.create_status_config()
+
+        # now we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
+        counter = 1
+        while counter <= total_nodes:
+            for i in range(active_nodes):
+                try:
+                    self.setup_shm("CC" + str(counter), True)
+                    subprocess.run(
+                        [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
+                    )
+
+                    # for transition to using node class
+                    new_node = Node(f'CC{counter}')
+                    self.nodes[new_node.name] = new_node
+
+                except subprocess.CalledProcessError as e:
+                    # This is where the error from lightning-cli lives!
+                    print(f"setup_test failed with exit code {e.returncode}")
+                    print(f"  setup_test STDOUT: {e.stdout.strip()}")
+                    print(f"  setup_test STDERR: {e.stderr.strip()}") 
+                    raise
+                except Exception as e:
+                    print(f"setup_test: Exception occurred: {e}")
+                    return None
+                counter += 1
+
+                if counter > total_nodes:
+                    break
+            # now we wait for for those nodes to fully connect before we create new nodes
+            if not self.are_channels_ready():
+                print(f'Channels were not ready in time')
+                return False
+        
+        # will fix when code gets refactored.
+        # for now, we kill the extra nodes that get created so that we conform to the max nodes we're supposed to have
+        # get the list of running CC nodes
+        if remainder:
+            cc_nodes = []
+            while not cc_nodes:
+                cc_nodes = self.get_cc_nodes()
+                time.sleep(SLEEP_INTERVAL)
+            self.shutdown_nodes(cc_nodes[-remainder:])
+
+        return True
+    
+    def create_status_config(self):
+        '''
+        Create a config file for the nodes for this test run.
+        '''
+        config_data = {
+            'active_nodes' : self.active_nodes,
+            'max_peers' : self.active_nodes * 2,
+            'block_size' : self.block_size,
+            'discovery_rule' : 19,
+            'botmaster_rule' : 123123,
+            'channel_creation_sleep' : 10,
+            'status_update_interval' : 1.5,
+            'channel_balance_counter' : 3
+        }
+
+        try:
+            with open(self.node_config_path, 'w') as f:
+                json.dump(config_data, f, indent=4)
+            print(f'Generated {self.node_config_path} with block size : {self.block_size}')
+        except Exception as e:
+            print(f'Error generating node status config. {e}')
+
     def takedown(self, config, percentage):
         '''
         Takedown section for taking down a percentage of nodes.
@@ -173,56 +273,6 @@ class NodeManager:
         print(f"Takedown test:")
         self.shutdown_nodes(nodes_to_kill)
         return True
-    
-    def get_all_nodes(self):
-        '''
-        Return a snapshot of the current active containers.
-        '''
-        nodes = [node.container for node in self.nodes.values() if node.is_running]
-        return nodes
-    
-    def get_cc_nodes(self):
-        '''
-        Return a list of all active CC nodes.
-        '''
-        nodes = self.get_all_nodes()
-        nodes = [node for node in nodes if node.name.startswith(self.CC_PREFIX)]
-
-        return nodes
-
-    def cleanup_test(self):
-        '''
-        Cleanup all nodes and shared memory.
-        '''
-        self.kill_all_nodes()
-
-        subprocess.run([KILL_NODES_BASH])
-
-    def sort_containers(self, in_containers):
-        '''
-        Takes in a set of containers and returns the list sorted alphabetically and numerically 
-        (ensures that cc15 comes after cc9) and non numbered containers at the end.
-        '''
-        container_dict = {}
-        non_numbered_containers = list()
-
-        for container in in_containers:
-            if 'CC' not in container.name:
-                non_numbered_containers.append(container)
-                continue
-
-            idx = re.findall(r'\d+', container.name)
-            idx = int(idx[0])
-            container_dict[idx] = container
-
-        sorted_container_dict = dict(sorted(container_dict.items()))
-        return_set = list(sorted_container_dict.values())
-        return_set = return_set + non_numbered_containers
-
-        # check to make sure we're not losing any containers
-        assert len(return_set) == len(in_containers)
-
-        return return_set
     
     def retrieve_all_status(self):
         '''
@@ -304,21 +354,32 @@ class NodeManager:
         except Exception as e:
             print(f'remove_shm: ERROR in cleaning up memory. Error: {e}')
 
-    def kill_node(self, node : Node):
+
+    def are_channels_ready(self):
         '''
-        Cleanup a single node and unlink the shared memory.
-        Remove from nodes tracker.
+        Wait for channel creation between nodes to finish
+        Returns:
+            Returns True when channels has finished creating
+            False when waiting time has exceeded MAX_WAIT
         '''
-        node.kill()
-        self.remove_shm(node.name)
-            
-    def kill_all_nodes(self):
-        '''
-        Cleanup all nodes and unlink shared memory
-        '''
-        for node in self.nodes.values():
-            self.kill_node(node)
-        self.nodes.clear()
+        start_time = time.time()
+        
+        while True:
+            time.sleep(SLEEP_INTERVAL)
+            all_status = self.retrieve_all_status()
+
+            if self.is_kill_time(start_time, MAX_WAIT * WAIT_MULT):
+                return False
+            if len(self.get_cc_nodes()) == len(all_status) and all_status:
+                channels_created = True
+                # if a single channel is not online, then channels create will be false and we sleep
+                for status in all_status:
+                    if status.get('state') != 'connected':
+                        channels_created = False
+                        break
+
+                if channels_created:
+                    return True
 
     def shutdown_nodes(self, nodes):
         '''
@@ -352,31 +413,87 @@ class NodeManager:
         with open(BOTMASTER_CCADDRESS_FILE, 'w') as file:
             file.write(''.join(new_cc_list))
 
-    def are_channels_ready(self):
+    def sort_containers(self, in_containers):
         '''
-        Wait for channel creation between nodes to finish
-        Returns:
-            Returns True when channels has finished creating
-            False when waiting time has exceeded MAX_WAIT
+        Takes in a set of containers and returns the list sorted alphabetically and numerically 
+        (ensures that cc15 comes after cc9) and non numbered containers at the end.
         '''
-        start_time = time.time()
-        
-        while True:
-            time.sleep(SLEEP_INTERVAL)
-            all_status = self.retrieve_all_status()
+        container_dict = {}
+        non_numbered_containers = list()
 
-            if self.is_kill_time(start_time, MAX_WAIT * WAIT_MULT):
-                return False
-            if len(self.get_cc_nodes()) == len(all_status) and all_status:
-                channels_created = True
-                # if a single channel is not online, then channels create will be false and we sleep
-                for status in all_status:
-                    if status.get('state') != 'connected':
-                        channels_created = False
-                        break
+        for container in in_containers:
+            if 'CC' not in container.name:
+                non_numbered_containers.append(container)
+                continue
 
-                if channels_created:
-                    return True
+            idx = re.findall(r'\d+', container.name)
+            idx = int(idx[0])
+            container_dict[idx] = container
+
+        sorted_container_dict = dict(sorted(container_dict.items()))
+        return_set = list(sorted_container_dict.values())
+        return_set = return_set + non_numbered_containers
+
+        # check to make sure we're not losing any containers
+        assert len(return_set) == len(in_containers)
+
+        return return_set
+
+    def calculate_blocksize(self, active_nodes):
+        '''
+        Calculate the size of the shm blocks for this test run.
+        With a little wiggle room on top.
+        '''
+        # more than what testing has shown, just to be safe
+        # tests showed:
+        # ~260 overhead
+        # ~120 per channel
+        overhead_size = 512
+        per_peer_size = 256
+        # extra padding just in case
+        buffer = 1.2
+
+        return int((overhead_size + (active_nodes * per_peer_size)) * buffer)
+
+    def kill_node(self, node : Node):
+        '''
+        Cleanup a single node and unlink the shared memory.
+        Remove from nodes tracker.
+        '''
+        node.kill()
+        self.remove_shm(node.name)
+            
+    def kill_all_nodes(self):
+        '''
+        Cleanup all nodes and unlink shared memory
+        '''
+        for node in self.nodes.values():
+            self.kill_node(node)
+        self.nodes.clear()
+
+    def get_all_nodes(self):
+        '''
+        Return a snapshot of the current active containers.
+        '''
+        nodes = [node.container for node in self.nodes.values() if node.is_running]
+        return nodes
+    
+    def get_cc_nodes(self):
+        '''
+        Return a list of all active CC nodes.
+        '''
+        nodes = self.get_all_nodes()
+        nodes = [node for node in nodes if node.name.startswith(self.CC_PREFIX)]
+
+        return nodes
+
+    def cleanup_test(self):
+        '''
+        Cleanup all nodes and shared memory.
+        '''
+        self.kill_all_nodes()
+
+        subprocess.run([KILL_NODES_BASH])
     
     # will enventually goto into a utils file
     def is_kill_time(self, start_time, wait_time):
@@ -393,78 +510,6 @@ class NodeManager:
         else:
             return False
         
-    def setup_test(self, total_nodes, active_nodes):
-        ''''
-        setup the number of CC servers needed
-        returns true when the the cc servers have been made
-        '''
-        try:
-            subprocess.run(
-                [INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}']
-            )
-            #for transition to using node class
-            inno_node = Node(self.inno_name)
-            bm_node = Node(self.bm_name)
-            self.nodes[inno_node.name] = inno_node
-            self.nodes[bm_node.name] = bm_node
-
-        except subprocess.CalledProcessError as e:
-            # This is where the error from lightning-cli lives!
-            print(f"testsetup_tester failed with exit code {e.returncode}")
-            print(f"  setup_test STDOUT: {e.stdout.strip()}")
-            print(f"  setup_test STDERR: {e.stderr.strip()}") 
-            raise # Re-raise the exception so your calling code can catch it
-        except Exception as e:
-            print(f"setup_test: Exception occurred: {e}")
-            return None
-        
-        # for shortcut fix, will replace
-        if remainder :=  total_nodes % active_nodes:
-            total_nodes += active_nodes - remainder
-
-        # now we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
-        counter = 1
-        while counter <= total_nodes:
-            for i in range(active_nodes):
-                try:
-                    self.setup_shm("CC" + str(counter), True)
-                    subprocess.run(
-                        [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
-                    )
-
-                    # for transition to using node class
-                    new_node = Node(f'CC{counter}')
-                    self.nodes[new_node.name] = new_node
-
-                except subprocess.CalledProcessError as e:
-                    # This is where the error from lightning-cli lives!
-                    print(f"setup_test failed with exit code {e.returncode}")
-                    print(f"  setup_test STDOUT: {e.stdout.strip()}")
-                    print(f"  setup_test STDERR: {e.stderr.strip()}") 
-                    raise
-                except Exception as e:
-                    print(f"setup_test: Exception occurred: {e}")
-                    return None
-                counter += 1
-
-                if counter > total_nodes:
-                    break
-            # now we wait for for those nodes to fully connect before we create new nodes
-            if not self.are_channels_ready():
-                print(f'Channels were not ready in time')
-                return False
-        
-        # will fix when code gets refactored.
-        # for now, we kill the extra nodes that get created so that we conform to the max nodes we're supposed to have
-        # get the list of running CC nodes
-        if remainder:
-            cc_nodes = []
-            while not cc_nodes:
-                cc_nodes = self.get_cc_nodes()
-                time.sleep(SLEEP_INTERVAL)
-            self.shutdown_nodes(cc_nodes[-remainder:])
-
-        return True
     
     def send_botmaster_command(self, message, seeds, position):
         '''

@@ -16,3 +16,5 @@ setuptime_data.csv
 venv/*
 utils/__pycache__
 config.env
+testState/*
+!testState/.gitkeep

@@ -7,10 +7,29 @@ from pathlib import Path
 from pyln.client import LightningRpc
 from multiprocessing import shared_memory
 
-# how many times the checker will try
+# global configs : should update from testState/node_config
 RETRY_INT = 5
 SLEEP_INT= 10
 DISCOVERY_RULE_DIVISOR = 19
+BOTMASTER_RULE_DIVISOR = 123123
+SHM_BLOCK_SIZE = 5012
+
+# where the config file lives
+BASE_DIR = Path(__file__).parent.resolve()
+NODE_CONFIG_PATH = BASE_DIR / 'testState/node_config.json'
+
+try:
+    if NODE_CONFIG_PATH.exists():
+        with open(NODE_CONFIG_PATH, 'r') as f:
+            config = json.load(f)
+            SHM_BLOCK_SIZE = config.get('block_size', SHM_BLOCK_SIZE)
+            DISCOVERY_RULE_DIVISOR = config.get('discovery_rule', DISCOVERY_RULE_DIVISOR)
+            BOTMASTER_RULE_DIVISOR = config.get('botmaster_rule', BOTMASTER_RULE_DIVISOR)
+        logging.info(f'ln_checker: Loaded from configs {NODE_CONFIG_PATH}')
+    else:
+        logging.warning(f'ln_checker: WARNING: No config found at {NODE_CONFIG_PATH}. Proceeding with defaults')
+except Exception as e:
+    print(f'ln_checker: ERROR loading config: {e}')
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
 
@@ -18,6 +37,7 @@ HOST_NAME = os.getenv("CONTAINER_NAME")
 STATUS_DIR = Path('status')
 STATUS_DIR.mkdir(parents=True, exist_ok=True)
 STATUS_FILE = STATUS_DIR / 'status_'
+
 
 # channel states
 NOT_CONNECTING = ['CHANNELD_NORMAL', 'ONCHAIN']
@@ -284,15 +304,14 @@ def write_status(status):
     '''
     Write the state to a shared memory buffer.
     '''
-    block_size = 5012 # give ourselves a little wiggle room (each status can get to roughly 1.5KB)
     
     try:
         status = json.dumps(status, default=json_set_converter).encode('utf-8')
     except Exception as e:
         logging.info(f'Trying to dumps status \n{status}')
         logging.info(f'write_status: Error: {e}')
-    if len(status) >= block_size:
-        logging.error(f'write_status: Status is greater than block_size {block_size}. Aborting write to memory.')
+    if len(status) >= SHM_BLOCK_SIZE:
+        logging.error(f'write_status: Status is greater than block_size {SHM_BLOCK_SIZE}. Aborting write to memory.')
         return
     
     # DEBUG
@@ -303,7 +322,7 @@ def write_status(status):
     try:
         shm = shared_memory.SharedMemory(name=f'{HOST_NAME}_status')
         shm.buf[:len(status)] = status
-        shm.buf[len(status):] = b'\x00' * (block_size - len(status))
+        shm.buf[len(status):] = b'\x00' * (SHM_BLOCK_SIZE - len(status))
         shm.close()
     except FileNotFoundError:
         logging.error(f'write_status: Error: Shared memory block for {HOST_NAME} not found.')

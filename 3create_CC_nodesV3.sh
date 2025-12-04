@@ -7,9 +7,10 @@ source config.env
 
 STARTUP_SCRIPT="$LNBOT_DIR/node_start.sh"
 
-# Directories for NodeManagerComms and BotMasterComms
+# Directories
 NODE_MANAGER_DIR="$LNBOT_DIR/NodeManagerComms"
 BOT_MASTER_DIR="$LNBOT_DIR/BotMasterComms"
+NODE_STATE_DIR="$LNBOT_DIR/testState"
 
 # Address list files for NodeManagerComms and BotMasterComms
 NODE_MANAGER_ADDRESS_LIST="$NODE_MANAGER_DIR/CC_address_list.txt"
@@ -97,6 +98,7 @@ create_node() {
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $NODE_MANAGER_DIR:/root/nodemanager \
+        -v $NODE_STATE_DIR:/root/nodemanager/testState \
         -v $LN_CHECKER_FILE:/root/nodemanager/ln_checker.py \
         -v $STARTUP_SCRIPT:/root/nodemanager/node_start.sh \
         --entrypoint /root/nodemanager/node_start.sh \
