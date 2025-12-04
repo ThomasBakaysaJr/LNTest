@@ -11,16 +11,12 @@ Logs for CC nodes are stored in Node_Manager/logs
 Logs for the Botmaster are in Botmaster/
 Most errors can be solved by crtl+c and then running the script again.
 '''
-
 import argparse
 import time
 import subprocess
 import json
-import re
-import shlex
 import os
 import textwrap
-import random
 import datetime
 import copy
 from dotenv import load_dotenv
@@ -29,7 +25,7 @@ from utils.node_manager import NodeManager
 from utils import record_total_time
 from utils import sys_monitor
 
-LNTEST_VERSION = "0.3.0"
+LNTEST_VERSION = "0.4.0"
 LNNODE_VERSION = "lnbot_node:v25.09"
 
 load_dotenv('config.env')
@@ -37,28 +33,15 @@ load_dotenv('config.env')
 BITCOIND_DIR = os.getenv('BITCOIND_PATH')
 BITCOIND_DATA_DIR = os.getenv('BITCOIN_DIR')
 
-BM_PATH = '/root/botmaster'
-BM_SCRIPT = 'BM.py'
-BM_CONT = 'BM'
-CC_MESSAGE_PREFIX = 'NodeManagerComms/status/cc_messageLog_*'
-CC_CUR_MESSAGE_PREFIX = 'NodeManagerComms/status/cc_currentMessage_*'
-STATUS_JSON_PREFIX = 'status/status_CC*'
-
 DATA_DIR = 'data/'
 
 TIMES_JSON = 'time_data.json'
-RUNTIMES_JSON = 'runtime_data.json'
-SETUPTIMES_JSON = 'setuptime_data.json'
 TOPO_JSON = 'topology_data.json'
 
 # scripts to use
 RESTART_BITCOIND_BASH = "./restart_bitcoin.sh"
 FUND_WALLETS_BASH = './4fund_wallets.sh'
-CLEANUP_NODES_BASH = './cleanup_lightning_nodes.sh'
 BITCOIN_MINER_PY = 'mineBlocks.py'
-
-COUNTER = 3 # index of the counter variable for time keeping
-TIME = 0 # index of `the time variable for time keeping
 
 # constant names for the variables we use
 TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
@@ -69,12 +52,10 @@ BM_POS = 'bm_pos'
 
 # Unless the script isn't working properly, best to leave these values alone
 MAX_WAIT = 450 # max wait for propagation before we move on (default = 450)
-WAIT_MULT = 2 # Multipler to MAX_WAIT for how long to wait for channel creation.
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
 SLEEP_INTERVAL = 1
 # will eventually be a argparse argument
 TAKEDOWN_PERCENTAGE = 0.1 # percentage of nodes to take down in takedown tests
-
 
 # configurations for the tests
 TEST_CONFIGS = {
@@ -147,7 +128,6 @@ TEST_CONFIGS = {
 }
 
 def main():
-    global MAX_MESSAGES
     '''
     Args:
         mode: What type of test to conduct.
@@ -314,12 +294,6 @@ def main():
     manager.kill_all_nodes()
     print(f'Testing finished. Exiting.')
 
-def confirm_test():
-    if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
-        return True
-    else:
-        return False
-
 def run_test(in_config, manager : NodeManager):
     '''
     Testing function. Runs test based on the configuration.
@@ -409,9 +383,9 @@ def run_test(in_config, manager : NodeManager):
 
                 print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds.')
                 print(f'Time: {get_time()}')
+                
             # record the test and set reset attempts
             total_send_time = time.time() - message_start_time
-
             record_test(config, test_data, total_setup_time, total_send_time)
             record_topology(config, manager)
 
@@ -427,25 +401,50 @@ def run_test(in_config, manager : NodeManager):
     print(f'FINISHED at {time.time() - overall_test_time} testing for {config['description']}.')
     print(f'Testing with: \n{config}')
 
-def init_bitcoin_server():
-    '''
-    Helper to auto restart the bitcoind server
-    and restart the bitcoinminer as well.
-    '''
-    stop_bitcoinminer()
-    time.sleep(0.5)
-    restart_bitcoind()
-    
-    balance = 0.0
-    while balance <= 0.0:
-        time.sleep(5)
-        balance = subprocess.run([BITCOIND_DIR, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
-        balance = balance.stdout.strip().decode()
-        if balance == '':
-            balance = 0
+def wait_for_propagation(command, manager : NodeManager):
+    print(f'Now waiting for command {command} to propagate.')
+    sending = True
+    start_time = time.time()
+    success = None
+    while sending:
+        data = manager.retrieve_all_status()
+        # manager.update()
+        if data:
+            time_interval, done = get_time_interval(data, command)
         else:
-            balance = float(balance)
+            done = False
+        if done:
+            sending = False
+            success = True 
+        time.sleep(SLEEP_INTERVAL)
+        if manager.is_kill_time(start_time, MAX_WAIT):
+            success = False
+            break
+    if success == None:
+        print(f'Somethin went wrong in the wait for propagation state. Success == None')
+    return time_interval, success
 
+def confirm_test():
+    if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
+        return True
+    else:
+        return False
+
+def fund_nodes():
+    try:
+        subprocess.run(
+            [FUND_WALLETS_BASH]
+        )
+    except subprocess.CalledProcessError as e:
+        # This is where the error from lightning-cli lives!
+        print(f"tester failed with exit code {e.returncode}")
+        print(f"  tester STDOUT: {e.stdout.strip()}")
+        print(f"  tester STDERR: {e.stderr.strip()}") 
+        raise # Re-raise the exception so your calling code can catch it
+    except Exception as e:
+        print(f"tester: Exception occurred: {e}")
+        return None
+    
 def confirm_execution(message):
     confirmation = ['y','yes','ye']
     negation = ['n','no']
@@ -556,6 +555,25 @@ def get_record_name(config):
 
     return filename
 
+def init_bitcoin_server():
+    '''
+    Helper to auto restart the bitcoind server
+    and restart the bitcoinminer as well.
+    '''
+    stop_bitcoinminer()
+    time.sleep(0.5)
+    restart_bitcoind()
+    
+    balance = 0.0
+    while balance <= 0.0:
+        time.sleep(5)
+        balance = subprocess.run([BITCOIND_DIR, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
+        balance = balance.stdout.strip().decode()
+        if balance == '':
+            balance = 0
+        else:
+            balance = float(balance)
+
 def restart_bitcoind():
     '''
     Shut down and restart bitcoind for a fresh start.
@@ -585,43 +603,6 @@ def stop_bitcoinminer():
             subprocess.run(["kill", str(id)])
             print(f"Found and killing the bitcoin miner with pid {id}.")
 
-def wait_for_propagation(command, manager : NodeManager):
-    print(f'Now waiting for command {command} to propagate.')
-    sending = True
-    start_time = time.time()
-    success = None
-    while sending:
-        data = manager.retrieve_all_status()
-        # manager.update()
-        if data:
-            time_interval, done = get_time_interval(data, command)
-        else:
-            done = False
-        if done:
-            sending = False
-            success = True 
-        time.sleep(SLEEP_INTERVAL)
-        if manager.is_kill_time(start_time, MAX_WAIT):
-            success = False
-            break
-    if success == None:
-        print(f'Somethin went wrong in the wait for propagation state. Success == None')
-    return time_interval, success
-    
-def fund_nodes():
-    try:
-        subprocess.run(
-            [FUND_WALLETS_BASH]
-        )
-    except subprocess.CalledProcessError as e:
-        # This is where the error from lightning-cli lives!
-        print(f"tester failed with exit code {e.returncode}")
-        print(f"  tester STDOUT: {e.stdout.strip()}")
-        print(f"  tester STDERR: {e.stderr.strip()}") 
-        raise # Re-raise the exception so your calling code can catch it
-    except Exception as e:
-        print(f"tester: Exception occurred: {e}")
-        return None
 
 def get_time_interval(data, top_count):
     '''

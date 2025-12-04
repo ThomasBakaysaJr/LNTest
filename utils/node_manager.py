@@ -178,7 +178,6 @@ class NodeManager:
         '''
         Return a snapshot of the current active containers.
         '''
-        # parity checking containers vs nodes
         nodes = [node.container for node in self.nodes.values() if node.is_running]
         return nodes
     
@@ -239,14 +238,6 @@ class NodeManager:
                 status = self.get_node_status(node_name)
                 if not status:
                     continue
-
-                # parity checking status
-                new_node = self.nodes.get(node_name)
-                new_status = new_node.get_node_status()
-                if status != new_status:
-                    print(f'retrieve_all_status: WARNING! Status mismatch for {node_name}.')
-                    print(f'  retrieve_all_status status: {status}')
-                    print(f'  Node class status: {new_status}')
 
                 all_status.append(status)
             except Exception as e:

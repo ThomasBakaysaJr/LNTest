@@ -1,7 +1,3 @@
-#NOTE this file should be in the NodeManagerComms(directory in home address) directory that gets mounted to the CC docker container
-
-
-
 #nodeManagerFinalVersion.py
 # This script is designed to run on a Lightning Network node (c-lightning) and manage the discovery of CC nodes and creating channels with them 
 # centered on a discovery rule. The script will connect to an "Innocent" node and fund a channel meeting the discovery rule amount. It will then connect and 
@@ -9,8 +5,6 @@
 # The script will avoid connecting to nodes that already have a channel with a peer. 
 # The script will also close the channel with the Innocent node and disconnect once the maximum number of peers with channels 
 # is reached, making the CC node no longer discoverable.
-
-import subprocess
 import json
 import time
 import logging
@@ -18,7 +12,6 @@ from pathlib import Path
 import random
 import sys
 import os
-from pyln.client import LightningRpc
 import ln_checker
 
 # Constants
@@ -31,20 +24,14 @@ INNOCENT_NODE_ID = None
 INNOCENT_NODE_ADDRESS = None
 CC_ADDRESS_LIST = None
 
-BLACKLISTED_NODES = {}# Nodes blacklisted for fundchannel
 
-outbound_channels = set()
+OUTBOUND_CHANNELS = set()
 INNOCENT_CHANNEL_CLOSED = False
 CHANNELS_CREATED = False
 # for channels that need to restart
 CHANNEL_OPENING_TIMES = {}
 
-# Cache for nodes already queried
-seen_nodes_cache = {}  # Format: {<target_node_id>: <timestamp>}
-CACHE_EXPIRATION_TIME = 3600  # Cache entries expire after 1 hour
-
 # HOW OFTEN the script looks for new channels
-CHANNEL_SLEEP_INT = 10
 CHANNEL_CHECK_SLEEP_INT = 60
 
 # wait counter for how often to attempt balancing the channels
@@ -125,11 +112,155 @@ def main(max_active_nodes):
             time.sleep(5)
     logging.info(f'Node has finished creating connections. Exiting out of CC_manager.')
 
-def get_node_info():
+
+def create_channels():
     """
-    Retrieve node information, including its ID.
+    Create channels only with nodes that meet the discovery rule and avoid duplicates.
+    Rules:
+        Can only make maximum of MAX_ACTIVE_NODES outbound channels
+        Can only have max MAX_PEERS (which is MAX_ACTIVE_NODES * 2) channels
+    This should happen organically as nodes come online, since once we have the max channels we
+    disconnect from the innocent node. Checks and failsafes make sure this is the case.
     """
-    return ln_checker.lightning_rpc.getinfo()
+    global INNOCENT_CHANNEL_CLOSED
+    global OUTBOUND_CHANNELS
+    global CHANNEL_OPENING_TIMES
+
+    if is_max_inbound_channels() and not INNOCENT_CHANNEL_CLOSED:
+        logging.info(f'create_channels: We have reached incoming node saturation. Disconnecting from innocent node')
+        close_and_disconnect_innocent()
+        return
+    elif CHANNELS_CREATED:
+        return
+
+
+    while True:
+        valid_nodes = discover_nodes()
+
+        if not valid_nodes:
+            logging.info(f'create_channels: No valid nodes found. Aborting channel creation.')
+            return
+
+        for node in valid_nodes:
+
+            # just in case we try to connect to more (this shouldn't happen)
+            if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
+                logging.info("create_channels: Reached maximum outbound peers while processing nodes.")
+                return 
+            
+            OUTBOUND_CHANNELS.add(node)  # Track this node
+
+            if node in OUTBOUND_CHANNELS and not ln_checker.does_connection_exist(node):
+                # make sure we're not trying to connect to a node we're already connected to
+                demoGetAddressAndConnect(node)
+
+            if ln_checker.does_connection_exist(node):
+                fund_channel(node)
+            else:
+                logging.error(f"create_channels: Failed to connect to {node}.")
+        
+        # last check, in case we came online too fast and missed some nodes
+        new_valid_nodes = discover_nodes()
+        if new_valid_nodes == valid_nodes:
+            break
+
+def channeled_with_peer(node_id, peer_channel_list):
+    """
+    Check if any of our channel peers (excluding the Innocent node) have a channel with the given node_id.
+    """
+
+    #For Regtest with mesh connected CCs, Get the list of peers we have channels with (excluding the Innocent node)
+    peer_ids = peer_channel_list - {INNOCENT_NODE_ID}
+
+    if not peer_ids:
+        logging.info("channeled_with_peer: No channel peers to check.")
+        return False
+    
+    channels = ln_checker.lightning_rpc.listchannels().get('channels', [])
+    for channel in channels:
+        source = channel["source"]
+        destination = channel["destination"]
+        if source in peer_ids and destination == node_id:
+            return True
+    return False
+
+def check_channel_states():
+    ''''
+    Check each channel. If it's been too long and it hasn't gone to normal we drop it.
+    On the main net this wouldn't be a problem, probably.
+    '''
+    global CHANNEL_OPENING_TIMES
+
+    if len(CHANNEL_OPENING_TIMES) == 0:
+        return
+
+    # check if any channels got stuck in AWAITING and thus weren't added to the dicitionary
+    channels = ln_checker.get_channels()
+    for channel in channels:
+        channel_state = channels[channel].get('state')
+        if channel not in CHANNEL_OPENING_TIMES.keys() and channel_state not in ln_checker.NOT_CONNECTING:
+            logging.warning(f'check_channel_states: Channel with {channel} is abnormal and not tracked. Tracking. . .')
+            CHANNEL_OPENING_TIMES[channel] = time.time()
+
+    logging.info(f'check_channel_states: Checking channel states for {len(CHANNEL_OPENING_TIMES)} nodes')
+
+    to_remove = []
+    for node in CHANNEL_OPENING_TIMES.keys():
+        start_time = CHANNEL_OPENING_TIMES[node]
+        elasped_time = time.time() - start_time
+        logging.info(f'check_channel_states: Checking node {node}')
+        if not ln_checker.has_channel_with(node): # check first that we still have a channel with this node
+            logging.info(f'check_channel_states: Channel with {node} no longer exists. Removing from pending list.')
+            to_remove.append(node)
+        elif ln_checker.is_node_active(node): # channel is normal, we're no longer watching this channel now
+            logging.info(f'check_channel_states: Channel with {node} is normal. Removing from pending list.')
+            to_remove.append(node)
+        elif elasped_time >= CHANNEL_CHECK_SLEEP_INT: # channel took too long to become normal, close the channel
+            logging.warning(f'check_channel_states: Channel with node {node} took too long to become normal. Closing channel.')
+            ln_checker.lightning_rpc.close(node)
+            to_remove.append(node)
+    if len(to_remove) > 0:
+        for node in to_remove:
+            CHANNEL_OPENING_TIMES.pop(node)
+            logging.info(f'Popped {node}')
+    logging.info(f'check_channel_states: Finished checking channels')
+
+#this is for the demo instead of using meshconnect, CCs can look at the shared address list and connect to each other by themselves
+def demoGetAddressAndConnect(node_ID):
+    """
+    Reads the CC_address_list.txt file, extracts the full address corresponding to the given node ID,
+    and connects to the node using the lightning-cli command.
+
+    :param node_ID: The ID of the node to connect to.
+    """
+    try:
+        # Read the CC_address_list.txt file
+        with open('CC_address_list.txt', 'r') as id_file:
+            CC_ADDRESS_LIST = id_file.readlines()
+
+        # Find the full address corresponding to the node_ID
+        full_address = None
+        for line in CC_ADDRESS_LIST:
+            address = line.split()[1]
+            if address.startswith(node_ID):
+                full_address = address.strip()
+                break
+
+        # If no matching address is found, log and exit
+        if not full_address:
+            logging.error(f"Node ID {node_ID} not found in CC_address_list.txt.")
+            return
+
+        # Connect to the node using the full address
+        logging.info(f"Connecting to node: {full_address}")
+        result = ln_checker.lightning_rpc.connect(full_address)
+
+        if result:
+            logging.info(f"Successfully connected to node {node_ID} at {full_address}.")
+        else:
+            logging.error(f"Failed to connect to node {node_ID} at {full_address}.")
+    except Exception as e:
+        logging.error(f"demoGetAddressAndConnect: Exception occurred: {e}")
 
 def connect_to_innocent():
     """
@@ -224,114 +355,6 @@ def get_node_address(node_id):
         logging.error("Error parsing listnodes output.")
         return None, None
 
-def channeled_with_peer(node_id, peer_channel_list):
-    """
-    Check if any of our channel peers (excluding the Innocent node) have a channel with the given node_id.
-    """
-
-    #For Regtest with mesh connected CCs, Get the list of peers we have channels with (excluding the Innocent node)
-    peer_ids = peer_channel_list - {INNOCENT_NODE_ID}
-
-    if not peer_ids:
-        logging.info("channeled_with_peer: No channel peers to check.")
-        return False
-    
-    channels = ln_checker.lightning_rpc.listchannels().get('channels', [])
-    for channel in channels:
-        source = channel["source"]
-        destination = channel["destination"]
-        if source in peer_ids and destination == node_id:
-            return True
-    return False
-
-#this is for the demo instead of using meshconnect, CCs can look at the shared address list and connect to each other by themselves
-def demoGetAddressAndConnect(node_ID):
-    """
-    Reads the CC_address_list.txt file, extracts the full address corresponding to the given node ID,
-    and connects to the node using the lightning-cli command.
-
-    :param node_ID: The ID of the node to connect to.
-    """
-    try:
-        # Read the CC_address_list.txt file
-        with open('CC_address_list.txt', 'r') as id_file:
-            CC_ADDRESS_LIST = id_file.readlines()
-
-        # Find the full address corresponding to the node_ID
-        full_address = None
-        for line in CC_ADDRESS_LIST:
-            address = line.split()[1]
-            if address.startswith(node_ID):
-                full_address = address.strip()
-                break
-
-        # If no matching address is found, log and exit
-        if not full_address:
-            logging.error(f"Node ID {node_ID} not found in CC_address_list.txt.")
-            return
-
-        # Connect to the node using the full address
-        logging.info(f"Connecting to node: {full_address}")
-        result = ln_checker.lightning_rpc.connect(full_address)
-
-        if result:
-            logging.info(f"Successfully connected to node {node_ID} at {full_address}.")
-        else:
-            logging.error(f"Failed to connect to node {node_ID} at {full_address}.")
-    except Exception as e:
-        logging.error(f"demoGetAddressAndConnect: Exception occurred: {e}")
-
-def create_channels():
-    """
-    Create channels only with nodes that meet the discovery rule and avoid duplicates.
-    Rules:
-        Can only make maximum of MAX_ACTIVE_NODES outbound channels
-        Can only have max MAX_PEERS (which is MAX_ACTIVE_NODES * 2) channels
-    This should happen organically as nodes come online, since once we have the max channels we
-    disconnect from the innocent node. Checks and failsafes make sure this is the case.
-    """
-    global INNOCENT_CHANNEL_CLOSED
-    global outbound_channels
-    global CHANNEL_OPENING_TIMES
-
-    if is_max_inbound_channels() and not INNOCENT_CHANNEL_CLOSED:
-        logging.info(f'create_channels: We have reached incoming node saturation. Disconnecting from innocent node')
-        close_and_disconnect_innocent()
-        return
-    elif CHANNELS_CREATED:
-        return
-
-
-    while True:
-        valid_nodes = discover_nodes()
-
-        if not valid_nodes:
-            logging.info(f'create_channels: No valid nodes found. Aborting channel creation.')
-            return
-
-        for node in valid_nodes:
-
-            # just in case we try to connect to more (this shouldn't happen)
-            if len(outbound_channels) >= MAX_ACTIVE_NODES:
-                logging.info("create_channels: Reached maximum outbound peers while processing nodes.")
-                return 
-            
-            outbound_channels.add(node)  # Track this node
-
-            if node in outbound_channels and not ln_checker.does_connection_exist(node):
-                # make sure we're not trying to connect to a node we're already connected to
-                demoGetAddressAndConnect(node)
-
-            if ln_checker.does_connection_exist(node):
-                fund_channel(node)
-            else:
-                logging.error(f"create_channels: Failed to connect to {node}.")
-        
-        # last check, in case we came online too fast and missed some nodes
-        new_valid_nodes = discover_nodes()
-        if new_valid_nodes == valid_nodes:
-            break
-
 def fund_channel(node):
     logging.info(f'fund_channel: Connected to {node}. Funding.')
     # random funding amount
@@ -371,7 +394,7 @@ def is_max_inbound_channels():
         True if incoming nodes >= MAX_ACTIVE_NODES
     '''
     active_channels = list_peers_with_channels() - {INNOCENT_NODE_ID}
-    incoming_channels = active_channels - outbound_channels
+    incoming_channels = active_channels - OUTBOUND_CHANNELS
     return len(incoming_channels) >= MAX_ACTIVE_NODES
 
 def discover_nodes():
@@ -400,16 +423,15 @@ def discover_nodes():
         # a check, but this shouldn't be called if we're connected to the innnocent node anyway
         if (source == own_node_id or destination == own_node_id):
             logging.error(f'discover_nodes: Is connected to innocent node. Not supposed to creating channels after connection to Innocent node.')
-        if (len(outbound_channels) >= MAX_ACTIVE_NODES):
+        if (len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES):
             logging.info(f'Node outbound channels is saturated.')
             return []
         
-        node_is_blacklisted = (source in BLACKLISTED_NODES or destination in BLACKLISTED_NODES)
-        node_is_outbound = destination in outbound_channels
+        node_is_outbound = destination in OUTBOUND_CHANNELS
         node_is_innocent = (destination == INNOCENT_NODE_ID)
 
         # checkpoint, we only want nodes connceted to the innocent node while our outbound nodes < Max active nodes
-        if node_is_innocent or node_is_blacklisted or node_is_outbound:
+        if node_is_innocent or node_is_outbound:
             continue
         
         # add the destination node, since we check that the channel source is the innocent node
@@ -490,54 +512,13 @@ def is_bm_node(node_id):
 
     return (int(capacity) % BM_DIVISOR) == 0 if capacity else False
 
-def check_channel_states():
-    ''''
-    Check each channel. If it's been too long and it hasn't gone to normal we drop it.
-    On the main net this wouldn't be a problem, probably.
-    '''
-    global CHANNEL_OPENING_TIMES
-
-    if len(CHANNEL_OPENING_TIMES) == 0:
-        return
-
-    # check if any channels got stuck in AWAITING and thus weren't added to the dicitionary
-    channels = ln_checker.get_channels()
-    for channel in channels:
-        channel_state = channels[channel].get('state')
-        if channel not in CHANNEL_OPENING_TIMES.keys() and channel_state not in ln_checker.NOT_CONNECTING:
-            logging.warning(f'check_channel_states: Channel with {channel} is abnormal and not tracked. Tracking. . .')
-            CHANNEL_OPENING_TIMES[channel] = time.time()
-
-    logging.info(f'check_channel_states: Checking channel states for {len(CHANNEL_OPENING_TIMES)} nodes')
-
-    to_remove = []
-    for node in CHANNEL_OPENING_TIMES.keys():
-        start_time = CHANNEL_OPENING_TIMES[node]
-        elasped_time = time.time() - start_time
-        logging.info(f'check_channel_states: Checking node {node}')
-        if not ln_checker.has_channel_with(node): # check first that we still have a channel with this node
-            logging.info(f'check_channel_states: Channel with {node} no longer exists. Removing from pending list.')
-            to_remove.append(node)
-        elif ln_checker.is_node_active(node): # channel is normal, we're no longer watching this channel now
-            logging.info(f'check_channel_states: Channel with {node} is normal. Removing from pending list.')
-            to_remove.append(node)
-        elif elasped_time >= CHANNEL_CHECK_SLEEP_INT: # channel took too long to become normal, close the channel
-            logging.warning(f'check_channel_states: Channel with node {node} took too long to become normal. Closing channel.')
-            ln_checker.lightning_rpc.close(node)
-            to_remove.append(node)
-    if len(to_remove) > 0:
-        for node in to_remove:
-            CHANNEL_OPENING_TIMES.pop(node)
-            logging.info(f'Popped {node}')
-    logging.info(f'check_channel_states: Finished checking channels')
-
 def check_outbound_channels():
     '''
     Check the outbound channel list to make sure we're still connected with those channels.
     Balance and fund those channels if we haven't
     '''
     outbound_connected = True
-    for node in outbound_channels:
+    for node in OUTBOUND_CHANNELS:
         if not ln_checker.has_channel_with(node):
             if ln_checker.does_connection_exist(node):
                     outbound_connected = False
@@ -551,9 +532,9 @@ def remove_outbound_channel(node_id):
     '''
     Remove the channel from outbound connections.
     '''
-    global outbound_channels
+    global OUTBOUND_CHANNELS
     if not ln_checker.has_channel_with(node_id):
-        outbound_channels = outbound_channels - {node_id}
+        OUTBOUND_CHANNELS = OUTBOUND_CHANNELS - {node_id}
     
 
 def load_this_node ():
@@ -577,6 +558,11 @@ def load_this_node ():
     logging.info(f'Node has synced successfully.')
     return True
 
+def get_node_info():
+    """
+    Retrieve node information, including its ID.
+    """
+    return ln_checker.lightning_rpc.getinfo()
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] > '0':
