@@ -313,10 +313,6 @@ def write_status(status):
     if len(status) >= SHM_BLOCK_SIZE:
         logging.error(f'write_status: Status is greater than block_size {SHM_BLOCK_SIZE}. Aborting write to memory.')
         return
-    
-    # DEBUG
-    logging.info(f'status size is {len(status)}')
-
 
     # Memory blocks are created by lntest
     try:
