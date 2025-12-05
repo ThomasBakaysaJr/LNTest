@@ -238,14 +238,10 @@ It is important to note that the script uses hard paths to find the necessary fi
 
 ### Clone the repo using git
 
-As of 9/30/25 this is a private repo, you will need a private access token (PAT) from Thomas Bakaysa Jr if you wish to clone the repo. First we move into the LNBot_research_project directory and then clone the git repo into this directory.
-
 ```
 cd ~\/Documents\/LNBot_research_project  
-git clone https://github.com/ThomasBakaysaJr/LNBot_Research.git 
+git clone https://github.com/LN-Testbed/DSN2026.git
 ```
-
-It will then ask for a username and password. The user name is ThomasBakaysaJr and the password will be the provided PAT. Unzip the file containing the PAT and open the text file, copy and paste the entire line as the password.
 
 Rename the cloned repo to LNBot
 
@@ -272,8 +268,7 @@ nano config.env
 ```
 
 USER_NAME : Needs to match the current user account.   
-In this example USER_NAME should be “akurt”.  
-![path-user](images/path-user.png)
+In this example USER_NAME should be “anon”. 
 
 RPC_USER: Should match what’s in bitcoin.conf and lightning.conf  
 RPC_PASSWORD: Should match what’s in bitcoin.conf and lightning.conf  

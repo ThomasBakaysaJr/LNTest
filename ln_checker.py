@@ -68,7 +68,6 @@ def run_bitcoin_cli(command):
         logging.error(f"run_bitcoin_cli: Exception occurred: {e}")
         return None
 
-# thomas functions
 # check and make sure we have funds before we try anything since it takes a while
 # for the funds to actually become available
 def check_funds():

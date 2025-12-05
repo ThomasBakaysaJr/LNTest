@@ -506,12 +506,7 @@ def create_meta_data(config):
         'constants' : constants,
         'takedown' : is_takedown,
         'authors' : [
-            'Professor Kurt, Ahmet',
-            'Bakaysa, Thomas',
-            'Erdin, Enes',
-            'Cebe, Mumin',
-            'Akkaya, Kemal',
-            'Selcuk Uluagac, A.'
+            'Anonymous Author 1'
         ]
     }
 
