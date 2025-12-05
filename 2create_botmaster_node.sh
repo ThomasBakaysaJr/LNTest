@@ -29,7 +29,7 @@ create_botmaster_node() {
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $BOT_MASTER_DIR:$BOT_MASTER_CONTAINER_DIR \
         -v $LN_CHECKER_FILE:$BOT_MASTER_CONTAINER_DIR/ln_checker.py \
-        lnbot_node:v25.09  \
+        $LNTEST_VERSION \
         --network=regtest \
         --addr=127.0.0.1:$NODE_PORT \
 	    --grpc-port=10011

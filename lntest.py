@@ -25,13 +25,13 @@ from utils.node_manager import NodeManager
 from utils import record_total_time
 from utils import sys_monitor
 
-LNTEST_VERSION = "0.4.0"
-LNNODE_VERSION = "lnbot_node:v25.09"
-
 load_dotenv('config.env')
 
 BITCOIND_DIR = os.getenv('BITCOIND_PATH')
 BITCOIND_DATA_DIR = os.getenv('BITCOIN_DIR')
+
+LIGHTNINGD_VERSION = os.getenv('LIGHTNINGD_VERSION')
+LNTEST_VERSION = os.getenv('LNTEST_VERSION')
 
 DATA_DIR = 'data/'
 
@@ -175,7 +175,7 @@ def main():
     
     args = parser.parse_args()
 
-    docker_utils.ensure_custom_image(LNNODE_VERSION)
+    docker_utils.ensure_custom_image(LNTEST_VERSION, LIGHTNINGD_VERSION)
     manager = NodeManager()
     # start recording time for total testing
     start_time = time.time()
