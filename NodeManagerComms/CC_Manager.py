@@ -12,7 +12,6 @@ from pathlib import Path
 import random
 import sys
 import os
-import ln_checker
 
 # Constants
 DISCOVERY_RULE_DIVISOR = 19  # Capacity must be divisible by 19 (prime number)
@@ -45,6 +44,8 @@ LOG_DIR = Path('logs')
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 log_file_path = LOG_DIR / f'cc_log_{HOST_NAME}.log'
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
+
+import ln_checker
 
 def main(max_active_nodes):
     """

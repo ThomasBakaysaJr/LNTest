@@ -8,7 +8,6 @@ import time
 import os
 import logging
 from pathlib import Path
-import ln_checker
 
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
@@ -39,6 +38,8 @@ CURRENT_MESSAGE_FILE = STATUS_DIR / f'cc_currentMessage_{HOST_NAME}.json'
 log_file_path = LOG_DIR / f'noise_log_{HOST_NAME}.log'
 
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
+
+import ln_checker
 
 def main():
     """
