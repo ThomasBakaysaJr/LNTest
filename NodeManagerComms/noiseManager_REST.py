@@ -11,23 +11,6 @@ from pathlib import Path
 
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
-DISCOVERY_RULE_DIVISOR = [19, 1231]
-
-SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
-CONNECT_SLEEP = 10 # timer specifically for initialization of channels
-
-# how long in s between status updates
-STATUS_TIMER = 1
-
-THIS_NODE = None
-# for global (is it sending right now?) type ask
-SENDING = False
-CONNECTING = True
-CREATED_CHANNELS = False
-
-# The TLV record type used for standard text messages in keysend.
-MESSAGE_TLV_TYPE = "34349334"
-LAST_INVOICE_INDEX = -1
 
 LOG_DIR = Path('logs')
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,6 +23,25 @@ log_file_path = LOG_DIR / f'noise_log_{HOST_NAME}.log'
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME}_noise %(asctime)s - %(levelname)s - %(message)s")
 
 import ln_checker
+
+DISCOVERY_RULE_DIVISOR = [ln_checker.DISCOVERY_RULE_DIVISOR, ln_checker.BOTMASTER_RULE_DIVISOR // 100]
+
+SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
+CONNECT_SLEEP = 10 # timer specifically for initialization of channels
+
+# how long in s between status updates
+STATUS_TIMER = ln_checker.STATUS_UPDATE_INTERVAL
+
+THIS_NODE = None
+# for global (is it sending right now?) type ask
+SENDING = False
+CONNECTING = True
+CREATED_CHANNELS = False
+
+# The TLV record type used for standard text messages in keysend.
+MESSAGE_TLV_TYPE = "34349334"
+LAST_INVOICE_INDEX = -1
+
 
 def main():
     """

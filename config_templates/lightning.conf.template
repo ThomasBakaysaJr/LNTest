@@ -1,0 +1,9 @@
+network=regtest #we are on a regtest network
+
+# REMEMBER to use the same bitcoin credentials
+bitcoin-rpcuser=username
+bitcoin-rpcpassword=password
+bitcoin-rpcconnect=127.0.0.1
+bitcoin-rpcport=8332
+
+log-level=debug

@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# get number of active nodes and remove it from incoming arguments
-active_nodes=$1
-shift
+# Set default values for paths if not provided
+LIGHTNING_HOME=${LIGHTNING_HOME:-"/root/.lightning"}
+NODE_CONTAINER_DIR=${NODE_CONTAINER_DIR:-"/root/nodemanager"}
 
 # Start lightningd in the background
 # The '$@' passes all command-line arguments to it
@@ -18,8 +18,8 @@ while ! lightning-cli --regtest getinfo &> /dev/null; do
     if ! kill -0 $LND_PID 2>/dev/null; then
         echo "CRITICAL: Lightningd process (PID $LND_PID) died during startup!"
         # Print the log file if it exists to see why
-        if [ -f /root/.lightning/regtest/log ]; then
-            cat /root/.lightning/regtest/log
+        if [ -f "$LIGHTNING_HOME/regtest/log" ]; then
+            cat "$LIGHTNING_HOME/regtest/log"
         fi
         exit 1
     fi
@@ -32,8 +32,8 @@ echo "Lightningd is online."
 
 # Now that lightningd is ready, start the python managers
 echo "Starting background services..."
-cd /root/nodemanager
-python3 CC_Manager.py $active_nodes &
+cd "$NODE_CONTAINER_DIR" 
+python3 CC_Manager.py &
 python3 noiseManager_REST.py &
 echo "Background services started."
 

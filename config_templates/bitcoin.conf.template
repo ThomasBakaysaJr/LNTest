@@ -1,0 +1,29 @@
+#Global Settings
+
+regtest=1 #run as regtest
+server=1 #enable rpc control
+daemon=1 #run bitcoincore in the background
+txindex=1 #index transactions for faster lookups
+# Increase the system resources available
+rpcworkqueue=512
+rpcthreads=64
+
+prune=n #keeps full blockchain for lightning compatibility
+
+# REMEMBER to use the same bitcoin credentials
+rpcuser=username
+rpcpassword=password
+
+[regtest]
+
+rpcport=8332
+rpcallowip=127.0.0.1
+rpcallowip=10.0.0.0/8
+rpcallowip=172.0.0.0/8
+rpcallowip=192.0.0.0/8
+zmqpubrawblock=tcp://0.0.0.0:28332
+zmqpubrawblock=tcc://0.0.0.0:28333
+zmqpubhashblock=tcp://0.0.0.0:28334
+whitelist=127.0.0.1
+
+fallbackfee=0.00001

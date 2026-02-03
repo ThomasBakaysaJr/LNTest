@@ -6,37 +6,28 @@ set -e
 # Base directories for lightning and Bitcoin 
 source config.env
 
-# Directories for NodeManagerComms and BotMasterComms
-NODE_MANAGER_DIR="$LNBOT_DIR/NodeManagerComms"
-BOT_MASTER_DIR="$LNBOT_DIR/BotMasterComms"
-INNO_MANAGER_DIR="$LNBOT_DIR/InnocentManager"
-
-# Files to store the address and ID
-NODE_ADDRESS_FILE="$NODE_MANAGER_DIR/innocentAddress.txt"
-NODE_ID_FILE="$NODE_MANAGER_DIR/innocentID.txt"
-BOT_ADDRESS_FILE="$BOT_MASTER_DIR/innocentAddress.txt"
-BOT_ID_FILE="$BOT_MASTER_DIR/innocentID.txt"
+# Default BITCOIN_HOST if not set
+BITCOIN_HOST=${BITCOIN_HOST:-"127.0.0.1"}
 
 # Function to create the Innocent Node
 create_innocent_node() {
     NODE_NAME="InnocentNode"
-    NODE_LIGHTNING_DIR="$LNBOT_DIR/lightning-$NODE_NAME"
-    NODE_PORT=19847
+    NODE_LIGHTNING_DIR="$NODE_DATA_DIR/lightning-$NODE_NAME"
+    NODE_PORT=$INNOCENT_PORT
 
     # Create a directory for the node
     mkdir -p $NODE_LIGHTNING_DIR
 
     # Run the Docker container without NODE_MANAGER_DIR and without bootstrap
+    echo "LNTEST_VERSION is: $LNTEST_VERSION"
     docker run -d --restart unless-stopped --network host --name $NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $INNO_MANAGER_DIR:/root/ \
         $LNTEST_VERSION \
-        --network=regtest \
-        --addr=127.0.0.1:$NODE_PORT \
-	    --grpc-port=10010
-    # echo "Starting REST server on innocent node"
-    # docker exec $NODE_NAME python3 /root/REST_server.py &
+        --network=$NETWORK_TYPE \
+        --addr=$BITCOIN_HOST:$NODE_PORT \
+	    --grpc-port=$INNOCENT_GRPC_PORT
 }
 
 # Function to extract address and ID and save to files
@@ -48,9 +39,8 @@ extract_address_and_id() {
 
     # Parse the address and ID from the JSON output
     NODE_ID=$(echo $NODE_INFO | jq -r '.id')
-    NODE_PORT=$(echo $NODE_INFO | jq -r '.binding[0].port')
-    NODE_IP=$(echo $NODE_INFO | jq -r '.binding[0].address')
-    NODE_ADDRESS="${NODE_ID}@${NODE_IP}:${NODE_PORT}"
+    # Use explicitly configured host and port instead of parsing dynamic bindings
+    NODE_ADDRESS="${NODE_ID}@${BITCOIN_HOST}:${INNOCENT_PORT}"
 
     # Clear the NodeManagerComms files before writing
     > $NODE_ADDRESS_FILE

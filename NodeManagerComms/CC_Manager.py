@@ -10,14 +10,24 @@ import time
 import logging
 from pathlib import Path
 import random
-import sys
 import os
 
+HOST_NAME = os.getenv("CONTAINER_NAME")
+
+THIS_NODE = None
+
+LOG_DIR = Path('logs')
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+log_file_path = LOG_DIR / f'cc_log_{HOST_NAME}.log'
+logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
+
+import ln_checker
+
 # Constants
-DISCOVERY_RULE_DIVISOR = 19  # Capacity must be divisible by 19 (prime number)
-BM_DIVISOR = 123123 # used to not disconnect from the BM node when its trying to send a command
-MAX_ACTIVE_NODES = 4 # number of active nodes (n in the paper)
-MAX_PEERS = 4     # Maximum number of peers
+DISCOVERY_RULE_DIVISOR = ln_checker.DISCOVERY_RULE_DIVISOR
+BM_DIVISOR = ln_checker.BOTMASTER_RULE_DIVISOR
+MAX_ACTIVE_NODES = ln_checker.ACTIVE_NODES
+MAX_PEERS = ln_checker.MAX_PEERS 
 
 INNOCENT_NODE_ID = None
 INNOCENT_NODE_ADDRESS = None
@@ -34,20 +44,9 @@ CHANNEL_OPENING_TIMES = {}
 CHANNEL_CHECK_SLEEP_INT = 60
 
 # wait counter for how often to attempt balancing the channels
-CHANNEL_BALANCE_COUNTER = 3
+CHANNEL_BALANCE_COUNTER = ln_checker.CHANNEL_BALANCE_COUNTER
 
-HOST_NAME = os.getenv("CONTAINER_NAME")
-
-THIS_NODE = None
-
-LOG_DIR = Path('logs')
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-log_file_path = LOG_DIR / f'cc_log_{HOST_NAME}.log'
-logging.basicConfig(filename=log_file_path, level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
-
-import ln_checker
-
-def main(max_active_nodes):
+def main():
     """
     Main script loop.
     """
@@ -63,10 +62,17 @@ def main(max_active_nodes):
     global MAX_ACTIVE_NODES
     
     # setting some important variables.
-    MAX_ACTIVE_NODES = max_active_nodes
-    MAX_PEERS = MAX_ACTIVE_NODES * 2
+    MAX_ACTIVE_NODES = ln_checker.ACTIVE_NODES
+    MAX_PEERS = ln_checker.MAX_PEERS
 
     logging.info(f'For node {HOST_NAME}, active nodes is {MAX_ACTIVE_NODES} and max peers is {MAX_PEERS}')
+
+    # Filenames from environment variables or defaults
+    # We use os.path.basename because these files are mounted into the container's working directory
+    # but the env vars might contain the full host path.
+    innocent_addr_file = os.path.basename(os.getenv('NODE_ADDRESS_FILE', 'innocentAddress.txt'))
+    innocent_id_file = os.path.basename(os.getenv('NODE_ID_FILE', 'innocentID.txt'))
+    cc_addr_list_file = os.path.basename(os.getenv('NODE_MANAGER_ADDRESS_LIST', 'CC_address_list.txt'))
 
     if not load_this_node(): # retrieve vital information and wait for node to sync
         logging.warning(f'Node tried to start with saturated nodes. Aborting start.')
@@ -74,12 +80,12 @@ def main(max_active_nodes):
 
     for _ in range(attempt_max):
         try:
-            with open('innocentAddress.txt', 'r') as address_file:
+            with open(innocent_addr_file, 'r') as address_file:
                 INNOCENT_NODE_ADDRESS = address_file.read().strip()
-            with open('innocentID.txt', 'r') as id_file:
+            with open(innocent_id_file, 'r') as id_file:
                 INNOCENT_NODE_ID = id_file.read().strip()
 
-            with open('CC_address_list.txt', 'r') as id_file:
+            with open(cc_addr_list_file, 'r') as id_file:
                 CC_ADDRESS_LIST = id_file.read().strip()
             
             logging.info(f"Found Innocent node at {INNOCENT_NODE_ADDRESS}")
@@ -236,7 +242,8 @@ def demoGetAddressAndConnect(node_ID):
     """
     try:
         # Read the CC_address_list.txt file
-        with open('CC_address_list.txt', 'r') as id_file:
+        cc_addr_list_file = os.path.basename(os.getenv('NODE_MANAGER_ADDRESS_LIST', 'CC_address_list.txt'))
+        with open(cc_addr_list_file, 'r') as id_file:
             CC_ADDRESS_LIST = id_file.readlines()
 
         # Find the full address corresponding to the node_ID
@@ -359,7 +366,7 @@ def get_node_address(node_id):
 def fund_channel(node):
     logging.info(f'fund_channel: Connected to {node}. Funding.')
     # random funding amount
-    funding_amount = random.randint(5,15) * 10000
+    funding_amount = random.randint(ln_checker.MIN_CHANNEL_CAPACITY, ln_checker.MAX_CHANNEL_CAPACITY)
     logging.info(f"fund_channel: Opening channel with node {node}. Funding amount: {funding_amount}")
     if ln_checker.check_funds():
         result = ln_checker.lightning_rpc.fundchannel(node, funding_amount)
@@ -566,7 +573,4 @@ def get_node_info():
     return ln_checker.lightning_rpc.getinfo()
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] > '0':
-        main(int(sys.argv[1]))
-    else:
-        main(4)
+    main()

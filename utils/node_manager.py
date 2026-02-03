@@ -4,24 +4,28 @@ import time
 import random
 import subprocess
 import docker
+import os
+from dotenv import load_dotenv
 from multiprocessing import shared_memory
 
-SLEEP_INTERVAL = 2  # seconds
-MAX_WAIT = 450  # seconds
-WAIT_MULT = 2  # multiplier for wait time
+load_dotenv('config.env')
+
+SLEEP_INTERVAL = int(os.getenv('NM_SLEEP', 2))  # seconds
+MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450))  # seconds
+WAIT_MULT = int(os.getenv('NM_MAX_WAIT_MULT', 2))  # multiplier for wait time
 
 # Directories for NodeManagerComms and BotMasterComms
-NODEMAN_CCADDRESS_FILE = "NodeManagerComms/CC_address_list.txt"
-BOTMASTER_CCADDRESS_FILE = "BotMasterComms/CC_address_list.txt"
+NODEMAN_CCADDRESS_FILE = os.getenv('NODE_MANAGER_ADDRESS_LIST')
+BOTMASTER_CCADDRESS_FILE = os.getenv('BOT_MASTER_ADDRESS_LIST')
 
-KILL_NODES_BASH = './kill_nodes.sh'
-INIT_BOTNET_BASH = './init_botnet.sh'
-CREATE_CC_SERVER_BASH = './3create_CC_nodesV3.sh'
+KILL_NODES_BASH = os.getenv('KILL_NODES_BASH')
+INIT_BOTNET_BASH = os.getenv('INIT_BOTNET_BASH')
+CREATE_CC_SERVER_BASH = os.getenv('CREATE_CC_SERVER_BASH')
 
-BM_DIR = '/root/botmaster'
+BM_DIR = os.getenv('BOT_MASTER_CONTAINER_DIR')
 
-NUM_CC = 'num_cc'
-ACTIVE_NODES = 'active_nodes'
+NUM_CC = os.getenv('NUM_CC', 'num_cc')
+ACTIVE_NODES = os.getenv('ACTIVE_NODES', 'active_nodes')
 
 class Node:
     '''
@@ -127,12 +131,13 @@ class Node:
 
 class NodeManager:
     def __init__(self):
-        self.node_config_path = 'testState/node_config.json'
+        self.node_config_dir = os.getenv('TEST_STATE_DIR')
+        # CHANGE to use the OS path making
+        self.node_config_path = f'{self.node_config_dir}/node_config.json'
         self.CC_PREFIX = 'CC'
-        self.bm_name = 'BM'
-        self.bm_script = 'BM.py'
-        self.inno_name = 'InnocentNode'
-        self.block_size = 5012  # bytes
+        self.bm_name = os.getenv('BOTMASTER_NODE', 'BM')
+        self.bm_script = os.getenv('BOTMASTER_SCRIPT')
+        self.inno_name = os.getenv('INNOCENT_NODE', 'InnocentNode')
         self.nodes: dict[str, Node] = {}
     
     def setup_test(self, total_nodes, active_nodes):
@@ -220,14 +225,17 @@ class NodeManager:
             'active_nodes' : self.active_nodes,
             'max_peers' : self.active_nodes * 2,
             'block_size' : self.block_size,
-            'discovery_rule' : 19,
-            'botmaster_rule' : 123123,
-            'channel_creation_sleep' : 10,
-            'status_update_interval' : 1.5,
-            'channel_balance_counter' : 3
+            'discovery_rule' : int(os.getenv('DISCOVERY_RULE', 19)),
+            'botmaster_rule' : int(os.getenv('BOTMASTER_RULE', 123123)),
+            'channel_creation_sleep' : int(os.getenv('NODE_CHANNEL_SLEEP', 10)),
+            'status_update_interval' : float(os.getenv('NODE_UPDATE_INTERVAL', 1.5)),
+            'channel_balance_counter' : int(os.getenv('NODE_BALANCE_COUNTER', 3)),
+            'min_channel_capacity' : int(os.getenv('MIN_CHANNEL_CAPACITY', 50000)),
+            'max_channel_capacity' : int(os.getenv('MAX_CHANNEL_CAPACITY', 150000))
         }
 
         try:
+            os.makedirs(self.node_config_dir, exist_ok=True)
             with open(self.node_config_path, 'w') as f:
                 json.dump(config_data, f, indent=4)
             print(f'Generated {self.node_config_path} with block size : {self.block_size}')
@@ -448,10 +456,10 @@ class NodeManager:
         # tests showed:
         # ~260 overhead
         # ~120 per channel
-        overhead_size = 512
-        per_peer_size = 256
+        overhead_size = int(os.getenv('SHM_OVERHEAD', 512))
+        per_peer_size = int(os.getenv('SHM_PER_PEER', 256))
         # extra padding just in case
-        buffer = 1.2
+        buffer = float(os.getenv('SHM_BUFFER', 1.2))
 
         return int((overhead_size + (active_nodes * per_peer_size)) * buffer)
 

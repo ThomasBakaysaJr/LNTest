@@ -1,7 +1,7 @@
-import time
 import datetime
 import json
 import os
+from dotenv import load_dotenv
 
 def record_total_time(total_time, config, output_suffix="total_times_log.json"):
     '''
@@ -12,7 +12,9 @@ def record_total_time(total_time, config, output_suffix="total_times_log.json"):
         config (dict): The configuration dictionary used for the test run.
             Can be a single config or a list of configs.
         output_file (str): The path to the JSON file where the log will be stored.'''
-    os.makedirs("data", exist_ok=True)
+    
+    load_dotenv('config.env')
+    os.makedirs(os.getenv('TEST_DATA_DIR'), exist_ok=True)
     filename = datetime.datetime.now().strftime(f"data/%Y-%m-%d_{output_suffix}")
 
     log_entry = {

@@ -1,4 +1,4 @@
-lightning*/
+node_data/
 time_data*
 runtime_data.csv
 topology*
@@ -11,7 +11,6 @@ InnocentManager/*
 NodeManagerComms/*
 !NodeManagerComms/CC_Manager.py
 !NodeManagerComms/noiseManager_REST.py
-master_log.log
 setuptime_data.csv
 venv/*
 utils/__pycache__

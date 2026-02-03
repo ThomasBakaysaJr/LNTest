@@ -21,6 +21,3 @@ fi
 # Start the scripts in order
 ./1create_Innocent_node.sh
 ./2create_botmaster_node.sh
-# ./3create_CC_nodesV2.sh "$TOTAL_NODES" "$ACTIVE_NODES"
-# ./4fund_wallets.sh
-# echo "Initialiation Finished"

@@ -27,21 +27,21 @@ from utils import sys_monitor
 
 load_dotenv('config.env')
 
-BITCOIND_DIR = os.getenv('BITCOIND_PATH')
+BITCOIND_CLI = os.getenv('BITCOIN_CLI')
 BITCOIND_DATA_DIR = os.getenv('BITCOIN_DIR')
 
 LIGHTNINGD_VERSION = os.getenv('LIGHTNINGD_VERSION')
 LNTEST_VERSION = os.getenv('LNTEST_VERSION')
 
-DATA_DIR = 'data/'
+DATA_DIR = os.getenv('TEST_DATA_DIR')
 
 TIMES_JSON = 'time_data.json'
 TOPO_JSON = 'topology_data.json'
 
 # scripts to use
-RESTART_BITCOIND_BASH = "./restart_bitcoin.sh"
-FUND_WALLETS_BASH = './4fund_wallets.sh'
-BITCOIN_MINER_PY = 'mineBlocks.py'
+RESTART_BITCOIND_BASH = os.getenv('RESTART_BITCOIND_BASH')
+FUND_WALLETS_BASH = os.getenv('FUND_WALLETS_BASH')
+BITCOIN_MINER_PY = os.getenv('MINER_SCRIPT')
 
 # constant names for the variables we use
 TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
@@ -51,11 +51,9 @@ BM_CC = 'bm_cc'
 BM_POS = 'bm_pos'
 
 # Unless the script isn't working properly, best to leave these values alone
-MAX_WAIT = 450 # max wait for propagation before we move on (default = 450)
+MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450)) # max wait for propagation before we move on (default = 450)
 MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
-SLEEP_INTERVAL = 1
-# will eventually be a argparse argument
-TAKEDOWN_PERCENTAGE = 0.1 # percentage of nodes to take down in takedown tests
+SLEEP_INTERVAL = int(os.getenv('NM_SLEEP', 1))
 
 # configurations for the tests
 TEST_CONFIGS = {
@@ -127,52 +125,43 @@ TEST_CONFIGS = {
     }
 }
 
+def add_common_arguments(parser):
+    """Add common simulation arguments to the given parser."""
+    group = parser.add_argument_group('Simulation Parameters')
+    group.add_argument('--num-cc', dest='num_cc', type=int, help='Starting number of CC servers.')
+    group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Starting number of active nodes.')
+    group.add_argument('--bm-cc', dest='bm_cc', type=int, help='Number of nodes the botmaster will send commands to.')
+    group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Botmaster connection position (e.g., 50 for middle).')
+    group.add_argument('--max-msg', dest='max_msg', type=int, help='Number of messages to send per test.')
+    
+    takedown = parser.add_argument_group('Takedown Settings')
+    takedown.add_argument('--takedown', action='store_true', help='Enable node takedown during test.')
+    takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Percentage of nodes to take down (default: 0.1).')
+
 def main():
     '''
-    Args:
-        mode: What type of test to conduct.
-        1 = number of cc iterations
-        2 = number of active nodes iterations
+    Main entry point for the LNBot Testing Orchestrator.
     '''
-
-    parser = argparse.ArgumentParser(description="LNBot Testing Orchestrator.",
-                                     formatter_class=argparse.RawDescriptionHelpFormatter )
-
-    mode = parser.add_mutually_exclusive_group(required = True)
-    mode.add_argument('--full', action = 'store_true', help = 'Run the full testing suite. Add options to change the defaults for each run.')
-    mode.add_argument('--small', action = 'store_true', help = 'Run a small testing suite to make sure everything works.')
-    mode.add_argument('--test', choices = TEST_CONFIGS.keys(), 
-                      help = textwrap.dedent('''
-                      Run tests on individual factors.
-                      1: Changing number of cc nodes
-                      2: Changing number of active nodes
-                      3: Changing number of cc nodes the botmaster will connect to
-                      4: Changing nubmer of locations the botmaster will connect to (fixed to top, middle and bottom)'''))
-
-    # Define optional arguments for starting values
-    parser.add_argument('--num_cc', type = int, default = None, 
-                        help='Starting number of CC servers.')
-    parser.add_argument('--active_nodes', type = int, default = None, 
-                        help='Starting number of active nodes.')
-    parser.add_argument('--bm_cc', type = int, default = None,
-                        help = 'Number of nodes the botmaster will send commands to')
-    parser.add_argument('--bm_pos', type = int, default = None,
-                        help = textwrap.dedent('''
-                        Where in the botnet to connect as a percentage of the network.
-                        <0  : Random
-                        0.0 : Oldest nodes
-                        50.0 : Middle of the network
-                        100.0 : Youngest Nodes
-                        '''))
-    parser.add_argument('--max_msg', type = int, default = None,
-                        help = 'Number of messages for this test.')
-    parser.add_argument('--max_range', type = int, default = None,
-                        help = 'Change the max range for this test. ONLY works with mode --test')
-    parser.add_argument('--step', type = int, default = None,
-                        help = 'Change the step used between tests. Only works with mode --test')
-    parser.add_argument('--takedown', action = 'store_true', 
-                        help = 'Takedown 10% of nodes for this test')
+    parser = argparse.ArgumentParser(description="LNBot Testing Orchestrator", 
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     
+    subparsers = parser.add_subparsers(dest='command', required=True, help='Mode of operation')
+
+    # Subcommand: full
+    parser_full = subparsers.add_parser('full', help='Run the full testing suite.')
+    add_common_arguments(parser_full)
+
+    # Subcommand: small
+    parser_small = subparsers.add_parser('small', help='Run a small sanity check suite.')
+    add_common_arguments(parser_small)
+
+    # Subcommand: run (was --test)
+    parser_run = subparsers.add_parser('run', help='Run a specific test configuration.')
+    parser_run.add_argument('test_id', choices=TEST_CONFIGS.keys(), help='ID of the test to run.')
+    parser_run.add_argument('--max-range', dest='max_range', type=int, help='Override the max range for the test variable.')
+    parser_run.add_argument('--step', dest='step', type=int, help='Override the step size for the test variable.')
+    add_common_arguments(parser_run)
+
     args = parser.parse_args()
 
     docker_utils.ensure_custom_image(LNTEST_VERSION, LIGHTNINGD_VERSION)
@@ -181,14 +170,14 @@ def main():
     start_time = time.time()
     all_configs = []
 
-    if args.full or args.small:
+    if args.command in ['full', 'small']:
 
         # print out warning that max_range does nothing with this test
-        if args.max_range:
-            print(f'WARNING: --max_range cannot be changed for --full or --small.')
+        # Note: In the new structure, max_range isn't even in the namespace for full/small, 
+        # so we don't need to check for it, preventing user error by design.
 
         test_order = TEST_CONFIGS.keys()
-        if args.full:
+        if args.command == 'full':
             print(f'Running full testing suite.')
         else:
             print(f'Running small testing suite.')
@@ -202,24 +191,24 @@ def main():
             config = TEST_CONFIGS[test_mode].copy()
             parameters = config['parameters']
             # specific changes for small tester
-            if args.small:
-                config['max_messages'] = 10
-                parameters[NUM_CC] = 10
-                parameters[ACTIVE_NODES] = 4
+            if args.command == 'small':
+                config['max_messages'] = 2
+                parameters[NUM_CC] = 6
+                parameters[ACTIVE_NODES] = 2
                 parameters[BM_CC] = 1
-                parameters[BM_POS] = 0
+                parameters[BM_POS] = 50
 
                 if config['var_key'] == NUM_CC:
-                    config['range'] = (20, 10)
+                    config['range'] = (8, 2)
                 elif config['var_key'] == ACTIVE_NODES:
-                    config['range'] = (5, 1)
+                    config['range'] = (3, 1)
                 elif config['var_key'] == BM_CC:
                     config['range'] = (2, 1)
                 elif config['var_key'] == BM_POS:
-                    config['range'] = (50, 50)
+                    config['range'] = (100, 50)
             # Implement changes to full testings
             # like if the user wants to change the number of bm_cc connections
-            if args.full:
+            if args.command == 'full':
                 testing = config['var_key']
                 if testing != NUM_CC and args.num_cc is not None:
                     print(f'num_cc is set to {args.num_cc}')
@@ -238,11 +227,12 @@ def main():
                     config['max_messages'] = args.max_msg
                         
             config['parameters'] = parameters
+            config['takedown_percentage'] = args.takedown_pct
             all_configs.append(config)
             run_test(config, manager)
 
-    elif args.test:
-        config = TEST_CONFIGS[args.test].copy()
+    elif args.command == 'run':
+        config = TEST_CONFIGS[args.test_id].copy()
         parameters = config['parameters']
         if args.num_cc is not None:
             print(f'num_cc is set to {args.num_cc}')
@@ -268,13 +258,13 @@ def main():
             print(f'step is set to {args.step}')
             temp_range = list(config['range'])
             temp_range[1] = args.step
-            temp_range[1] = args.step
             config['range'] = temp_range
         if args.takedown:
             print(f'Takedown test is True')
             config['takedown'] = True
 
         config['parameters'] = parameters
+        config['takedown_percentage'] = args.takedown_pct
         print(f'Running test with:\n{parameters}')
         if not confirm_test():
             print(f'Exiting tester.')
@@ -289,7 +279,7 @@ def main():
     total_time = time.time() - start_time
     record_total_time.record_total_time(total_time, all_configs)
 
-    # we only kill the nodes here since we wan't to keep
+    # we only kill the nodes here since we want to keep
     # the logs for the last run.
     manager.kill_all_nodes()
     print(f'Testing finished. Exiting.')
@@ -300,6 +290,7 @@ def run_test(in_config, manager : NodeManager):
     Returns true is successful, false if something fails.
     '''
     config = copy.deepcopy(in_config)
+    takedown_pct = config.get('takedown_percentage', 0.1)
     overall_test_time = time.time()
     attempt = 0
     testing = config['var_key']
@@ -352,8 +343,8 @@ def run_test(in_config, manager : NodeManager):
             print(f'Channels created in {total_setup_time} seconds.')
 
             if config.get('takedown', False):
-                print(f'Preparing for takedown of 10% of nodes.')
-                if not manager.takedown(config, TAKEDOWN_PERCENTAGE):
+                print(f'Preparing for takedown of {takedown_pct*100}% of nodes.')
+                if not manager.takedown(config, takedown_pct):
                     # we stop tracking containers here because we won't be reaching the !success block below
                     success = False
                     attempt += 1
@@ -399,8 +390,8 @@ def run_test(in_config, manager : NodeManager):
         monitor.stop()
         stop_bitcoinminer()           
 
-    print(f'FINISHED at {time.time() - overall_test_time} testing for {config['description']}.')
-    print(f'Testing with: \n{config}')
+    print(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.")
+    print(f"Testing with: \n{config}")
 
 def wait_for_propagation(command, manager : NodeManager):
     print(f'Now waiting for command {command} to propagate.')
@@ -547,7 +538,7 @@ def get_record_name(config):
     if config.get('takedown', False):
         id += 'T'
     
-    filename = f'{DATA_DIR}{var_key}_{values[var_key]}_{id}'
+    filename = f'{DATA_DIR}/{var_key}_{values[var_key]}_{id}'
 
     return filename
 
@@ -563,7 +554,7 @@ def init_bitcoin_server():
     balance = 0.0
     while balance <= 0.0:
         time.sleep(5)
-        balance = subprocess.run([BITCOIND_DIR, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
+        balance = subprocess.run([BITCOIND_CLI, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
         balance = balance.stdout.strip().decode()
         if balance == '':
             balance = 0

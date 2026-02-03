@@ -13,6 +13,12 @@ SLEEP_INT= 10
 DISCOVERY_RULE_DIVISOR = 19
 BOTMASTER_RULE_DIVISOR = 123123
 SHM_BLOCK_SIZE = 5012
+ACTIVE_NODES = 4
+MAX_PEERS = 8
+CHANNEL_BALANCE_COUNTER = 3
+STATUS_UPDATE_INTERVAL = 1.5
+MIN_CHANNEL_CAPACITY = 50000
+MAX_CHANNEL_CAPACITY = 150000
 
 # where the config file lives
 BASE_DIR = Path(__file__).parent.resolve()
@@ -25,6 +31,12 @@ try:
             SHM_BLOCK_SIZE = config.get('block_size', SHM_BLOCK_SIZE)
             DISCOVERY_RULE_DIVISOR = config.get('discovery_rule', DISCOVERY_RULE_DIVISOR)
             BOTMASTER_RULE_DIVISOR = config.get('botmaster_rule', BOTMASTER_RULE_DIVISOR)
+            ACTIVE_NODES = config.get('active_nodes', ACTIVE_NODES)
+            MAX_PEERS = config.get('max_peers', MAX_PEERS)
+            CHANNEL_BALANCE_COUNTER = config.get('channel_balance_counter', CHANNEL_BALANCE_COUNTER)
+            STATUS_UPDATE_INTERVAL = config.get('status_update_interval', STATUS_UPDATE_INTERVAL)
+            MIN_CHANNEL_CAPACITY = config.get('min_channel_capacity', MIN_CHANNEL_CAPACITY)
+            MAX_CHANNEL_CAPACITY = config.get('max_channel_capacity', MAX_CHANNEL_CAPACITY)
         logging.info(f'ln_checker: Loaded from configs {NODE_CONFIG_PATH}')
     else:
         logging.warning(f'ln_checker: WARNING: No config found at {NODE_CONFIG_PATH}. Proceeding with defaults')
@@ -44,7 +56,7 @@ NOT_CONNECTING = ['CHANNELD_NORMAL', 'ONCHAIN']
 DONT_BALANCE = ['CLOSINGD_COMPLETE', 'ONCHAIN']
 
 # lightning rpc connection
-lightning_rpc = LightningRpc("/root/.lightning/regtest/lightning-rpc")
+lightning_rpc = LightningRpc(os.getenv("LIGHTNING_RPC_PATH", "/root/.lightning/regtest/lightning-rpc"))
 
 def run_bitcoin_cli(command):
     try:

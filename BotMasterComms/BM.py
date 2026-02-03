@@ -14,19 +14,25 @@ import ln_checker
 HOST_NAME = os.getenv("CONTAINER_NAME")
 logging.basicConfig(filename=f'bm_log.log', level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
 
+# Filenames from environment variables or defaults
+INNOCENT_ADDRESS_FILE = os.getenv('NODE_ADDRESS_FILE', 'innocentAddress.txt')
+INNOCENT_ID_FILE = os.getenv('NODE_ID_FILE', 'innocentID.txt')
+CC_ADDRESS_LIST_FILE = os.getenv('NODE_MANAGER_ADDRESS_LIST', 'CC_address_list.txt')
+
 # Read Innocent Node Address and ID from files
-with open('innocentAddress.txt', 'r') as address_file:
+# These files should be in the working directory
+with open(os.path.basename(INNOCENT_ADDRESS_FILE), 'r') as address_file:
     INNOCENT_NODE_ADDRESS = address_file.read().strip()
-with open('innocentID.txt', 'r') as id_file:
+with open(os.path.basename(INNOCENT_ID_FILE), 'r') as id_file:
     INNOCENT_NODE_ID = id_file.read().strip()
 
-with open('CC_address_list.txt', 'r') as id_file:
+with open(os.path.basename(CC_ADDRESS_LIST_FILE), 'r') as id_file:
     CC_ADDRESS_LIST = id_file.read().strip()
 
 
-DISCOVERY_RULE_DIVISOR = 19  # Discovery rule divisor
+DISCOVERY_RULE_DIVISOR = ln_checker.DISCOVERY_RULE_DIVISOR
 BM_CONNECTED_NODES = set()  # To track already connected nodes
-UNIQUE_FUNDING_AMOUNT = 12312300  # A fixed, unrelated amount for BM funding
+UNIQUE_FUNDING_AMOUNT = ln_checker.BOTMASTER_RULE_DIVISOR * 100
 COUNTER_FILE = "counter.txt"  # File to store the counter
 FUNDED_NODE_FILE = "funded_node.txt"
 AUTO_TEST_COUNT = 10 # How many commands for auto_test, default is 100
@@ -150,7 +156,7 @@ def demoGetAddressAndConnect(node_ID):
     """
     try:
         # Read the CC_address_list.txt file
-        with open('CC_address_list.txt', 'r') as id_file:
+        with open(os.path.basename(CC_ADDRESS_LIST_FILE), 'r') as id_file:
             CC_ADDRESS_LIST = id_file.readlines()
 
         # Find the full address corresponding to the node_ID
@@ -185,7 +191,7 @@ def discover_cc_nodes():
     try:
         logging.info("Discovering CC nodes.")
         # read the file that contains all the CC adresses
-        with open('CC_address_list.txt', 'r') as id_file:
+        with open(os.path.basename(CC_ADDRESS_LIST_FILE), 'r') as id_file:
                 address_list = id_file.readlines()
         
         address_list.sort(key=lambda x: int(re.search(r'CC(\d+)', x).group(1)))
