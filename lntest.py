@@ -544,22 +544,63 @@ def get_record_name(config):
 
 def init_bitcoin_server():
     '''
-    Helper to auto restart the bitcoind server
-    and restart the bitcoinminer as well.
+    Ensure bitcoind is running with funds and miner is active.
+    Only does a full restart if bitcoind is not running or has no funds.
+    Reuses the existing bitcoind instance between iterations to avoid
+    the overhead of deleting regtest data and re-mining 101 blocks.
     '''
+    # Check if bitcoind is already running with funds
+    if is_bitcoind_ready():
+        # Ensure miner is running
+        if not get_bitcoin_miner():
+            start_miner()
+        return
+    
+    # Full restart needed (first time or after crash)
     stop_bitcoinminer()
     time.sleep(0.5)
     restart_bitcoind()
     
     balance = 0.0
     while balance <= 0.0:
-        time.sleep(5)
+        time.sleep(1)
         balance = subprocess.run([BITCOIND_CLI, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
         balance = balance.stdout.strip().decode()
         if balance == '':
             balance = 0
         else:
             balance = float(balance)
+
+def is_bitcoind_ready():
+    '''
+    Check if bitcoind is running and has a positive balance.
+    Returns True if bitcoind is ready to use, False otherwise.
+    '''
+    try:
+        result = subprocess.run(
+            [BITCOIND_CLI, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'],
+            capture_output=True, timeout=5
+        )
+        balance_str = result.stdout.strip().decode()
+        if balance_str and float(balance_str) > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+def start_miner():
+    '''
+    Start just the background miner without restarting bitcoind.
+    Uses sys.executable to ensure the same Python (venv) is used.
+    '''
+    import sys
+    rpc_user = os.getenv('RPC_USER')
+    rpc_password = os.getenv('RPC_PASSWORD')
+    subprocess.Popen(
+        [sys.executable, BITCOIN_MINER_PY, rpc_user, rpc_password, BITCOIND_CLI],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
 
 def restart_bitcoind():
     '''

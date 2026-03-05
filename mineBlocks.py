@@ -38,7 +38,10 @@ def main(user, password):
         initial_blocks = os.getenv('INITIAL_MINING_BLOCKS', '201')
         regular_blocks = os.getenv('REGULAR_MINING_BLOCKS', '10')
         
-        command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", f"{initial_blocks}", f"{address}"]
+        # Mine the initial batch for coinbase maturity
+        init_command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", f"{initial_blocks}", f"{address}"]
+        subprocess.run(init_command, stdout=subprocess.DEVNULL)
+
         while True:        
             command = [f"{BITCOIN_CLI}", f"-rpcuser={user}", f"-rpcpassword={password}", "generatetoaddress", f"{regular_blocks}", f"{address}"]
             subprocess.run(command, stdout=subprocess.DEVNULL)

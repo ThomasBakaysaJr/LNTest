@@ -102,7 +102,10 @@ create_node() {
         $LNTEST_VERSION \
         --network=$NETWORK_TYPE \
         --addr=$BITCOIN_HOST:$NODE_PORT \
-	    --grpc-port=$NODE_GRPC_PORT
+	    --grpc-port=$NODE_GRPC_PORT \
+        --developer \
+        --dev-bitcoind-poll=1 \
+        --dev-fast-gossip
 
     # wait for the lightning daemon to be up and running
     wait_for_node_ready "$NODE_NAME"

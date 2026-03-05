@@ -31,7 +31,10 @@ create_botmaster_node() {
         $LNTEST_VERSION \
         --network=$NETWORK_TYPE \
         --addr=$BITCOIN_HOST:$NODE_PORT \
-	    --grpc-port=$BOTMASTER_GRPC_PORT
+	    --grpc-port=$BOTMASTER_GRPC_PORT \
+        --developer \
+        --dev-bitcoind-poll=1 \
+        --dev-fast-gossip
 }
 
 # Create the BotMaster node

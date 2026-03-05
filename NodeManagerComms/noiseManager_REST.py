@@ -27,7 +27,7 @@ import ln_checker
 DISCOVERY_RULE_DIVISOR = [ln_checker.DISCOVERY_RULE_DIVISOR, ln_checker.BOTMASTER_RULE_DIVISOR // 100]
 
 SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
-CONNECT_SLEEP = 10 # timer specifically for initialization of channels
+CONNECT_SLEEP = 3 # timer specifically for initialization of channels
 
 # how long in s between status updates
 STATUS_TIMER = ln_checker.STATUS_UPDATE_INTERVAL
@@ -230,18 +230,21 @@ def is_node_ready(status):
     
 
     try:
-        is_connecting = False
         for channel in channels.keys():
             info = channels[channel]
             if ln_checker.evaluate_discovery_rule(int(info.get("capacity", 0)) // 1000) and info.get('state') in ln_checker.NOT_CONNECTING:
                 set_state(status,'connected')
                 CREATED_CHANNELS = True
                 return True
-            elif info.get('state') not in ln_checker.NOT_CONNECTING:
-                is_connecting = True
-        if CREATED_CHANNELS and not is_connecting:
+        # Check if we have enough CC-to-CC peers with working channels
+        cc_peers = get_connected_nodes()
+        if len(cc_peers) >= ln_checker.ACTIVE_NODES:
             set_state(status,'connected')
-            return True # channel is normal and balanced
+            CREATED_CHANNELS = True
+            return True
+        if CREATED_CHANNELS:
+            set_state(status,'connected')
+            return True
         else:
             set_state(status,'connecting')
             return False

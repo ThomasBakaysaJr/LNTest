@@ -176,30 +176,23 @@ class NodeManager:
         # now we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
         counter = 1
         while counter <= total_nodes:
+            processes = []
             for i in range(active_nodes):
-                try:
-                    self.setup_shm("CC" + str(counter), True)
-                    subprocess.run(
-                        [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
-                    )
-
-                    # for transition to using node class
-                    new_node = Node(f'CC{counter}')
-                    self.nodes[new_node.name] = new_node
-
-                except subprocess.CalledProcessError as e:
-                    # This is where the error from lightning-cli lives!
-                    print(f"setup_test failed with exit code {e.returncode}")
-                    print(f"  setup_test STDOUT: {e.stdout.strip()}")
-                    print(f"  setup_test STDERR: {e.stderr.strip()}") 
-                    raise
-                except Exception as e:
-                    print(f"setup_test: Exception occurred: {e}")
-                    return None
-                counter += 1
-
                 if counter > total_nodes:
                     break
+                self.setup_shm("CC" + str(counter), True)
+                proc = subprocess.Popen(
+                    [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
+                )
+                new_node = Node(f'CC{counter}')
+                self.nodes[new_node.name] = new_node
+                counter += 1
+                processes.append(proc)
+
+            # Wait for all nodes in this batch to finish
+            for proc in processes:
+                proc.wait()
+
             # now we wait for for those nodes to fully connect before we create new nodes
             if not self.are_channels_ready():
                 print(f'Channels were not ready in time')
@@ -231,7 +224,9 @@ class NodeManager:
             'status_update_interval' : float(os.getenv('NODE_UPDATE_INTERVAL', 1.5)),
             'channel_balance_counter' : int(os.getenv('NODE_BALANCE_COUNTER', 3)),
             'min_channel_capacity' : int(os.getenv('MIN_CHANNEL_CAPACITY', 50000)),
-            'max_channel_capacity' : int(os.getenv('MAX_CHANNEL_CAPACITY', 150000))
+            'max_channel_capacity' : int(os.getenv('MAX_CHANNEL_CAPACITY', 150000)),
+            'sleep_interval' : int(os.getenv('NODE_SLEEP_INTERVAL', 3)),
+            'retry_interval' : int(os.getenv('NODE_RETRY_INTERVAL', 5))
         }
 
         try:

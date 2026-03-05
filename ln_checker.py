@@ -9,7 +9,7 @@ from multiprocessing import shared_memory
 
 # global configs : should update from testState/node_config
 RETRY_INT = 5
-SLEEP_INT= 10
+SLEEP_INT= 3
 DISCOVERY_RULE_DIVISOR = 19
 BOTMASTER_RULE_DIVISOR = 123123
 SHM_BLOCK_SIZE = 5012
@@ -37,6 +37,8 @@ try:
             STATUS_UPDATE_INTERVAL = config.get('status_update_interval', STATUS_UPDATE_INTERVAL)
             MIN_CHANNEL_CAPACITY = config.get('min_channel_capacity', MIN_CHANNEL_CAPACITY)
             MAX_CHANNEL_CAPACITY = config.get('max_channel_capacity', MAX_CHANNEL_CAPACITY)
+            SLEEP_INT = config.get('sleep_interval', SLEEP_INT)
+            RETRY_INT = config.get('retry_interval', RETRY_INT)
         logging.info(f'ln_checker: Loaded from configs {NODE_CONFIG_PATH}')
     else:
         logging.warning(f'ln_checker: WARNING: No config found at {NODE_CONFIG_PATH}. Proceeding with defaults')
@@ -101,7 +103,7 @@ def check_funds():
                     total_on_chain_msat += output.get('amount_msat', 0)
 
             if on_chain_funds_exist:
-                time.sleep(2) # adding a timer here, a little buffer
+                time.sleep(0.5) # small buffer
                 logging.info(f"On-chain funds found! Total confirmed and spendable: {total_on_chain_msat / 1000:.8f} BTC")
                 return True
             else:

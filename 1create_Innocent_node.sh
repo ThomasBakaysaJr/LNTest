@@ -27,7 +27,10 @@ create_innocent_node() {
         $LNTEST_VERSION \
         --network=$NETWORK_TYPE \
         --addr=$BITCOIN_HOST:$NODE_PORT \
-	    --grpc-port=$INNOCENT_GRPC_PORT
+	    --grpc-port=$INNOCENT_GRPC_PORT \
+        --developer \
+        --dev-bitcoind-poll=1 \
+        --dev-fast-gossip
 }
 
 # Function to extract address and ID and save to files

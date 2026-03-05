@@ -292,26 +292,44 @@ def fund_innocent_channel():
 
     if not INNOCENT_CHANNEL_CLOSED and not ln_checker.does_connection_exist(INNOCENT_NODE_ID):
         logging.info(f"Connecting to Innocent Node: {INNOCENT_NODE_ADDRESS}")
-        ln_checker.lightning_rpc.connect(INNOCENT_NODE_ADDRESS)
+        try:
+            ln_checker.lightning_rpc.connect(INNOCENT_NODE_ADDRESS)
+        except Exception as e:
+            logging.warning(f"fund_innocent_channel: Could not connect to Innocent Node: {e}")
 
     # Check if we're still creating channels
     if not CHANNELS_CREATED:
+        # If we already have the innocent channel, check if outbound is ready
+        if ln_checker.has_channel_with(INNOCENT_NODE_ID):
+            if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
+                logging.info(f'Outbound channels established. Marking channel creation as complete.')
+                CHANNELS_CREATED = True
+            return
+
         # Calculate funding amount based on the discovery rule
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
         inno_channels = ln_checker.lightning_rpc.listchannels(source=INNOCENT_NODE_ID).get('channels')
         if inno_channels is not None and len(inno_channels) >= MAX_ACTIVE_NODES:
             logging.info(f'Trying to connect to innocent node but it currently has max number of active nodes channeled. Aborting.')
+            # If outbound channels are working, mark as done
+            if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
+                logging.info(f'Outbound channels are working. Marking channels as created despite innocent saturation.')
+                CHANNELS_CREATED = True
             return
 
         try:
             logging.info(f"No channel with Innocent Node. Funding a channel with funding amount: {funding_amount}")
-            # seeing if this helps the funding problems
             if ln_checker.check_funds():
                 result = ln_checker.lightning_rpc.fundchannel(INNOCENT_NODE_ID, funding_amount)
                 if result:
-                    logging.info(f'Channel created with innocent node. Stopping channel creation.')
+                    logging.info(f'Channel funded with innocent node.')
                     INNOCENT_CHANNEL_CLOSED = False
-                    CHANNELS_CREATED = True # we are done creating channels
+                    # Only mark as fully done if outbound channels are established
+                    if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
+                        logging.info(f'Outbound channels ready. Channel creation complete.')
+                        CHANNELS_CREATED = True
+                    else:
+                        logging.info(f'Innocent channel funded but waiting for outbound channels ({len(OUTBOUND_CHANNELS)}/{MAX_ACTIVE_NODES}).')
         except Exception as e:
             logging.error(f"Funding failed: {e}")
 
