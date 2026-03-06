@@ -78,7 +78,7 @@ TEST_CONFIGS = {
         'max_messages' : 30,
         'parameters': {
             NUM_CC: 50,
-            ACTIVE_NODES: 1,
+            ACTIVE_NODES: 2,
             BM_CC: 1,
             BM_POS: 50
         }

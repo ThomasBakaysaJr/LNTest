@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 from pyln.client import LightningRpc
-from multiprocessing import shared_memory
+from multiprocessing import shared_memory, resource_tracker
 
 # global configs : should update from testState/node_config
 RETRY_INT = 5
@@ -238,6 +238,12 @@ def get_status_data():
     data = {}
     try:
         shm = shared_memory.SharedMemory(name=node_name)
+        # Prevent this process's resource_tracker from unlinking the block on exit.
+        # The block is owned by the host process (lntest.py) and cleaned up explicitly.
+        try:
+            resource_tracker.unregister(shm._name, 'shared_memory')
+        except Exception:
+            pass
         data = shm.buf.tobytes().split(b'\x00', 1)[0]
         shm.close()
 
@@ -330,6 +336,11 @@ def write_status(status):
     # Memory blocks are created by lntest
     try:
         shm = shared_memory.SharedMemory(name=f'{HOST_NAME}_status')
+        # Prevent this process's resource_tracker from unlinking the block on exit.
+        try:
+            resource_tracker.unregister(shm._name, 'shared_memory')
+        except Exception:
+            pass
         shm.buf[:len(status)] = status
         shm.buf[len(status):] = b'\x00' * (SHM_BLOCK_SIZE - len(status))
         shm.close()

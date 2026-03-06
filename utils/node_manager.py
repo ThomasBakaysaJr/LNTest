@@ -6,7 +6,7 @@ import subprocess
 import docker
 import os
 from dotenv import load_dotenv
-from multiprocessing import shared_memory
+from multiprocessing import shared_memory, resource_tracker
 
 load_dotenv('config.env')
 
@@ -70,6 +70,10 @@ class Node:
         '''
         try:
             shm = shared_memory.SharedMemory(self.shm_name)
+            try:
+                resource_tracker.unregister(shm._name, 'shared_memory')
+            except Exception:
+                pass
             data = shm.buf.tobytes().split(b'\x00', 1)[0]
             shm.close()
             
@@ -139,6 +143,7 @@ class NodeManager:
         self.bm_script = os.getenv('BOTMASTER_SCRIPT')
         self.inno_name = os.getenv('INNOCENT_NODE', 'InnocentNode')
         self.nodes: dict[str, Node] = {}
+        self.shm_blocks = {}  # Keep SHM references alive to prevent Python resource tracker GC
     
     def setup_test(self, total_nodes, active_nodes):
         ''''
@@ -297,6 +302,10 @@ class NodeManager:
             '''
             node_name = f'{suffix}_status'
             shm = shared_memory.SharedMemory(name=node_name)
+            try:
+                resource_tracker.unregister(shm._name, 'shared_memory')
+            except Exception:
+                pass
             data = shm.buf.tobytes().split(b'\x00', 1)[0]
             shm.close()
             
@@ -314,6 +323,8 @@ class NodeManager:
         '''
         Setup the shm block for this node using incoming suffix counter
         Make sure node_name and block_size matches the name and block_size in ln_checker.
+        Unregisters from Python's resource_tracker to prevent automatic cleanup.
+        Explicit cleanup is handled by remove_shm() and cleanup_lightning_nodes.sh.
         '''
         # shadowing to make sure ti works
         node_name = f'{suffix}_status'
@@ -324,7 +335,11 @@ class NodeManager:
 
         try:
             shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
-            shm.close()
+            # Prevent Python's resource_tracker daemon from auto-unlinking this block.
+            # Without this, the tracker destroys blocks ~2-3 min after creation,
+            # which kills propagation monitoring for slow topologies (e.g. m=1 chains).
+            resource_tracker.unregister(shm._name, 'shared_memory')
+            self.shm_blocks[node_name] = shm  # Keep reference alive
         except FileExistsError:
             # Found a block by this name still, probably from bad cleanup. Clear and prepare it again
             print(f'setup_shm: warning: Shared memory block found for {node_name}.')
@@ -335,10 +350,18 @@ class NodeManager:
                 temp_shm.unlink()
                 # recreate memory block
                 shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
-                shm.close()
+                resource_tracker.unregister(shm._name, 'shared_memory')
+                self.shm_blocks[node_name] = shm  # Keep reference alive
 
     def remove_shm(self, suffix):
         node_name = f'{suffix}_status'
+        # Close and remove stored reference first
+        if node_name in self.shm_blocks:
+            try:
+                self.shm_blocks[node_name].close()
+            except Exception:
+                pass
+            del self.shm_blocks[node_name]
         try:
             shm = shared_memory.SharedMemory(name=node_name)
             shm.unlink()
@@ -438,13 +461,14 @@ class NodeManager:
         Calculate the size of the shm blocks for this test run.
         With sequential creation, each CC has at most:
           m outbound + m inbound + 1 innocent + 1 BM + 1 transition margin = 2*m + 3
-        We add extra headroom for safety.
+        For small m (especially m=1), dev-fast-gossip causes nodes to accumulate
+        extra channels via gossip discovery, so we enforce a minimum of 20 channel slots.
         '''
         overhead_size = int(os.getenv('SHM_OVERHEAD', 512))
         per_peer_size = int(os.getenv('SHM_PER_PEER', 256))
         buffer = float(os.getenv('SHM_BUFFER', 1.2))
-        # 2*m channels + 3 for innocent/BM/transition, doubled for safety
-        max_channels = active_nodes * 2 + 6
+        # 2*m channels + 6 for safety, but at least 20 slots for small-m gossip effects
+        max_channels = max(active_nodes * 2 + 6, 20)
 
         return int((overhead_size + (max_channels * per_peer_size)) * buffer)
 
