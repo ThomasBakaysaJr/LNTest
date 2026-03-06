@@ -1,6 +1,6 @@
 # LNTest
 
-A testbed for a distributed Lightning network on one machine, using production grade Bitcoin Core and Core Lightning nodes orchestrated via Docker on a Bitcoin regtest environment.
+A testbed for designing, deploying, and evaluating Lightning Network-based botnets. Built with production-grade Bitcoin Core and Core Lightning nodes orchestrated via Docker on a Bitcoin regtest environment, LNTest runs entirely on a single host machine with no external network dependencies.
 
 # Table of Contents
 - [LNTest](#lntest)
@@ -8,73 +8,59 @@ A testbed for a distributed Lightning network on one machine, using production g
 - [Architecture](#architecture)
   - [Generated Data \& Output](#generated-data--output)
 - [Pre-requisites \& Compatibility](#pre-requisites--compatibility)
-    - [Update Ubuntu](#update-ubuntu)
-    - [Python](#python)
-    - [Docker](#docker)
-    - [Git](#git)
 - [Set-up](#set-up)
-  - [1. Create directory for LNTest and the Bitcoin-Core files](#1-create-directory-for-lntest-and-the-bitcoin-core-files)
-  - [2. Install Bitcoin-core](#2-install-bitcoin-core)
-  - [3. Setting up LNTest](#3-setting-up-lntest)
-  - [4. Running lntest](#4-running-lntest)
-- [Commands and Scripts](#commands-and-scripts)
-    - [Script](#script)
 - [Running the Test Suite](#running-the-test-suite)
   - [Modes of Operation](#modes-of-operation)
-    - [1. Small Check (`small`)](#1-small-check-small)
-    - [2. Full Suite (`full`)](#2-full-suite-full)
-    - [3. Specific Test Run (`run`)](#3-specific-test-run-run)
   - [Test Scenarios (Test IDs)](#test-scenarios-test-ids)
   - [Customization \& Flags](#customization--flags)
-    - [Topology Parameters](#topology-parameters)
-    - [Simulation Control](#simulation-control)
-    - [Takedown Simulation](#takedown-simulation)
-    - [Range Control (Only for `run` mode)](#range-control-only-for-run-mode)
   - [Examples](#examples)
-    - [kill\_nodes.sh](#kill_nodessh)
-    - [cleanup\_lightning\_nodes.sh](#cleanup_lightning_nodessh)
-    - [restart\_bitcoin.sh](#restart_bitcoinsh)
+- [Utility Scripts](#utility-scripts)
 - [Common Problems and Fixes](#common-problems-and-fixes)
-    - [Bitcoin error](#bitcoin-error)
-    - [Bitcoin lock error](#bitcoin-lock-error)
-
 
 # Architecture
 
-The botnet has 5 essential components. We have the main tester script that runs on the host machine, the Innocent Node, Botmaster Node and the CC Server Nodes, all of which run on individual docker containers running a custom docker image that is essentially the “elementsproject/lightningd:v25.09” image with python installed. Finally we have bitcoin core running a regtest server on the host machine to simulate the bitcoin network.
+LNTest consists of five components:
 
-Each test automatically restarts the bitcoin server with a fresh wallet. In an effort to minimize the impact of previous tests on the next, all nodes and their associated resources are taken down after every test.
+1. **Bitcoin Core** — runs on the host machine in regtest mode, providing the on-chain base layer for all Lightning nodes.
+2. **Innocent Node** — a CLN instance in a Docker container that acts as a rendezvous point for C&C server peer discovery during network formation.
+3. **Botmaster Node** — a CLN instance in a Docker container that issues commands by opening a temporary Lightning channel to a C&C server and injecting keysend payments.
+4. **C&C Server Nodes** — CLN instances, each in its own Docker container, forming a Lightning-based overlay by opening payment channels to one another. Commands propagate through this overlay via flooding.
+5. **Test Orchestrator (`lntest.py`)** — a Python script on the host that automates experiment setup, monitors propagation via POSIX shared memory, and records results.
+
+Each test automatically resets the Bitcoin regtest environment with a fresh wallet. All nodes and their associated resources (containers, shared memory, logs) are cleaned up between test iterations to minimize cross-test interference.
 
 ## Generated Data & Output
 
-All experimental data is automatically saved to the `data/` directory. The testbed generates distinct files for each test configuration to ensure no data is overwritten or lost. However, this only applies per configuration as the exact same type of test will overwrite already present data.
+All experimental data is saved to the `data/` directory. The testbed generates distinct files for each test configuration based on parameter values, so different configurations never overwrite each other. However, re-running the exact same configuration will overwrite previously generated data for that configuration.
 
 ### Data Structure
-The filenames generally follow a specific convention based on the test parameters: `data/<variable>_<value>_<unique_id>_<type>`.
+Filenames follow the convention: `data/<variable>_<value>_<unique_id>_<type>`.
+
+For takedown tests, filenames include a strategy marker: `T` for random takedown, `Ttargeted` for targeted takedown.
 
 * **Propagation Data** (`*_time_data.json`)
-  * Contains the precise time it took for each message to propagate through the network.
-  * Includes metadata about the test (e.g., number of CC nodes, active nodes).
-  * Records total setup time vs. total message sending time.
+  * Contains the time it took for each message to propagate through the network.
+  * Includes metadata about the test configuration (number of C&C nodes, active nodes, etc.).
+  * Records total setup time and total message sending time.
+  * For takedown tests, also records coverage percentage, number of nodes that received the message, total surviving nodes, and whether the network partitioned.
 
 * **Topology Snapshots** (`*_topology_data.json`)
-  * Captures the state of the Lightning Network at the end of the test.
-  * Lists every node, its channels, channel capacity, and connection status.
-  * Useful for visualizing the mesh network created during the experiment.
+  * Captures the state of the Lightning Network at the end of each test iteration.
+  * Lists every surviving node, its channels, channel capacity, and connection status.
+  * For takedown tests, the metadata includes which nodes were removed and their channel details at the time of removal.
 
 * **System Metrics** (`*_system_metrics.csv`)
-  * Logs CPU and RAM usage of the host machine throughout the test duration.
-  * Useful for analyzing the hardware overhead of running high-density docker simulations.
+  * Logs CPU and RAM usage of the host machine throughout the test.
+  * Useful for analyzing the hardware overhead of running many Docker containers.
 
 * **Execution Logs** (`*_total_times_log.json`)
-  * A running log of how long each full test suite took to execute.
-  * Helps track performance improvements or regressions in the testbed itself.
-  * *Note: These files are timestamped by date (e.g., `YYYY-MM-DD_total_times_log.json`).*
+  * A running log of how long each test run took to execute.
+  * Timestamped by date (e.g., `YYYY-MM-DD_total_times_log.json`).
 
 ### Logs
 Detailed logs for debugging specific node behaviors are stored in:
-* `NodeManagerComms/logs/`: Individual logs for every Command & Control (CC) node.
-* `BotMasterComms/`: Logs for the Botmaster node actions.
+* `NodeManagerComms/logs/` — individual logs for every C&C node.
+* `BotMasterComms/` — logs for the Botmaster node.
 
 
 # Pre-requisites & Compatibility
@@ -84,11 +70,11 @@ This testbed has been verified on the following Linux distributions:
 * Ubuntu 24.04 LTS
 * Ubuntu 25.04
 
-This guide assumes that the user is starting from a fresh install of Ubuntu.
+This guide assumes a fresh install of Ubuntu.
 
 ### Update Ubuntu
 
-Be sure your system is up to date.
+Ensure your system is up to date.
 
 ```bash
 sudo apt update  
@@ -97,9 +83,9 @@ sudo apt upgrade
 
 ### Python
 
-This project uses bash and python scripts. We will specifically create a virtual environment for this project.
+This project uses bash and Python scripts with a dedicated virtual environment.
 
-Install venv for python so we can create the virtual environments.
+Install venv:
 
 ```bash
 sudo apt install python3-venv -y
@@ -107,11 +93,11 @@ sudo apt install python3-venv -y
 
 ### Docker
 
-All lightning nodes will be individual docker containers. Reference the following guide, the pertinent instructions have been provided.
+All Lightning nodes run as individual Docker containers. Follow the official Docker installation guide for Ubuntu:
 
 - [https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository) 
 
-Install the Apt resources.
+Install the apt resources:
 
 ```bash
 # Add Docker's official GPG key:
@@ -121,7 +107,7 @@ sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-# Add the repository to Apt sources:
+# Add the repository to apt sources:
 sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
@@ -133,13 +119,13 @@ EOF
 sudo apt update
 ```
 
-Actual installation of Docker.
+Install Docker:
 
 ```bash
 sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
-Check the status of Docker, it should be running at this point.
+Verify Docker is running:
 
 ```bash
 sudo systemctl status docker
@@ -147,126 +133,89 @@ sudo systemctl status docker
 
 ### Git
 
-The repository containing the project will need to be cloned.
-
-Install git using apt.
+Install git:
 
 ```bash
 sudo apt install git
 ```
+
 # Set-up
 
-Note: The setup script should be robust enough to handle different directory names. However, this was only tested inside the user's home directory.
+Note: The setup script should handle different directory names, but this has only been tested inside the user's home directory.
 
 ## 1. Create directory for LNTest and the Bitcoin-Core files
 
-Navigate to the Documents directory in your home directory.
-
 ```bash
 cd ~/Documents
-```
-
-Create a directory for LNBot and Bitcoin core to live in. In our testing environment we named it “LNBot_research_project”.
-
-```bash
 mkdir LNBot_research_project  
 cd LNBot_research_project
 ```
 
-Note: If you name this directory something else, the setup script should catch and name the paths correctly. This can be double checked in config.env once setup is complete.
-
 ## 2. Install Bitcoin-core
 
-Download the bitcoin core tar file from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/) and move this file into the LNBot_research_project directory.
+Download the Bitcoin Core tar file from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/) and move it into the `LNBot_research_project` directory.
 
-Extract the bitcoin core tar file here.
+Extract, rename, and clean up:
 
 ```bash
 tar -xvzf bitcoin-*
+mv bitcoin-*/ bitcoin
+rm bitcoin-*.tar.gz
 ```
 
-Rename the folder to bitcoin. After typing the initial bitcoin, press tab to autofill the bitcoin folder name.
-
-```bash
-mv bitcoin-[tab] bitcoin
-```
-
-Remove the tar file since it is no longer needed.
-
-```bash
-rm bitcoin-*
-```
-
-The directory should currently look like this.
-
-![ln-research-bitcoin-only-dir](images/ln-research-bitcoin-only-dir.png)
-
-Do not run bitcoin-core just yet.
+Do not run Bitcoin Core yet.
 
 ## 3. Setting up LNTest
 
-Using git, we will download the repo containing LNTest. Keep in mind that this is a self contained testing suite and will not communicate outside of the host machine, hence why we did not need to open up any ports in the previous steps. We will then run the setup.sh script to populate the required paths and rpc credentials.
-
-The setup script will also check dependencies, create the python virtual environment, install pre-requisite packages, and create the config files in ```~/.lightning``` and ```~/.bitcoin``` directories.
-
-It is important to note that the script uses paths in ```config.env``` to find the necessary files to run. This is because we use sudo to run the tester files (docker and shared memory management require root privileges) and so the tester file will look in “root”s home directory for those files unless a hard path is used instead.
-
-### 3.1 Clone the repo using git
+### 3.1 Clone the repo
 
 ```bash
 cd ~/Documents/LNBot_research_project  
 git clone https://github.com/LN-Testbed/DSN2026.git LNTest
 ```
 
-The final directory structure inside the LNBot_research_project should appear as follows:  
-![lntest-dir](images/lntest-dir.png)
-
-### 3.2 Add execute permission to bash files
+### 3.2 Add execute permissions to bash files
 
 ```bash
+cd LNTest
 chmod +x *.sh
 ```
 
-Restore execute permissions to the bash files in case they were removed during the cloning process.
-
-### 3.2 Run setup.sh
+### 3.3 Run setup.sh
 
 ```bash
 ./setup.sh
 ```
 
-The setup will ask for the rpc username and password to use for this installation. You can double check that the rpc username and password matches by checking ```config.env``` and the config files in ```~/.bitcoin``` and ```~/.lightning```.
+The setup script will:
+* Check dependencies
+* Create the Python virtual environment
+* Install required Python packages
+* Create config files in `~/.lightning` and `~/.bitcoin`
+* Ask for RPC username and password
+
+You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
+
+Note: The script uses paths in `config.env` to locate files. Since `lntest.py` runs with `sudo` (required for Docker and shared memory management), it needs absolute paths rather than relative ones.
 
 ## 4. Running lntest
 
-The python script “lntest” is the main script for testing the Lightning Botnet. It is responsible for creating the containers, managing memory, sending the initial botnet commands for propagation and then tearing everything down for subsequent tests.
-
-Because this script manages memory and deals with running docker files, it must be run as sudo, however doing so will use the root’s path for python, which means that we lose the dependencies we just installed. To use the correct interpreter, we need to run sudo with an absolute path to the correct python interpreter. Run lntest.
+Because this script manages Docker containers and shared memory, it must be run with `sudo`. To use the correct Python interpreter with all dependencies, provide the absolute path to the virtual environment's interpreter:
 
 ```bash
-sudo venv/bin/python lntest.py small
+sudo venv/bin/python3 lntest.py small
 ```
 
-This will start a small gamut of tests to see if everything is set up correctly. Progress can be monitored in the logs in the log directory, with the status of each node stored in the status directory.
+This runs a quick sanity check to verify everything is set up correctly. Data is saved to the `data/` directory.
 
-Data collected will be in the “data/” directory.
+**Tip:** To save terminal output to a file while still seeing it live, use `tee`:
 
-Important: Remember to save your data to a separate directory after each run since the script will overwrite any data that is stored there.
+```bash
+sudo venv/bin/python3 lntest.py run 1 --max-msg 3 2>&1 | tee /tmp/test_output.log
+```
 
-# Commands and Scripts
-
-An overview of the useful scripts contained in this setup. This section will be written as:
-
-### Script
-
-How to run script  
-Description of what this script does.
 
 # Running the Test Suite
-
-The core of the simulation is managed by `lntest.py`. This script handles container orchestration, network topology generation, and data recording.
-
-**Note:** Because the script manages Docker containers and system memory, it must be run with `sudo`. To ensure it uses the correct dependencies, point it to the python interpreter inside your virtual environment.
 
 ```bash
 sudo venv/bin/python3 lntest.py <command> [options]
@@ -274,11 +223,9 @@ sudo venv/bin/python3 lntest.py <command> [options]
 
 ## Modes of Operation
 
-The script operates in three main modes:
-
 ### 1. Small Check (`small`)
 
-Runs a minimal test to verify that the environment, Docker containers, and Bitcoin regtest are configured correctly.
+Runs a minimal version of every test to verify the environment is configured correctly.
 
 ```bash
 sudo venv/bin/python3 lntest.py small
@@ -286,7 +233,7 @@ sudo venv/bin/python3 lntest.py small
 
 ### 2. Full Suite (`full`)
 
-Runs the complete battery of default experiments (Test IDs 1 through 5).
+Runs the complete battery of experiments (Test IDs 1 through 6).
 
 ```bash
 sudo venv/bin/python3 lntest.py full
@@ -294,125 +241,155 @@ sudo venv/bin/python3 lntest.py full
 
 ### 3. Specific Test Run (`run`)
 
-Runs a specific experimental scenario. This mode allows for granular control over the test variable ranges and steps.
+Runs a specific test scenario with full control over variable ranges and steps.
 
 ```bash
-# Syntax: lntest.py run <TEST_ID> [options]
-sudo venv/bin/python3 lntest.py run 1 --max-range 50 --step 5
+sudo venv/bin/python3 lntest.py run <TEST_ID> [options]
 ```
 
 ---
 
 ## Test Scenarios (Test IDs)
 
-When using the `run` command, you must specify one of the following Test IDs:
-
-| ID | Description | Variable Tested | Default Behavior |
+| ID | Description | Variable Tested | Default Range |
 | --- | --- | --- | --- |
-| **1** | **Scale C&C Nodes** | `num_cc` | Increases total C&C nodes from 10 to 100. |
-| **2** | **Scale Active Nodes** | `active_nodes` | Increases the number of active channels per node from 1 to 6. |
-| **3** | **Botmaster Connectivity** | `bm_cc` | Increases the number of initial entry nodes the Botmaster connects to. |
-| **4** | **Botmaster Position** | `bm_pos` | Changes the Botmaster's injection point from oldest nodes (0%) to newest nodes (100%). |
-| **5** | **Resilience (Takedown)** | `num_cc` (with takedown) | Randomly shuts down 10% of nodes during propagation to test resilience. |
+| **1** | Scale C&C nodes | `num_cc` | 10 to 100, step 10 |
+| **2** | Scale active nodes (N_active) | `active_nodes` | 2 to 6, step 1 |
+| **3** | Botmaster connectivity | `bm_cc` | 1 to 6, step 1 |
+| **4** | Botmaster injection point | `bm_pos` | -50 to 150, step 50 |
+| **5** | Random takedown sweep | `takedown_pct` | 10% to 50%, step 10% |
+| **6** | Targeted takedown sweep | `takedown_pct` | 10% to 50%, step 10% |
+
+### Test Details
+
+**Test 1 (Scale C&C nodes):** Measures command propagation delay as the number of C&C servers increases from 10 to 100 (default N_active=4, botmaster at 50%).
+
+**Test 2 (Scale active nodes):** Varies the active neighbor limit N_active from 2 to 6 with a fixed 50-node network to study how overlay width affects propagation. Starts at N_active=2 because N_active=1 topologies fragment under `--dev-fast-gossip`.
+
+**Test 3 (Botmaster connectivity):** Varies how many C&C servers the botmaster opens channels to simultaneously.
+
+**Test 4 (Botmaster injection point):** Tests five injection positions:
+  * `-50` — Random position
+  * `0` — Oldest nodes (beginning of the network)
+  * `50` — Middle of the network
+  * `100` — Youngest nodes (end of the network)
+  * `150` — Multi-point injection (connects at 0%, 50%, and 100% simultaneously)
+
+**Test 5 (Random takedown):** Builds a 50-node network (N_active=4), then randomly removes an increasing percentage of nodes (10% to 50%) and measures propagation delay and coverage among surviving nodes.
+
+**Test 6 (Targeted takedown):** Same as Test 5, but removes the highest-degree (most-connected) nodes first. This simulates a law enforcement strategy that targets the most critical C&C servers.
+
+### Coverage and Partition Detection
+
+Tests 5 and 6 include coverage tracking and partition detection:
+* **Coverage** — the fraction of surviving nodes that successfully receive the command.
+* **Partition detection** — if no new node receives the command for 60 seconds, the test declares a network partition and records partial coverage as a valid data point instead of retrying.
 
 ---
 
 ## Customization & Flags
 
-You can override the default network topology and simulation parameters for **any** mode (`small`, `full`, or `run`) using the flags below.
+Override default parameters for any mode (`small`, `full`, or `run`):
 
 ### Topology Parameters
 
-* `--num-cc <INT>`: Set the starting number of Command & Control (C&C) nodes.
-* `--active-nodes <INT>`: Set the number of active channels every node attempts to maintain.
-* `--bm-cc <INT>`: Set how many C&C nodes the Botmaster creates channels with.
-* `--bm-pos <INT>`: Set the position in the network where the Botmaster connects (0-100%).
-* `0`: Oldest nodes.
-* `50`: Middle of the network.
-* `100`: Newest nodes.
-
-
+* `--num-cc <INT>` — Number of C&C nodes.
+* `--active-nodes <INT>` — Active neighbor limit (N_active). Each node maintains up to this many outbound channels.
+* `--bm-cc <INT>` — Number of C&C nodes the botmaster connects to.
+* `--bm-pos <INT>` — Botmaster injection position (see Test 4 for values).
 
 ### Simulation Control
 
-* `--max-msg <INT>`: The number of distinct messages to propagate per test iteration.
+* `--max-msg <INT>` — Number of messages to propagate per test iteration.
 
 ### Takedown Simulation
 
-Forcefully remove nodes during the test.
+* `--takedown` — Enable node takedown during the test.
+* `--takedown-pct <FLOAT>` — Fraction of nodes to remove (e.g., `0.2` for 20%). Default: `0.1`.
+* `--takedown-strategy <random|targeted>` — `random` selects nodes uniformly at random. `targeted` removes the highest-degree nodes first. Default: `random`.
 
-* `--takedown`: Enable the takedown mechanism.
-* `--takedown-pct <FLOAT>`: The percentage of nodes to kill (e.g., `0.2` for 20%). Default is `0.1` (10%).
+### Range Control (only for `run` mode)
 
-### Range Control (Only for `run` mode)
-
-* `--max-range <INT>`: Override the upper limit of the test variable.
-* `--step <INT>`: Override the increment step size for the test variable.
+* `--max-range <INT>` — Override the upper limit of the test variable.
+* `--step <INT>` — Override the step size.
 
 ---
 
 ## Examples
 
-**1. Run a custom "Scale C&C" test:**
-Run Test ID 1, but go up to 200 nodes in steps of 20.
+**Run the scaling test up to 200 nodes in steps of 20:**
 
 ```bash
 sudo venv/bin/python3 lntest.py run 1 --max-range 200 --step 20
 ```
 
-**2. Test network resilience with higher churn:**
-Run the "Small" sanity check, but kill 30% of the nodes.
+**Run random takedown sweep with 3 messages per iteration:**
 
 ```bash
-sudo venv/bin/python3 lntest.py small --takedown --takedown-pct 0.3
+sudo venv/bin/python3 lntest.py run 5 --max-msg 3
 ```
 
-**3. customized Full Run:**
-Run the full suite, but force all tests to start with a highly connected topology (8 active nodes).
+**Run targeted takedown sweep with 3 messages per iteration:**
+
+```bash
+sudo venv/bin/python3 lntest.py run 6 --max-msg 3
+```
+
+**Run botmaster injection point test with 3 messages:**
+
+```bash
+sudo venv/bin/python3 lntest.py run 4 --max-msg 3
+```
+
+**Run the full suite with a custom active node count:**
 
 ```bash
 sudo venv/bin/python3 lntest.py full --active-nodes 8
 ```
 
+**Enable takedown on an ad-hoc basis with 30% targeted removal:**
+
+```bash
+sudo venv/bin/python3 lntest.py run 1 --takedown --takedown-pct 0.3 --takedown-strategy targeted
+```
+
+
+# Utility Scripts
 
 ### kill_nodes.sh
 
 ```bash
 sudo ./kill_nodes.sh
-```  
-Stops and removes all docker nodes created during the test.  
-Clears out shared memory.  
-Removes the persistent docker directories so that no files interfere with further tests.  
-Does not remove logs in the NodeManagerComms/logs directory.
+```
+
+Stops and removes all Docker containers created during the test. Clears shared memory. Removes persistent Docker directories. Does not remove logs in `NodeManagerComms/logs/`.
 
 ### cleanup_lightning_nodes.sh
+
 ```bash
 sudo ./cleanup_lightning_nodes.sh  
 ```
-Kill nodes except it also clears out the logs.   
-This is the script that the lntest script calls after recording each test.
+
+Same as `kill_nodes.sh` but also clears logs. This is the script that `lntest.py` calls between test iterations.
 
 ### restart_bitcoin.sh
+
 ```bash
 sudo ./restart_bitcoin.sh  
 ```
-Stops bitcoin-core.  
-Deletes regtest data so we start fresh.  
-Creates a new wallet for the tests, since by default bitcoind does not create a wallet.  
-Starts a mineBlocks bitcoin miner in the background.
 
-Note: Does not kill any bitcoin miner that may be still running. That is done in the lntest script.
+Stops Bitcoin Core, deletes regtest data for a fresh start, creates a new wallet, and starts a background block miner.
+
+Note: Does not kill any existing background miner process — that is handled by `lntest.py`.
+
 
 # Common Problems and Fixes
 
-Some common problems that can pop up from time to time.
-
 ### Bitcoin error
 
-If you run into bitcoin errors as the testing starts, usually with a description of loading wallet or some such. This is usually because bitcoin core was already running and the script couldn’t shut it down properly or the device was shutdown while bitcoin-core was still running.
+If you encounter Bitcoin errors when a test starts (typically related to wallet loading), this usually means Bitcoin Core was already running and the script could not shut it down properly, or the machine was shut down while Bitcoin Core was still running.
 
-You will need to find the pid of bitcoin-core and kill it, sometimes forcefully if it will not exit out with a normal kill command.
-You may need to run pkill as sudo.
+Kill the process (may require `sudo`):
 
 ```bash
 pkill -9 bitcoind
@@ -420,4 +397,16 @@ pkill -9 bitcoind
 
 ### Bitcoin lock error
 
-If you start the tester and it states that it can’t get a lock on the regtest folder, that means bitcoin-core was not shutdown automatically by the scripts. Crtl+c to exit the tester and retry, it usually clears up immediately.
+If the tester reports it cannot acquire a lock on the regtest folder, Bitcoin Core was not shut down by the previous run. Press Ctrl+C to exit the tester and try again — it usually resolves immediately.
+
+### Shared memory errors
+
+If you see "Shared memory block not found" errors during propagation monitoring, this is typically caused by Python's resource tracker prematurely unlinking shared memory blocks. The current codebase includes fixes for this (unregistering SHM blocks from the resource tracker in both host and container processes). If it still occurs, clean up manually:
+
+```bash
+sudo rm -rf /dev/shm/CC*
+```
+
+### Channel creation timeout
+
+If the test reports "Channels were not ready in time" and retries, this is usually a transient issue with container scheduling or gossip propagation timing. The test will automatically retry up to 5 times per iteration. If it consistently fails, try reducing the number of nodes or increasing the `NM_MAX_WAIT` environment variable.
