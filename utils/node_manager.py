@@ -145,10 +145,13 @@ class NodeManager:
         self.nodes: dict[str, Node] = {}
         self.shm_blocks = {}  # Keep SHM references alive to prevent Python resource tracker GC
     
-    def setup_test(self, total_nodes, active_nodes):
-        ''''
-        setup the number of CC servers needed
-        returns true when the the cc servers have been made
+    def setup_test(self, total_nodes, active_nodes, topology=None):
+        '''
+        Setup the number of CC servers needed.
+        Returns true when the CC servers have been made.
+        
+        If topology='chain', CC_Manager is killed in each container immediately
+        after creation to prevent autonomous channel formation.
         '''
         try:
             subprocess.run(
@@ -162,11 +165,10 @@ class NodeManager:
             self.nodes[inno_node.name] = inno_node
             self.nodes[bm_node.name] = bm_node
         except subprocess.CalledProcessError as e:
-            # This is where the error from lightning-cli lives!
             print(f"testsetup_tester failed with exit code {e.returncode}")
             print(f"  setup_test STDOUT: {e.stdout.strip()}")
             print(f"  setup_test STDERR: {e.stderr.strip()}") 
-            raise # Re-raise the exception so your calling code can catch it
+            raise
         except Exception as e:
             print(f"setup_test: Exception occurred: {e}")
             return None
@@ -174,18 +176,13 @@ class NodeManager:
         # create the node configs
         self.create_status_config()
 
-        # Create nodes ONE AT A TIME matching the paper's sequential join model.
-        # Each node creation takes ~5-8s (docker + init + fund + mine), which provides
-        # natural gossip propagation time for the discovery mechanism in Algorithm 2.
-        # This ensures each CC only discovers the currently active CCs (at most m),
-        # resulting in the correct 2*m channel topology.
         counter = 1
+        skip_flag = '1' if topology == 'chain' else '0'
         while counter <= total_nodes:
             try:
                 self.setup_shm("CC" + str(counter), True)
-                # subprocess.run blocks until node is fully created, funded, and mined
                 subprocess.run(
-                    [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
+                    [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag]
                 )
                 new_node = Node(f'CC{counter}')
                 self.nodes[new_node.name] = new_node
@@ -198,6 +195,11 @@ class NodeManager:
                 print(f"setup_test: Exception occurred: {e}")
                 return None
             counter += 1
+
+        # For chain topology, skip channel readiness - no natural channels exist
+        if topology == 'chain':
+            print(f'Chain mode: skipping channel readiness check.', flush=True)
+            return True
 
         # Wait for all channels to be established
         if not self.are_channels_ready():
@@ -304,7 +306,303 @@ class NodeManager:
             print(f'  {nd[0].name}: {nd[1]} channels')
         
         return selected
-    
+
+    def enforce_uniform_topology(self, max_channels):
+        '''
+        Prune excess channels from hub nodes to create a more uniform topology.
+        Only closes channels where BOTH endpoints have more than max_channels,
+        so no node drops below the target degree.
+        
+        Args:
+            max_channels: target maximum channels per node (typically 2 * active_nodes)
+        '''
+        import json as _json
+        
+        cc_nodes = self.get_cc_nodes()
+        if not cc_nodes:
+            print('enforce_uniform_topology: No CC nodes found.')
+            return
+        
+        # Step 1: Get each node's public key via lightning-cli getinfo
+        pubkey_to_name = {}
+        name_to_pubkey = {}
+        name_to_container = {}
+        
+        for node in cc_nodes:
+            try:
+                exit_code, output = node.exec_run(
+                    'lightning-cli --regtest getinfo', demux=True
+                )
+                if exit_code == 0 and output[0]:
+                    info = _json.loads(output[0].decode('utf-8'))
+                    pubkey = info.get('id', '')
+                    pubkey_to_name[pubkey] = node.name
+                    name_to_pubkey[node.name] = pubkey
+                    name_to_container[node.name] = node
+            except Exception as e:
+                print(f'  Warning: could not get info for {node.name}: {e}')
+        
+        # Step 2: Get channel data from SHM and build degree tracking
+        degree_map = {}
+        channels_map = {}
+        
+        for node in cc_nodes:
+            try:
+                status = self.get_node_status(node.name)
+                if status and 'channels' in status:
+                    normal_channels = {
+                        pk: ch for pk, ch in status['channels'].items()
+                        if ch.get('state') == 'CHANNELD_NORMAL'
+                    }
+                    degree_map[node.name] = len(normal_channels)
+                    channels_map[node.name] = normal_channels
+                else:
+                    degree_map[node.name] = 0
+                    channels_map[node.name] = {}
+            except Exception:
+                degree_map[node.name] = 0
+                channels_map[node.name] = {}
+        
+        over_degree = {n: d for n, d in degree_map.items() if d > max_channels}
+        if not over_degree:
+            print(f'  All nodes already have <= {max_channels} channels. No pruning needed.')
+            return
+        
+        total_excess = sum(d - max_channels for d in over_degree.values())
+        print(f'  {len(over_degree)} nodes exceed {max_channels} channels (total excess: {total_excess})')
+        
+        # Step 3: Close excess channels safely
+        channels_closed = 0
+        for node_name in sorted(degree_map.keys(), key=lambda n: -degree_map[n]):
+            if degree_map[node_name] <= max_channels:
+                continue
+            node_channels = channels_map.get(node_name, {})
+            peers_with_degrees = []
+            for peer_pk in node_channels:
+                peer_name = pubkey_to_name.get(peer_pk)
+                if peer_name:
+                    peers_with_degrees.append((peer_pk, peer_name, degree_map.get(peer_name, 0)))
+            peers_with_degrees.sort(key=lambda x: -x[2])
+            
+            for peer_pk, peer_name, peer_deg in peers_with_degrees:
+                if degree_map[node_name] <= max_channels:
+                    break
+                if degree_map.get(peer_name, 0) <= max_channels:
+                    continue
+                container = name_to_container.get(node_name)
+                if container:
+                    try:
+                        exit_code, output = container.exec_run(
+                            f'lightning-cli --regtest close {peer_pk}', demux=True
+                        )
+                        if exit_code == 0:
+                            degree_map[node_name] -= 1
+                            degree_map[peer_name] -= 1
+                            channels_closed += 1
+                        else:
+                            err = output[1].decode('utf-8') if output[1] else 'unknown error'
+                            print(f'  Warning: failed to close channel {node_name}->{peer_name}: {err.strip()}')
+                    except Exception as e:
+                        print(f'  Warning: exception closing channel {node_name}->{peer_name}: {e}')
+        
+        if channels_closed == 0:
+            print(f'  No safe channels to close (all excess connections are to leaf nodes).')
+            return
+        
+        print(f'  Closed {channels_closed} excess channels. Waiting for on-chain confirmation...')
+        time.sleep(15)
+        
+        still_over = sum(1 for d in degree_map.values() if d > max_channels)
+        avg_deg = sum(degree_map.values()) / len(degree_map) if degree_map else 0
+        print(f'  Post-pruning: avg_degree={avg_deg:.1f}, nodes still over {max_channels}: {still_over}')
+
+    def build_chain_topology(self, active_nodes):
+        '''
+        Build the D-LNBot chain topology on a clean network.
+        CC_i opens outbound channels to CC_{max(1, i-m)} ... CC_{i-1}.
+        
+        Uses multifundchannel to open all of a node's channels in a single
+        on-chain transaction, avoiding UTXO exhaustion issues.
+        
+        Prerequisites: SKIP_CC_MANAGER=1 was set during setup_test() so
+        no autonomous channels exist. This method only opens channels.
+        '''
+        import json as _json
+        
+        m = active_nodes
+        cc_nodes = self.get_cc_nodes()
+        if not cc_nodes:
+            print('build_chain_topology: No CC nodes found.', flush=True)
+            return False
+        
+        def cc_num(container):
+            return int(container.name.replace('CC', ''))
+        cc_nodes_sorted = sorted(cc_nodes, key=cc_num)
+        n = len(cc_nodes_sorted)
+        
+        def get_cli_error(output):
+            if output[0]:
+                try:
+                    err_data = _json.loads(output[0].decode('utf-8'))
+                    if 'message' in err_data:
+                        return err_data['message']
+                except Exception:
+                    return output[0].decode('utf-8').strip()[:120]
+            if output[1]:
+                return output[1].decode('utf-8').strip()[:120]
+            return 'unknown'
+        
+        def mine_blocks(num_blocks=6):
+            bitcoin_cli = os.getenv('BITCOIN_CLI')
+            bitcoin_dir = os.getenv('BITCOIN_DIR')
+            if bitcoin_cli and bitcoin_dir:
+                try:
+                    result = subprocess.run(
+                        [bitcoin_cli, f'-datadir={bitcoin_dir}', '-regtest', 'getnewaddress'],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        addr = result.stdout.strip()
+                        subprocess.run(
+                            [bitcoin_cli, f'-datadir={bitcoin_dir}', '-regtest',
+                             'generatetoaddress', str(num_blocks), addr],
+                            capture_output=True
+                        )
+                except Exception as e:
+                    print(f'    Warning: could not mine blocks: {e}', flush=True)
+        
+        # ── Phase 1: Gather node info ──
+        print(f'  Phase 1: Gathering node info for {n} nodes...', flush=True)
+        node_info = {}
+        
+        for container in cc_nodes_sorted:
+            num = cc_num(container)
+            try:
+                exit_code, output = container.exec_run(
+                    'lightning-cli --regtest getinfo', demux=True
+                )
+                if exit_code == 0 and output[0]:
+                    info = _json.loads(output[0].decode('utf-8'))
+                    binding = info.get('binding', [{}])
+                    addr = binding[0].get('address', '127.0.0.1') if binding else '127.0.0.1'
+                    port = binding[0].get('port', 19849 + num) if binding else 19849 + num
+                    node_info[num] = {
+                        'pubkey': info['id'],
+                        'address': f"{info['id']}@{addr}:{port}",
+                        'container': container,
+                        'name': container.name
+                    }
+                else:
+                    print(f'  ERROR: Could not get info for CC{num}', flush=True)
+                    return False
+            except Exception as e:
+                print(f'  ERROR: Exception getting info for CC{num}: {e}', flush=True)
+                return False
+        
+        # Build ideal edge set for reference
+        ideal_edges = set()
+        for i in range(2, n + 1):
+            for j in range(max(1, i - m), i):
+                ideal_edges.add((i, j))
+        
+        print(f'  Ideal chain: {len(ideal_edges)} edges for {n} nodes with m={m}', flush=True)
+        
+        # ── Phase 2: Open channels using multifundchannel ──
+        # For each CC_i (i >= 2), open channels to its m predecessors in one tx
+        print(f'  Phase 2: Opening chain channels via multifundchannel...', flush=True)
+        total_opened = 0
+        total_failed = 0
+        
+        for i in range(2, n + 1):
+            from_info = node_info[i]
+            container = from_info['container']
+            
+            # Build targets: CC_{max(1,i-m)} through CC_{i-1}
+            targets = []
+            for j in range(max(1, i - m), i):
+                to_info = node_info[j]
+                targets.append(j)
+                # Connect first (multifundchannel auto-connects but explicit is safer)
+                container.exec_run(
+                    f'lightning-cli --regtest connect {to_info["address"]}', demux=True
+                )
+            
+            # Build the multifundchannel destinations JSON
+            destinations = []
+            for j in targets:
+                to_info = node_info[j]
+                destinations.append({
+                    "id": to_info['pubkey'],
+                    "amount": "50000",
+                    "push_msat": 25000000
+                })
+            
+            dest_json = _json.dumps(destinations)
+            # Escape for shell
+            cmd = f"lightning-cli --regtest multifundchannel '{dest_json}'"
+            
+            exit_code, output = container.exec_run(cmd, demux=True)
+            
+            target_names = ','.join([f'CC{j}' for j in targets])
+            if exit_code == 0:
+                total_opened += len(targets)
+                print(f'    CC{i} -> [{target_names}]: {len(targets)} channels opened', flush=True)
+            else:
+                err = get_cli_error(output)
+                print(f'    CC{i} -> [{target_names}]: FAILED - {err}', flush=True)
+                total_failed += len(targets)
+            
+            # Mine after each node to confirm the funding tx
+            mine_blocks(6)
+            time.sleep(1)
+        
+        print(f'  Opened {total_opened} channels ({total_failed} failed).', flush=True)
+        
+        # Final mining to ensure all channels reach CHANNELD_NORMAL
+        print(f'    Mining 20 blocks to finalize...', flush=True)
+        mine_blocks(20)
+        print(f'    Waiting 15s for channels to activate...', flush=True)
+        time.sleep(15)
+        
+        # ── Phase 3: Verify final topology ──
+        print(f'  Phase 3: Verifying chain topology...', flush=True)
+        degree_counts = {}
+        for num, info in node_info.items():
+            try:
+                exit_code, output = info['container'].exec_run(
+                    'lightning-cli --regtest listpeerchannels', demux=True
+                )
+                if exit_code == 0 and output[0]:
+                    result = _json.loads(output[0].decode('utf-8'))
+                    normal = [c for c in result.get('channels', []) if c.get('state') == 'CHANNELD_NORMAL']
+                    degree_counts[num] = len(normal)
+            except Exception:
+                degree_counts[num] = 0
+        
+        if degree_counts:
+            avg = sum(degree_counts.values()) / len(degree_counts)
+            expected_ideal = sum(min(m, i-1) + min(m, n-i) for i in range(1, n+1)) / n
+            print(f'  Final topology: avg_degree={avg:.1f} (ideal={expected_ideal:.1f}), '
+                  f'min={min(degree_counts.values())}, max={max(degree_counts.values())}', flush=True)
+            
+            mismatches = 0
+            for i in sorted(degree_counts.keys()):
+                expected = min(m, i-1) + min(m, n-i)
+                actual = degree_counts[i]
+                if i <= m + 1 or i >= n - m or actual != expected:
+                    marker = " OK" if actual == expected else f" MISMATCH (expected {expected})"
+                    if actual != expected:
+                        mismatches += 1
+                    print(f'    CC{i}: {actual} channels{marker}', flush=True)
+            
+            if mismatches == 0:
+                print(f'  All nodes match ideal chain topology!', flush=True)
+            else:
+                print(f'  {mismatches} nodes have mismatched channel counts.', flush=True)
+        
+        print(f'  Chain topology build complete.', flush=True)
+        return True
+
     def retrieve_all_status(self):
         '''
         Retrieve all running CC container statuses from shared memory

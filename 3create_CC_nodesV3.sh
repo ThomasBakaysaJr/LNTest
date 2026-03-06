@@ -23,6 +23,9 @@ else
     active_nodes="$2"
 fi
 
+# Optional: skip CC_Manager for chain topology mode
+skip_cc_manager="${3:-0}"
+
 wait_for_node_ready() {
     local node_name=$1
     echo "Waiting for $node_name to initialize..."
@@ -86,6 +89,7 @@ create_node() {
     # Run the Docker container with the specified name
     docker run -d --restart unless-stopped --network host --ipc=host --name $NODE_NAME \
         -e CONTAINER_NAME=$NODE_NAME \
+        -e SKIP_CC_MANAGER=$skip_cc_manager \
         -e NODE_CONTAINER_DIR=$NODE_CONTAINER_DIR \
         -e LIGHTNING_HOME=$LIGHTNING_CONTAINER_DIR \
         -e LIGHTNING_RPC_PATH="$LIGHTNING_CONTAINER_DIR/regtest/lightning-rpc" \

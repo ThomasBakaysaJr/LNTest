@@ -33,7 +33,11 @@ echo "Lightningd is online."
 # Now that lightningd is ready, start the python managers
 echo "Starting background services..."
 cd "$NODE_CONTAINER_DIR" 
-python3 CC_Manager.py &
+if [ "${SKIP_CC_MANAGER}" = "1" ]; then
+    echo "SKIP_CC_MANAGER=1: CC_Manager will NOT start (chain topology mode)."
+else
+    python3 CC_Manager.py &
+fi
 python3 noiseManager_REST.py &
 echo "Background services started."
 

@@ -158,6 +158,9 @@ def add_common_arguments(parser):
     takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Percentage of nodes to take down (default: 0.1).')
     takedown.add_argument('--takedown-strategy', dest='takedown_strategy', choices=['random', 'targeted'], default=None, help='Takedown strategy: random or targeted (highest-degree nodes).')
 
+    topology = parser.add_argument_group('Topology Settings')
+    topology.add_argument('--topology', dest='topology', choices=['natural', 'uniform', 'chain'], default=None, help='Topology mode: natural (default formation), uniform (prune hubs), or chain (D-LNBot sequential chain).')
+
 def main():
     '''
     Main entry point for the LNBot Testing Orchestrator.
@@ -250,6 +253,8 @@ def main():
                         
             config['parameters'] = parameters
             config['takedown_percentage'] = args.takedown_pct
+            if args.topology is not None:
+                config['topology'] = args.topology
             all_configs.append(config)
             run_test(config, manager)
 
@@ -287,6 +292,9 @@ def main():
         if args.takedown_strategy is not None:
             print(f'Takedown strategy is set to {args.takedown_strategy}')
             config['takedown_strategy'] = args.takedown_strategy
+        if args.topology is not None:
+            print(f'Topology mode is set to {args.topology}')
+            config['topology'] = args.topology
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
@@ -351,7 +359,7 @@ def run_test(in_config, manager : NodeManager):
             cc_start_time = time.time()
             
             print(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.')
-            channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES])
+            channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES], topology=config.get('topology'))
 
             print(f'Setup finished at {get_time()}')
 
@@ -365,6 +373,18 @@ def run_test(in_config, manager : NodeManager):
             total_setup_time = time.time() - cc_start_time
             
             print(f'Channels created in {total_setup_time} seconds.')
+
+            # If uniform topology requested, prune excess channels from hub nodes
+            if config.get('topology') == 'uniform':
+                print(f'Enforcing uniform topology (max {parameters[ACTIVE_NODES] * 2} channels per node)...')
+                manager.enforce_uniform_topology(parameters[ACTIVE_NODES] * 2)
+            elif config.get('topology') == 'chain':
+                print(f'Rebuilding as D-LNBot chain topology (m={parameters[ACTIVE_NODES]})...')
+                if not manager.build_chain_topology(parameters[ACTIVE_NODES]):
+                    print('Chain topology build failed. Retrying...')
+                    success = False
+                    attempt += 1
+                    continue
 
             if config.get('takedown', False):
                 # Derive takedown percentage from parameter (integer %) or fallback
@@ -388,7 +408,9 @@ def run_test(in_config, manager : NodeManager):
             '''
             for y in range(1, config['max_messages'] + 1):
                 # another wait, just in case we got nodes disconnecting or something
-                manager.are_channels_ready()
+                # Skip for chain topology — CC_Manager is not running so SHM status won't update
+                if config.get('topology') != 'chain':
+                    manager.are_channels_ready()
 
                 manager.send_botmaster_command(y, parameters[BM_CC], parameters[BM_POS])
                 cmd_start_time = time.time()
@@ -588,6 +610,8 @@ def create_meta_data(config):
         meta_data['takendown_nodes'] = config['takendown_nodes']
         meta_data['takedown_strategy'] = config.get('takedown_strategy', 'random')
 
+    meta_data['topology'] = config.get('topology', 'natural')
+
     return meta_data
 
 def record_topology(config, manager : NodeManager):
@@ -621,6 +645,11 @@ def get_record_name(config):
     if config.get('takedown', False):
         strategy = config.get('takedown_strategy', 'random')
         id += 'T' if strategy == 'random' else 'Ttargeted'
+    # U in the name means uniform topology was enforced
+    if config.get('topology') == 'uniform':
+        id += 'U'
+    elif config.get('topology') == 'chain':
+        id += 'C'
     
     filename = f'{DATA_DIR}/{var_key}_{values[var_key]}_{id}'
 
