@@ -49,6 +49,7 @@ NUM_CC = 'num_cc'
 ACTIVE_NODES = 'active_nodes'
 BM_CC = 'bm_cc'
 BM_POS = 'bm_pos'
+TAKEDOWN_PCT = 'takedown_pct'
 
 # Unless the script isn't working properly, best to leave these values alone
 MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450)) # max wait for propagation before we move on (default = 450)
@@ -110,9 +111,10 @@ TEST_CONFIGS = {
         }
     },
     '5' : {
-        'description': 'takedown test where a random 10% of the topology gets shutdown.',
-        'var_key' : NUM_CC,
+        'description': 'random takedown with increasing percentage of C&C nodes removed',
+        'var_key' : TAKEDOWN_PCT,
         'takedown' : True,
+        'takedown_strategy': 'random',
         'range' : (50, 10),
         'multiplier': 1,
         'max_messages' : 30,
@@ -120,7 +122,24 @@ TEST_CONFIGS = {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
             BM_CC: 1,
-            BM_POS: 50
+            BM_POS: 50,
+            TAKEDOWN_PCT: 10
+        }
+    },
+    '6' : {
+        'description': 'targeted takedown removing highest-degree C&C nodes',
+        'var_key' : TAKEDOWN_PCT,
+        'takedown' : True,
+        'takedown_strategy': 'targeted',
+        'range' : (50, 10),
+        'multiplier': 1,
+        'max_messages' : 30,
+        'parameters': {
+            NUM_CC: 50,
+            ACTIVE_NODES: 4,
+            BM_CC: 1,
+            BM_POS: 50,
+            TAKEDOWN_PCT: 10
         }
     }
 }
@@ -137,6 +156,7 @@ def add_common_arguments(parser):
     takedown = parser.add_argument_group('Takedown Settings')
     takedown.add_argument('--takedown', action='store_true', help='Enable node takedown during test.')
     takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Percentage of nodes to take down (default: 0.1).')
+    takedown.add_argument('--takedown-strategy', dest='takedown_strategy', choices=['random', 'targeted'], default=None, help='Takedown strategy: random or targeted (highest-degree nodes).')
 
 def main():
     '''
@@ -206,6 +226,8 @@ def main():
                     config['range'] = (2, 1)
                 elif config['var_key'] == BM_POS:
                     config['range'] = (100, 50)
+                elif config['var_key'] == TAKEDOWN_PCT:
+                    config['range'] = (30, 10)
             # Implement changes to full testings
             # like if the user wants to change the number of bm_cc connections
             if args.command == 'full':
@@ -262,6 +284,9 @@ def main():
         if args.takedown:
             print(f'Takedown test is True')
             config['takedown'] = True
+        if args.takedown_strategy is not None:
+            print(f'Takedown strategy is set to {args.takedown_strategy}')
+            config['takedown_strategy'] = args.takedown_strategy
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
@@ -290,7 +315,6 @@ def run_test(in_config, manager : NodeManager):
     Returns true is successful, false if something fails.
     '''
     config = copy.deepcopy(in_config)
-    takedown_pct = config.get('takedown_percentage', 0.1)
     overall_test_time = time.time()
     attempt = 0
     testing = config['var_key']
@@ -343,8 +367,14 @@ def run_test(in_config, manager : NodeManager):
             print(f'Channels created in {total_setup_time} seconds.')
 
             if config.get('takedown', False):
-                print(f'Preparing for takedown of {takedown_pct*100}% of nodes.')
-                if not manager.takedown(config, takedown_pct):
+                # Derive takedown percentage from parameter (integer %) or fallback
+                if TAKEDOWN_PCT in parameters:
+                    takedown_pct = parameters[TAKEDOWN_PCT] / 100.0
+                else:
+                    takedown_pct = config.get('takedown_percentage', 0.1)
+                takedown_strategy = config.get('takedown_strategy', 'random')
+                print(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.')
+                if not manager.takedown(config, takedown_pct, takedown_strategy):
                     # we stop tracking containers here because we won't be reaching the !success block below
                     success = False
                     attempt += 1
@@ -361,18 +391,38 @@ def run_test(in_config, manager : NodeManager):
                 manager.are_channels_ready()
 
                 manager.send_botmaster_command(y, parameters[BM_CC], parameters[BM_POS])
+                cmd_start_time = time.time()
                 send_time, success = wait_for_propagation(y, manager)
                 
+                # Calculate coverage (what fraction of surviving nodes received the command)
+                coverage_pct, received, total = get_coverage(y, manager)
+
                 if not success:
+                    if config.get('takedown', False):
+                        # Network partition is a valid result for takedown tests — record it
+                        actual_elapsed = time.time() - cmd_start_time
+                        record = parameters.copy()
+                        record['message'] = y
+                        record['time_elapsed'] = actual_elapsed
+                        record['coverage'] = coverage_pct
+                        record['nodes_received'] = received
+                        record['nodes_total'] = total
+                        record['partitioned'] = True
+                        test_data.append(record)
+                        print(f'Command {y} timed out at {get_time()}. Coverage: {coverage_pct*100:.1f}% ({received}/{total} surviving nodes)')
                     break
 
                 # add the record of this data
                 record = parameters.copy()
                 record['message'] = y
                 record['time_elapsed'] = send_time
+                record['coverage'] = coverage_pct
+                record['nodes_received'] = received
+                record['nodes_total'] = total
+                record['partitioned'] = False
                 test_data.append(record)
 
-                print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds.')
+                print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds. Coverage: {coverage_pct*100:.1f}%')
                 print(f'Time: {get_time()}')
                 
             # record the test and set reset attempts
@@ -383,6 +433,10 @@ def run_test(in_config, manager : NodeManager):
             if success:
                 attempt = 0
             # if not a success, add to the attempt
+            elif config.get('takedown', False):
+                # Network partition is a valid data point for takedown tests, advance to next iteration
+                success = True
+                attempt = 0
             else:
                 attempt += 1
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
@@ -398,11 +452,20 @@ def wait_for_propagation(command, manager : NodeManager):
     sending = True
     start_time = time.time()
     success = None
+    time_interval = None
+    last_received = 0
+    last_change_time = time.time()
+    STALE_TIMEOUT = 60  # If no new node receives the message for 60s, network is partitioned
     while sending:
         data = manager.retrieve_all_status()
         # manager.update()
         if data:
             time_interval, done = get_time_interval(data, command)
+            # Track coverage progress for early partition detection
+            received = sum(1 for s in data if int(s.get('counter', 0)) >= int(command))
+            if received > last_received:
+                last_received = received
+                last_change_time = time.time()
         else:
             done = False
         if done:
@@ -412,9 +475,28 @@ def wait_for_propagation(command, manager : NodeManager):
         if manager.is_kill_time(start_time, MAX_WAIT):
             success = False
             break
+        # Early exit: if coverage hasn't improved for STALE_TIMEOUT, network is partitioned
+        if (time.time() - last_change_time) >= STALE_TIMEOUT and last_received > 0:
+            print(f'Coverage stalled at {last_received}/{len(data) if data else "?"} nodes for {STALE_TIMEOUT}s. Network likely partitioned.')
+            success = False
+            break
     if success == None:
         print(f'Somethin went wrong in the wait for propagation state. Success == None')
     return time_interval, success
+
+def get_coverage(command, manager : NodeManager):
+    '''
+    Calculate what fraction of surviving nodes received the given command.
+    Returns:
+        (coverage_pct, received_count, total_count)
+    '''
+    data = manager.retrieve_all_status()
+    if not data:
+        return 0.0, 0, 0
+    total = len(data)
+    received = sum(1 for s in data if int(s.get('counter', 0)) >= int(command))
+    coverage = received / total if total > 0 else 0.0
+    return coverage, received, total
 
 def confirm_test():
     if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
@@ -504,6 +586,7 @@ def create_meta_data(config):
     # add the takendown nodes - if they exist
     if is_takedown:
         meta_data['takendown_nodes'] = config['takendown_nodes']
+        meta_data['takedown_strategy'] = config.get('takedown_strategy', 'random')
 
     return meta_data
 
@@ -536,7 +619,8 @@ def get_record_name(config):
     id = ''.join(parts)
     # a T in the name means that this was a takedown test.
     if config.get('takedown', False):
-        id += 'T'
+        strategy = config.get('takedown_strategy', 'random')
+        id += 'T' if strategy == 'random' else 'Ttargeted'
     
     filename = f'{DATA_DIR}/{var_key}_{values[var_key]}_{id}'
 

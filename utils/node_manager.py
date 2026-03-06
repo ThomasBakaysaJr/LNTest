@@ -233,16 +233,17 @@ class NodeManager:
         except Exception as e:
             print(f'Error generating node status config. {e}')
 
-    def takedown(self, config, percentage):
+    def takedown(self, config, percentage, strategy='random'):
         '''
         Takedown section for taking down a percentage of nodes.
         Will append takedown nodes to the config.
         Args:
             percentage: float, percentage of nodes to take down (e.g., 0.1 for 10%)
+            strategy: 'random' for random selection, 'targeted' for highest-degree nodes
         '''
         cc_nodes = []
         parameters = config['parameters']
-        # find the 10% of nodes we're taking down
+        # find the percentage of nodes we're taking down
         num_nodes_kill = int(parameters[NUM_CC] * percentage)
         
         # get the list of running CC nodes
@@ -250,7 +251,10 @@ class NodeManager:
             cc_nodes = self.get_cc_nodes()
             time.sleep(SLEEP_INTERVAL)
         
-        nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
+        if strategy == 'targeted':
+            nodes_to_kill = self._select_highest_degree(cc_nodes, num_nodes_kill)
+        else:
+            nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
 
         # we only need the name and channels of these nodes being shut down
         try:
@@ -272,6 +276,34 @@ class NodeManager:
         print(f"Takedown test:")
         self.shutdown_nodes(nodes_to_kill)
         return True
+
+    def _select_highest_degree(self, cc_nodes, num_to_kill):
+        '''
+        Select the nodes with the highest channel degree (most connections).
+        These are typically the early nodes in sequential creation that accumulate
+        many inbound connections, making them high-value targets for takedown.
+        '''
+        node_degrees = []
+        for node in cc_nodes:
+            try:
+                status = self.get_node_status(node.name)
+                if status and 'channels' in status:
+                    degree = len(status['channels'])
+                else:
+                    degree = 0
+                node_degrees.append((node, degree))
+            except Exception:
+                node_degrees.append((node, 0))
+        
+        # Sort by degree descending, take top num_to_kill
+        node_degrees.sort(key=lambda x: -x[1])
+        selected = [nd[0] for nd in node_degrees[:num_to_kill]]
+        
+        print(f'Targeted takedown selecting {num_to_kill} highest-degree nodes:')
+        for nd in node_degrees[:num_to_kill]:
+            print(f'  {nd[0].name}: {nd[1]} channels')
+        
+        return selected
     
     def retrieve_all_status(self):
         '''
