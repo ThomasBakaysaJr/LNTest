@@ -145,5 +145,5 @@ NODE_NAME="CC$suffix"
 NODE_PORT=$(($CC_PORT_BASE + suffix))
 NODE_GRPC_PORT=$(($CC_GRPC_PORT_BASE + suffix))
 echo "Creating node CC$suffix with $active_nodes active nodes."
-create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT $active_nodes &
+create_node $NODE_NAME $NODE_PORT $NODE_GRPC_PORT $active_nodes
     

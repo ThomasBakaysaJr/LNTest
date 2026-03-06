@@ -153,7 +153,7 @@ class NodeManager:
             bm_node = Node(self.bm_name)
             self.active_nodes = active_nodes
             self.max_peers = active_nodes * 2
-            self.block_size = self.calculate_blocksize(active_nodes)
+            self.block_size = self.calculate_blocksize(active_nodes, total_nodes)
             self.nodes[inno_node.name] = inno_node
             self.nodes[bm_node.name] = bm_node
         except subprocess.CalledProcessError as e:
@@ -165,48 +165,39 @@ class NodeManager:
         except Exception as e:
             print(f"setup_test: Exception occurred: {e}")
             return None
-        
-        # get remainder nodes that need to be pruned
-        if remainder :=  total_nodes % active_nodes:
-            total_nodes += active_nodes - remainder
 
         # create the node configs
         self.create_status_config()
 
-        # now we make the nodes, but we do this ACTIVE NODES at a time to get full mesh connectivity
+        # Create nodes ONE AT A TIME matching the paper's sequential join model.
+        # Each node creation takes ~5-8s (docker + init + fund + mine), which provides
+        # natural gossip propagation time for the discovery mechanism in Algorithm 2.
+        # This ensures each CC only discovers the currently active CCs (at most m),
+        # resulting in the correct 2*m channel topology.
         counter = 1
         while counter <= total_nodes:
-            processes = []
-            for i in range(active_nodes):
-                if counter > total_nodes:
-                    break
+            try:
                 self.setup_shm("CC" + str(counter), True)
-                proc = subprocess.Popen(
+                # subprocess.run blocks until node is fully created, funded, and mined
+                subprocess.run(
                     [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}']
                 )
                 new_node = Node(f'CC{counter}')
                 self.nodes[new_node.name] = new_node
-                counter += 1
-                processes.append(proc)
+            except subprocess.CalledProcessError as e:
+                print(f"setup_test failed with exit code {e.returncode}")
+                print(f"  setup_test STDOUT: {e.stdout.strip()}")
+                print(f"  setup_test STDERR: {e.stderr.strip()}")
+                raise
+            except Exception as e:
+                print(f"setup_test: Exception occurred: {e}")
+                return None
+            counter += 1
 
-            # Wait for all nodes in this batch to finish
-            for proc in processes:
-                proc.wait()
-
-            # now we wait for for those nodes to fully connect before we create new nodes
-            if not self.are_channels_ready():
-                print(f'Channels were not ready in time')
-                return False
-        
-        # will fix when code gets refactored.
-        # for now, we kill the extra nodes that get created so that we conform to the max nodes we're supposed to have
-        # get the list of running CC nodes
-        if remainder:
-            cc_nodes = []
-            while not cc_nodes:
-                cc_nodes = self.get_cc_nodes()
-                time.sleep(SLEEP_INTERVAL)
-            self.shutdown_nodes(cc_nodes[-remainder:])
+        # Wait for all channels to be established
+        if not self.are_channels_ready():
+            print(f'Channels were not ready in time')
+            return False
 
         return True
     
@@ -442,21 +433,20 @@ class NodeManager:
 
         return return_set
 
-    def calculate_blocksize(self, active_nodes):
+    def calculate_blocksize(self, active_nodes, total_nodes):
         '''
         Calculate the size of the shm blocks for this test run.
-        With a little wiggle room on top.
+        With sequential creation, each CC has at most:
+          m outbound + m inbound + 1 innocent + 1 BM + 1 transition margin = 2*m + 3
+        We add extra headroom for safety.
         '''
-        # more than what testing has shown, just to be safe
-        # tests showed:
-        # ~260 overhead
-        # ~120 per channel
         overhead_size = int(os.getenv('SHM_OVERHEAD', 512))
         per_peer_size = int(os.getenv('SHM_PER_PEER', 256))
-        # extra padding just in case
         buffer = float(os.getenv('SHM_BUFFER', 1.2))
+        # 2*m channels + 3 for innocent/BM/transition, doubled for safety
+        max_channels = active_nodes * 2 + 6
 
-        return int((overhead_size + (active_nodes * per_peer_size)) * buffer)
+        return int((overhead_size + (max_channels * per_peer_size)) * buffer)
 
     def kill_node(self, node : Node):
         '''

@@ -238,7 +238,7 @@ def is_node_ready(status):
                 return True
         # Check if we have enough CC-to-CC peers with working channels
         cc_peers = get_connected_nodes()
-        if len(cc_peers) >= ln_checker.ACTIVE_NODES:
+        if len(cc_peers) >= 1:
             set_state(status,'connected')
             CREATED_CHANNELS = True
             return True

@@ -134,7 +134,7 @@ def create_channels():
     global CHANNEL_OPENING_TIMES
 
     if is_max_inbound_channels() and not INNOCENT_CHANNEL_CLOSED:
-        logging.info(f'create_channels: We have reached incoming node saturation. Disconnecting from innocent node')
+        logging.info(f'create_channels: Reached m={MAX_ACTIVE_NODES} inbound connections. Closing innocent channel per Algorithm 2.')
         close_and_disconnect_innocent()
         return
     elif CHANNELS_CREATED:
@@ -154,15 +154,14 @@ def create_channels():
             if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
                 logging.info("create_channels: Reached maximum outbound peers while processing nodes.")
                 return 
-            
-            OUTBOUND_CHANNELS.add(node)  # Track this node
 
-            if node in OUTBOUND_CHANNELS and not ln_checker.does_connection_exist(node):
+            if not ln_checker.does_connection_exist(node):
                 # make sure we're not trying to connect to a node we're already connected to
                 demoGetAddressAndConnect(node)
 
             if ln_checker.does_connection_exist(node):
                 fund_channel(node)
+                OUTBOUND_CHANNELS.add(node)  # Only track after successful connection
             else:
                 logging.error(f"create_channels: Failed to connect to {node}.")
         
