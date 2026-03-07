@@ -1,7 +1,6 @@
 node_data/
 time_data*
 runtime_data.csv
-topology*
 Backup_data/
 data/*
 !data/.gitkeep
