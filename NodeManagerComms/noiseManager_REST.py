@@ -69,7 +69,7 @@ def main():
             time.sleep(CONNECT_SLEEP)
         logging.info('Channels have started being created.')
     else:
-        logging.info('Chain topology mode: skipping channel wait loop.')
+        logging.info('Orchestrator-controlled topology: skipping channel wait loop.')
         set_state(status,'connected')
 
     update_counter = 0

@@ -177,7 +177,7 @@ class NodeManager:
         self.create_status_config()
 
         counter = 1
-        skip_flag = '1' if topology == 'chain' else '0'
+        skip_flag = '1' if topology in ('chain', 'custom') else '0'
         while counter <= total_nodes:
             try:
                 self.setup_shm("CC" + str(counter), True)
@@ -196,9 +196,9 @@ class NodeManager:
                 return None
             counter += 1
 
-        # For chain topology, skip channel readiness - no natural channels exist
-        if topology == 'chain':
-            print(f'Chain mode: skipping channel readiness check.', flush=True)
+        # For chain/custom topology, skip channel readiness - no natural channels exist
+        if topology in ('chain', 'custom'):
+            print(f'Orchestrator-controlled topology: skipping channel readiness check.', flush=True)
             return True
 
         # Wait for all channels to be established
@@ -238,74 +238,63 @@ class NodeManager:
     def takedown(self, config, percentage, strategy='random'):
         '''
         Takedown section for taking down a percentage of nodes.
+        Will append takedown nodes to the config.
+        Args:
+            percentage: float, percentage of nodes to take down (e.g., 0.1 for 10%)
+            strategy: 'random' for random selection, 'targeted' for highest-degree nodes
         '''
-        import traceback as _tb
-        DBG = '/tmp/chain_debug.log'
-        
+        import json as _json
         cc_nodes = []
         parameters = config['parameters']
         num_nodes_kill = int(parameters[NUM_CC] * percentage)
-        
-        with open(DBG, 'a') as dbg:
-            dbg.write(f'\n  --- takedown() called ---\n')
-            dbg.write(f'  num_nodes_kill: {num_nodes_kill}, strategy: {strategy}\n')
-            dbg.flush()
         
         # get the list of running CC nodes
         while not cc_nodes:
             cc_nodes = self.get_cc_nodes()
             time.sleep(SLEEP_INTERVAL)
         
-        with open(DBG, 'a') as dbg:
-            dbg.write(f'  cc_nodes count: {len(cc_nodes)}\n')
-            dbg.write(f'  cc_node names: {[n.name for n in cc_nodes[:5]]}...\n')
-            dbg.flush()
-        
         if strategy == 'targeted':
             nodes_to_kill = self._select_highest_degree(cc_nodes, num_nodes_kill)
         else:
             nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
 
-        with open(DBG, 'a') as dbg:
-            dbg.write(f'  nodes_to_kill: {[n.name for n in nodes_to_kill]}\n')
-            dbg.flush()
-
-        # Record info about nodes being shut down
+        # Record info about nodes being shut down.
+        # Try SHM first; if empty (orchestrator-controlled topology), query containers directly.
         try:
-            temp_dead_nodes = []
+            dead_nodes = []
             for node in nodes_to_kill:
-                with open(DBG, 'a') as dbg:
-                    dbg.write(f'  Getting status for {node.name}...\n')
-                    dbg.flush()
                 status = self.get_node_status(node.name)
-                with open(DBG, 'a') as dbg:
-                    dbg.write(f'    status is None: {status is None}\n')
-                    if status:
-                        dbg.write(f'    status keys: {list(status.keys())}\n')
-                        dbg.write(f'    has channels: {"channels" in status}\n')
-                        dbg.write(f'    state: {status.get("state")}\n')
-                    dbg.flush()
-                temp_dead_nodes.append(status)
-            
-            with open(DBG, 'a') as dbg:
-                dbg.write(f'  All statuses collected. None count: {sum(1 for s in temp_dead_nodes if s is None)}\n')
-                dbg.flush()
-            
-            dead_nodes = [
-                {element : node.get(element) for element in ['short_id','host_name', 'channels']}
-                for node in temp_dead_nodes
-                ]
-            
-            with open(DBG, 'a') as dbg:
-                dbg.write(f'  dead_nodes built successfully: {len(dead_nodes)}\n')
-                dbg.flush()
-                
+                if status and status.get('channels') is not None:
+                    dead_nodes.append({
+                        'short_id': status.get('short_id'),
+                        'host_name': status.get('host_name'),
+                        'channels': status.get('channels')
+                    })
+                else:
+                    # SHM not populated — query container directly
+                    node_data = {'host_name': node.name, 'channels': {}}
+                    try:
+                        ec, out = node.exec_run('lightning-cli --regtest getinfo', demux=True)
+                        if ec == 0 and out[0]:
+                            info = _json.loads(out[0].decode('utf-8'))
+                            node_data['short_id'] = info.get('id', '')[-8:]
+                        
+                        ec, out = node.exec_run('lightning-cli --regtest listpeerchannels', demux=True)
+                        if ec == 0 and out[0]:
+                            result = _json.loads(out[0].decode('utf-8'))
+                            for ch in result.get('channels', []):
+                                if ch.get('state') == 'CHANNELD_NORMAL':
+                                    peer_id = ch.get('peer_id', '')
+                                    node_data['channels'][peer_id] = {
+                                        'short_id': peer_id[-8:],
+                                        'state': ch.get('state'),
+                                        'capacity': ch.get('total_msat', 0) // 1000 if ch.get('total_msat') else 0,
+                                        'our_amount': ch.get('to_us_msat', 0) // 1000 if ch.get('to_us_msat') else 0
+                                    }
+                    except Exception as e:
+                        print(f'  Warning: could not query container {node.name}: {e}', flush=True)
+                    dead_nodes.append(node_data)
         except Exception as e:
-            with open(DBG, 'a') as dbg:
-                dbg.write(f'  EXCEPTION in takedown:\n')
-                dbg.write(f'  {e}\n')
-                dbg.write(_tb.format_exc())
-                dbg.flush()
             print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}", flush=True)
             return False
             
@@ -316,10 +305,6 @@ class NodeManager:
         # disconnect the nodes here
         print(f"Takedown test:", flush=True)
         self.shutdown_nodes(nodes_to_kill)
-        
-        with open(DBG, 'a') as dbg:
-            dbg.write(f'  takedown() returning True\n')
-            dbg.flush()
         return True
 
     def _select_highest_degree(self, cc_nodes, num_to_kill):
@@ -350,119 +335,133 @@ class NodeManager:
         
         return selected
 
-    def enforce_uniform_topology(self, max_channels):
+    @staticmethod
+    def build_chain_edges(n, m):
         '''
-        Prune excess channels from hub nodes to create a more uniform topology.
-        Only closes channels where BOTH endpoints have more than max_channels,
-        so no node drops below the target degree.
+        Generate the D-LNBot chain edge set.
+        CC_i connects to CC_{max(1, i-m)} through CC_{i-1}.
+        Returns a set of (from, to) tuples.
+        '''
+        edges = set()
+        for i in range(2, n + 1):
+            for j in range(max(1, i - m), i):
+                edges.add((i, j))
+        return edges
+
+    @staticmethod
+    def load_and_validate_topology(file_path, n):
+        '''
+        Load a custom topology from a JSON file and validate it.
         
-        Args:
-            max_channels: target maximum channels per node (typically 2 * active_nodes)
+        Expected format:
+        {
+          "nodes": 50,
+          "edges": [[2, 1], [3, 1], [3, 2], ...]
+        }
+        
+        Each [from, to] means CC{from} opens a channel to CC{to}.
+        Returns a set of (from, to) tuples.
         '''
         import json as _json
-        
-        cc_nodes = self.get_cc_nodes()
-        if not cc_nodes:
-            print('enforce_uniform_topology: No CC nodes found.')
-            return
-        
-        # Step 1: Get each node's public key via lightning-cli getinfo
-        pubkey_to_name = {}
-        name_to_pubkey = {}
-        name_to_container = {}
-        
-        for node in cc_nodes:
-            try:
-                exit_code, output = node.exec_run(
-                    'lightning-cli --regtest getinfo', demux=True
-                )
-                if exit_code == 0 and output[0]:
-                    info = _json.loads(output[0].decode('utf-8'))
-                    pubkey = info.get('id', '')
-                    pubkey_to_name[pubkey] = node.name
-                    name_to_pubkey[node.name] = pubkey
-                    name_to_container[node.name] = node
-            except Exception as e:
-                print(f'  Warning: could not get info for {node.name}: {e}')
-        
-        # Step 2: Get channel data from SHM and build degree tracking
-        degree_map = {}
-        channels_map = {}
-        
-        for node in cc_nodes:
-            try:
-                status = self.get_node_status(node.name)
-                if status and 'channels' in status:
-                    normal_channels = {
-                        pk: ch for pk, ch in status['channels'].items()
-                        if ch.get('state') == 'CHANNELD_NORMAL'
-                    }
-                    degree_map[node.name] = len(normal_channels)
-                    channels_map[node.name] = normal_channels
-                else:
-                    degree_map[node.name] = 0
-                    channels_map[node.name] = {}
-            except Exception:
-                degree_map[node.name] = 0
-                channels_map[node.name] = {}
-        
-        over_degree = {n: d for n, d in degree_map.items() if d > max_channels}
-        if not over_degree:
-            print(f'  All nodes already have <= {max_channels} channels. No pruning needed.')
-            return
-        
-        total_excess = sum(d - max_channels for d in over_degree.values())
-        print(f'  {len(over_degree)} nodes exceed {max_channels} channels (total excess: {total_excess})')
-        
-        # Step 3: Close excess channels safely
-        channels_closed = 0
-        for node_name in sorted(degree_map.keys(), key=lambda n: -degree_map[n]):
-            if degree_map[node_name] <= max_channels:
-                continue
-            node_channels = channels_map.get(node_name, {})
-            peers_with_degrees = []
-            for peer_pk in node_channels:
-                peer_name = pubkey_to_name.get(peer_pk)
-                if peer_name:
-                    peers_with_degrees.append((peer_pk, peer_name, degree_map.get(peer_name, 0)))
-            peers_with_degrees.sort(key=lambda x: -x[2])
-            
-            for peer_pk, peer_name, peer_deg in peers_with_degrees:
-                if degree_map[node_name] <= max_channels:
-                    break
-                if degree_map.get(peer_name, 0) <= max_channels:
-                    continue
-                container = name_to_container.get(node_name)
-                if container:
-                    try:
-                        exit_code, output = container.exec_run(
-                            f'lightning-cli --regtest close {peer_pk}', demux=True
-                        )
-                        if exit_code == 0:
-                            degree_map[node_name] -= 1
-                            degree_map[peer_name] -= 1
-                            channels_closed += 1
-                        else:
-                            err = output[1].decode('utf-8') if output[1] else 'unknown error'
-                            print(f'  Warning: failed to close channel {node_name}->{peer_name}: {err.strip()}')
-                    except Exception as e:
-                        print(f'  Warning: exception closing channel {node_name}->{peer_name}: {e}')
-        
-        if channels_closed == 0:
-            print(f'  No safe channels to close (all excess connections are to leaf nodes).')
-            return
-        
-        print(f'  Closed {channels_closed} excess channels. Waiting for on-chain confirmation...')
-        time.sleep(15)
-        
-        still_over = sum(1 for d in degree_map.values() if d > max_channels)
-        avg_deg = sum(degree_map.values()) / len(degree_map) if degree_map else 0
-        print(f'  Post-pruning: avg_degree={avg_deg:.1f}, nodes still over {max_channels}: {still_over}')
+        import os as _os
 
-    def build_chain_topology(self, active_nodes):
+        if not _os.path.exists(file_path):
+            print(f'  ERROR: Topology file not found: {file_path}', flush=True)
+            return None
+
+        try:
+            with open(file_path, 'r') as f:
+                data = _json.load(f)
+        except Exception as e:
+            print(f'  ERROR: Could not parse topology file: {e}', flush=True)
+            return None
+
+        # Validate structure
+        if 'edges' not in data:
+            print(f'  ERROR: Topology file missing "edges" field.', flush=True)
+            return None
+
+        file_nodes = data.get('nodes', n)
+        if file_nodes != n:
+            print(f'  WARNING: Topology file specifies {file_nodes} nodes but LNTest is running {n} nodes. Using {n}.', flush=True)
+
+        raw_edges = data['edges']
+        edges = set()
+        skipped_self = 0
+        skipped_dup = 0
+        skipped_range = 0
+
+        for edge in raw_edges:
+            if len(edge) != 2:
+                print(f'  WARNING: Skipping malformed edge: {edge}', flush=True)
+                continue
+            src, dst = int(edge[0]), int(edge[1])
+
+            # Self-loop check
+            if src == dst:
+                skipped_self += 1
+                continue
+
+            # Range check
+            if src < 1 or src > n or dst < 1 or dst > n:
+                skipped_range += 1
+                continue
+
+            # Duplicate check
+            if (src, dst) in edges:
+                skipped_dup += 1
+                continue
+
+            edges.add((src, dst))
+
+        # Print warnings
+        if skipped_self > 0:
+            print(f'  WARNING: Filtered {skipped_self} self-loop(s).', flush=True)
+        if skipped_dup > 0:
+            print(f'  WARNING: Filtered {skipped_dup} duplicate edge(s).', flush=True)
+        if skipped_range > 0:
+            print(f'  WARNING: Filtered {skipped_range} out-of-range edge(s) (valid range: 1-{n}).', flush=True)
+
+        if len(edges) == 0:
+            print(f'  ERROR: No valid edges in topology file.', flush=True)
+            return None
+
+        # Connectivity check (BFS from node 1)
+        from collections import deque
+        adj = {i: set() for i in range(1, n + 1)}
+        for src, dst in edges:
+            adj[src].add(dst)
+            adj[dst].add(src)
+
+        visited = set()
+        queue = deque([1])
+        visited.add(1)
+        while queue:
+            node = queue.popleft()
+            for neighbor in adj[node]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+
+        isolated = [i for i in range(1, n + 1) if i not in visited]
+        if isolated:
+            print(f'  WARNING: Graph is disconnected. {len(isolated)} node(s) unreachable from CC1: '
+                  f'{isolated[:10]}{"..." if len(isolated) > 10 else ""}', flush=True)
+            print(f'  These nodes will not receive commands. Proceeding anyway.', flush=True)
+
+        # Summary
+        max_degree = max(len(adj[i]) for i in range(1, n + 1))
+        min_degree = min(len(adj[i]) for i in range(1, n + 1))
+        avg_degree = sum(len(adj[i]) for i in range(1, n + 1)) / n
+        print(f'  Loaded {len(edges)} edges for {n} nodes '
+              f'(avg_degree={avg_degree:.1f}, min={min_degree}, max={max_degree}).', flush=True)
+
+        return edges
+
+    def build_topology(self, edges):
         '''
-        Build the D-LNBot chain topology on a clean network.
-        CC_i opens outbound channels to CC_{max(1, i-m)} ... CC_{i-1}.
+        Build an arbitrary topology on a clean network from a set of edges.
+        Each edge is a (from, to) tuple where from and to are CC node numbers.
         
         Uses multifundchannel to open all of a node's channels in a single
         on-chain transaction, avoiding UTXO exhaustion issues.
@@ -472,10 +471,9 @@ class NodeManager:
         '''
         import json as _json
         
-        m = active_nodes
         cc_nodes = self.get_cc_nodes()
         if not cc_nodes:
-            print('build_chain_topology: No CC nodes found.', flush=True)
+            print('build_topology: No CC nodes found.', flush=True)
             return False
         
         def cc_num(container):
@@ -542,38 +540,35 @@ class NodeManager:
                 print(f'  ERROR: Exception getting info for CC{num}: {e}', flush=True)
                 return False
         
-        # Build ideal edge set for reference
-        ideal_edges = set()
-        for i in range(2, n + 1):
-            for j in range(max(1, i - m), i):
-                ideal_edges.add((i, j))
-        
-        print(f'  Ideal chain: {len(ideal_edges)} edges for {n} nodes with m={m}', flush=True)
+        print(f'  Target: {len(edges)} edges for {n} nodes', flush=True)
         
         # ── Phase 2: Open channels using multifundchannel ──
-        # For each CC_i (i >= 2), open channels to its m predecessors in one tx
-        print(f'  Phase 2: Opening chain channels via multifundchannel...', flush=True)
+        # Group edges by source node so each node opens all its outbound channels in one tx
+        from collections import defaultdict
+        outbound = defaultdict(list)
+        for src, dst in edges:
+            outbound[src].append(dst)
+        
+        print(f'  Phase 2: Opening channels via multifundchannel...', flush=True)
         total_opened = 0
         total_failed = 0
         
-        for i in range(2, n + 1):
-            from_info = node_info[i]
+        for src_num in sorted(outbound.keys()):
+            targets = outbound[src_num]
+            from_info = node_info[src_num]
             container = from_info['container']
             
-            # Build targets: CC_{max(1,i-m)} through CC_{i-1}
-            targets = []
-            for j in range(max(1, i - m), i):
-                to_info = node_info[j]
-                targets.append(j)
-                # Connect first (multifundchannel auto-connects but explicit is safer)
+            # Connect to all targets first
+            for dst_num in targets:
+                to_info = node_info[dst_num]
                 container.exec_run(
                     f'lightning-cli --regtest connect {to_info["address"]}', demux=True
                 )
             
-            # Build the multifundchannel destinations JSON
+            # Build multifundchannel destinations
             destinations = []
-            for j in targets:
-                to_info = node_info[j]
+            for dst_num in targets:
+                to_info = node_info[dst_num]
                 destinations.append({
                     "id": to_info['pubkey'],
                     "amount": "50000",
@@ -581,7 +576,6 @@ class NodeManager:
                 })
             
             dest_json = _json.dumps(destinations)
-            # Escape for shell
             cmd = f"lightning-cli --regtest multifundchannel '{dest_json}'"
             
             exit_code, output = container.exec_run(cmd, demux=True)
@@ -589,13 +583,13 @@ class NodeManager:
             target_names = ','.join([f'CC{j}' for j in targets])
             if exit_code == 0:
                 total_opened += len(targets)
-                print(f'    CC{i} -> [{target_names}]: {len(targets)} channels opened', flush=True)
+                print(f'    CC{src_num} -> [{target_names}]: {len(targets)} channels opened', flush=True)
             else:
                 err = get_cli_error(output)
-                print(f'    CC{i} -> [{target_names}]: FAILED - {err}', flush=True)
+                print(f'    CC{src_num} -> [{target_names}]: FAILED - {err}', flush=True)
                 total_failed += len(targets)
             
-            # Mine after each node to confirm the funding tx
+            # Mine after each source node to confirm the funding tx
             mine_blocks(6)
             time.sleep(1)
         
@@ -608,7 +602,7 @@ class NodeManager:
         time.sleep(15)
         
         # ── Phase 3: Verify final topology ──
-        print(f'  Phase 3: Verifying chain topology...', flush=True)
+        print(f'  Phase 3: Verifying topology...', flush=True)
         degree_counts = {}
         for num, info in node_info.items():
             try:
@@ -624,26 +618,39 @@ class NodeManager:
         
         if degree_counts:
             avg = sum(degree_counts.values()) / len(degree_counts)
-            expected_ideal = sum(min(m, i-1) + min(m, n-i) for i in range(1, n+1)) / n
-            print(f'  Final topology: avg_degree={avg:.1f} (ideal={expected_ideal:.1f}), '
+            # Compute expected degrees from the edge set
+            expected_degrees = {i: 0 for i in range(1, n + 1)}
+            for src, dst in edges:
+                expected_degrees[src] += 1
+                expected_degrees[dst] += 1
+            expected_avg = sum(expected_degrees.values()) / n
+            
+            print(f'  Final topology: avg_degree={avg:.1f} (expected={expected_avg:.1f}), '
                   f'min={min(degree_counts.values())}, max={max(degree_counts.values())}', flush=True)
             
             mismatches = 0
             for i in sorted(degree_counts.keys()):
-                expected = min(m, i-1) + min(m, n-i)
+                expected = expected_degrees[i]
                 actual = degree_counts[i]
-                if i <= m + 1 or i >= n - m or actual != expected:
-                    marker = " OK" if actual == expected else f" MISMATCH (expected {expected})"
-                    if actual != expected:
-                        mismatches += 1
-                    print(f'    CC{i}: {actual} channels{marker}', flush=True)
+                if actual != expected:
+                    mismatches += 1
+                    print(f'    CC{i}: {actual} channels MISMATCH (expected {expected})', flush=True)
+            
+            # Show edge nodes for reference
+            edge_nodes = [i for i in sorted(degree_counts.keys()) 
+                         if degree_counts[i] != max(degree_counts.values())]
+            if edge_nodes and mismatches == 0:
+                # Show first/last few nodes
+                show = edge_nodes[:3] + edge_nodes[-3:] if len(edge_nodes) > 6 else edge_nodes
+                for i in show:
+                    print(f'    CC{i}: {degree_counts[i]} channels OK', flush=True)
             
             if mismatches == 0:
-                print(f'  All nodes match ideal chain topology!', flush=True)
+                print(f'  All nodes match expected topology!', flush=True)
             else:
                 print(f'  {mismatches} nodes have mismatched channel counts.', flush=True)
         
-        print(f'  Chain topology build complete.', flush=True)
+        print(f'  Topology build complete.', flush=True)
         return True
 
     def retrieve_all_status(self):

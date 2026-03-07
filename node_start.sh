@@ -34,7 +34,7 @@ echo "Lightningd is online."
 echo "Starting background services..."
 cd "$NODE_CONTAINER_DIR" 
 if [ "${SKIP_CC_MANAGER}" = "1" ]; then
-    echo "SKIP_CC_MANAGER=1: CC_Manager will NOT start (chain topology mode)."
+    echo "SKIP_CC_MANAGER=1: CC_Manager will NOT start (orchestrator-controlled topology)."
 else
     python3 CC_Manager.py &
 fi

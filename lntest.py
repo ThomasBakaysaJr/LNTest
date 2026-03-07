@@ -159,7 +159,8 @@ def add_common_arguments(parser):
     takedown.add_argument('--takedown-strategy', dest='takedown_strategy', choices=['random', 'targeted'], default=None, help='Takedown strategy: random or targeted (highest-degree nodes).')
 
     topology = parser.add_argument_group('Topology Settings')
-    topology.add_argument('--topology', dest='topology', choices=['natural', 'uniform', 'chain'], default=None, help='Topology mode: natural (default formation), uniform (prune hubs), or chain (D-LNBot sequential chain).')
+    topology.add_argument('--topology', dest='topology', choices=['chain', 'natural', 'custom'], default='chain', help='Topology mode: chain (default, D-LNBot sequential chain), natural (autonomous formation via CC_Manager), or custom (user-supplied JSON topology file).')
+    topology.add_argument('--topology-file', dest='topology_file', default=None, help='Path to custom topology JSON file (required when --topology custom).')
 
 def main():
     '''
@@ -253,8 +254,12 @@ def main():
                         
             config['parameters'] = parameters
             config['takedown_percentage'] = args.takedown_pct
-            if args.topology is not None:
-                config['topology'] = args.topology
+            config['topology'] = args.topology
+            if args.topology_file is not None:
+                config['topology_file'] = args.topology_file
+            if args.topology == 'custom' and args.topology_file is None:
+                print('ERROR: --topology custom requires --topology-file.', flush=True)
+                return
             all_configs.append(config)
             run_test(config, manager)
 
@@ -292,9 +297,13 @@ def main():
         if args.takedown_strategy is not None:
             print(f'Takedown strategy is set to {args.takedown_strategy}', flush=True)
             config['takedown_strategy'] = args.takedown_strategy
-        if args.topology is not None:
-            print(f'Topology mode is set to {args.topology}', flush=True)
-            config['topology'] = args.topology
+        print(f'Topology mode is set to {args.topology}', flush=True)
+        config['topology'] = args.topology
+        if args.topology_file is not None:
+            config['topology_file'] = args.topology_file
+        if args.topology == 'custom' and args.topology_file is None:
+            print('ERROR: --topology custom requires --topology-file.', flush=True)
+            return
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
@@ -374,33 +383,32 @@ def run_test(in_config, manager : NodeManager):
             
             print(f'Channels created in {total_setup_time} seconds.', flush=True)
 
-            # Debug log file — bypasses stdout buffering issues with tee
-            DBG = '/tmp/chain_debug.log'
-            import traceback as _tb
-
-            # If uniform topology requested, prune excess channels from hub nodes
-            if config.get('topology') == 'uniform':
-                print(f'Enforcing uniform topology (max {parameters[ACTIVE_NODES] * 2} channels per node)...', flush=True)
-                manager.enforce_uniform_topology(parameters[ACTIVE_NODES] * 2)
-            elif config.get('topology') == 'chain':
-                print(f'Rebuilding as D-LNBot chain topology (m={parameters[ACTIVE_NODES]})...', flush=True)
-                if not manager.build_chain_topology(parameters[ACTIVE_NODES]):
-                    print('Chain topology build failed. Retrying...', flush=True)
+            # Build topology based on mode
+            topo_mode = config.get('topology', 'chain')
+            if topo_mode == 'chain':
+                edges = NodeManager.build_chain_edges(parameters[NUM_CC], parameters[ACTIVE_NODES])
+                print(f'Building D-LNBot chain topology (n={parameters[NUM_CC]}, m={parameters[ACTIVE_NODES]}, {len(edges)} edges)...', flush=True)
+                if not manager.build_topology(edges):
+                    print('Topology build failed. Retrying...', flush=True)
                     success = False
                     attempt += 1
                     continue
                 print(f'Waiting 10s for node status updates...', flush=True)
                 time.sleep(10)
-
-            with open(DBG, 'a') as dbg:
-                dbg.write(f'\n{"="*60}\n')
-                dbg.write(f'DEBUG CHECKPOINT: after topology build\n')
-                dbg.write(f'  topology: {config.get("topology")}\n')
-                dbg.write(f'  takedown flag: {config.get("takedown")}\n')
-                dbg.write(f'  takedown_pct in params: {TAKEDOWN_PCT in parameters}\n')
-                dbg.write(f'  parameters: {parameters}\n')
-                dbg.write(f'  attempt: {attempt}, success: {success}\n')
-                dbg.flush()
+            elif topo_mode == 'custom':
+                edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[NUM_CC])
+                if edges is None:
+                    print('Custom topology loading failed. Aborting.', flush=True)
+                    return
+                print(f'Building custom topology ({len(edges)} edges)...', flush=True)
+                if not manager.build_topology(edges):
+                    print('Topology build failed. Retrying...', flush=True)
+                    success = False
+                    attempt += 1
+                    continue
+                print(f'Waiting 10s for node status updates...', flush=True)
+                time.sleep(10)
+            # natural: CC_Manager handles formation, nothing to do here
 
             if config.get('takedown', False):
                 # Derive takedown percentage from parameter (integer %) or fallback
@@ -409,40 +417,12 @@ def run_test(in_config, manager : NodeManager):
                 else:
                     takedown_pct = config.get('takedown_percentage', 0.1)
                 takedown_strategy = config.get('takedown_strategy', 'random')
-                
-                with open(DBG, 'a') as dbg:
-                    dbg.write(f'  takedown_pct: {takedown_pct}\n')
-                    dbg.write(f'  takedown_strategy: {takedown_strategy}\n')
-                    dbg.write(f'  About to call manager.takedown()...\n')
-                    dbg.flush()
-                
                 print(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.', flush=True)
-                
-                try:
-                    takedown_result = manager.takedown(config, takedown_pct, takedown_strategy)
-                except Exception as e:
-                    with open(DBG, 'a') as dbg:
-                        dbg.write(f'  EXCEPTION in takedown: {e}\n')
-                        dbg.write(_tb.format_exc())
-                        dbg.flush()
-                    takedown_result = False
-                
-                with open(DBG, 'a') as dbg:
-                    dbg.write(f'  takedown_result: {takedown_result}\n')
-                    dbg.flush()
-                
-                if not takedown_result:
-                    with open(DBG, 'a') as dbg:
-                        dbg.write(f'  TAKEDOWN FAILED — triggering retry\n')
-                        dbg.flush()
-                    print(f'DEBUG: takedown returned False, retrying...', flush=True)
+                if not manager.takedown(config, takedown_pct, takedown_strategy):
+                    print(f'Takedown failed, retrying...', flush=True)
                     success = False
                     attempt += 1
                     continue
-            
-            with open(DBG, 'a') as dbg:
-                dbg.write(f'  Reached "Waiting done" — takedown succeeded or no takedown\n')
-                dbg.flush()
             
             print(f'Waiting done, proceeding to testing.', flush=True)
             message_start_time = time.time()
@@ -452,8 +432,8 @@ def run_test(in_config, manager : NodeManager):
             '''
             for y in range(1, config['max_messages'] + 1):
                 # another wait, just in case we got nodes disconnecting or something
-                # Skip for chain topology — CC_Manager is not running so SHM status won't update
-                if config.get('topology') != 'chain':
+                # Skip for orchestrator-controlled topologies — CC_Manager is not running
+                if config.get('topology', 'chain') == 'natural':
                     manager.are_channels_ready()
 
                 manager.send_botmaster_command(y, parameters[BM_CC], parameters[BM_POS])
@@ -654,7 +634,9 @@ def create_meta_data(config):
         meta_data['takendown_nodes'] = config['takendown_nodes']
         meta_data['takedown_strategy'] = config.get('takedown_strategy', 'random')
 
-    meta_data['topology'] = config.get('topology', 'natural')
+    meta_data['topology'] = config.get('topology', 'chain')
+    if config.get('topology_file'):
+        meta_data['topology_file'] = config['topology_file']
 
     return meta_data
 
@@ -689,11 +671,14 @@ def get_record_name(config):
     if config.get('takedown', False):
         strategy = config.get('takedown_strategy', 'random')
         id += 'T' if strategy == 'random' else 'Ttargeted'
-    # U in the name means uniform topology was enforced
-    if config.get('topology') == 'uniform':
-        id += 'U'
-    elif config.get('topology') == 'chain':
+    # Topology suffix in filename
+    topo = config.get('topology', 'chain')
+    if topo == 'chain':
         id += 'C'
+    elif topo == 'natural':
+        id += 'N'
+    elif topo == 'custom':
+        id += 'X'
     
     filename = f'{DATA_DIR}/{var_key}_{values[var_key]}_{id}'
 
