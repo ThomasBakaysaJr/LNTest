@@ -238,36 +238,75 @@ class NodeManager:
     def takedown(self, config, percentage, strategy='random'):
         '''
         Takedown section for taking down a percentage of nodes.
-        Will append takedown nodes to the config.
-        Args:
-            percentage: float, percentage of nodes to take down (e.g., 0.1 for 10%)
-            strategy: 'random' for random selection, 'targeted' for highest-degree nodes
         '''
+        import traceback as _tb
+        DBG = '/tmp/chain_debug.log'
+        
         cc_nodes = []
         parameters = config['parameters']
-        # find the percentage of nodes we're taking down
         num_nodes_kill = int(parameters[NUM_CC] * percentage)
+        
+        with open(DBG, 'a') as dbg:
+            dbg.write(f'\n  --- takedown() called ---\n')
+            dbg.write(f'  num_nodes_kill: {num_nodes_kill}, strategy: {strategy}\n')
+            dbg.flush()
         
         # get the list of running CC nodes
         while not cc_nodes:
             cc_nodes = self.get_cc_nodes()
             time.sleep(SLEEP_INTERVAL)
         
+        with open(DBG, 'a') as dbg:
+            dbg.write(f'  cc_nodes count: {len(cc_nodes)}\n')
+            dbg.write(f'  cc_node names: {[n.name for n in cc_nodes[:5]]}...\n')
+            dbg.flush()
+        
         if strategy == 'targeted':
             nodes_to_kill = self._select_highest_degree(cc_nodes, num_nodes_kill)
         else:
             nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
 
-        # we only need the name and channels of these nodes being shut down
+        with open(DBG, 'a') as dbg:
+            dbg.write(f'  nodes_to_kill: {[n.name for n in nodes_to_kill]}\n')
+            dbg.flush()
+
+        # Record info about nodes being shut down
         try:
-            temp_dead_nodes = [self.get_node_status(node.name) for node in nodes_to_kill]
+            temp_dead_nodes = []
+            for node in nodes_to_kill:
+                with open(DBG, 'a') as dbg:
+                    dbg.write(f'  Getting status for {node.name}...\n')
+                    dbg.flush()
+                status = self.get_node_status(node.name)
+                with open(DBG, 'a') as dbg:
+                    dbg.write(f'    status is None: {status is None}\n')
+                    if status:
+                        dbg.write(f'    status keys: {list(status.keys())}\n')
+                        dbg.write(f'    has channels: {"channels" in status}\n')
+                        dbg.write(f'    state: {status.get("state")}\n')
+                    dbg.flush()
+                temp_dead_nodes.append(status)
+            
+            with open(DBG, 'a') as dbg:
+                dbg.write(f'  All statuses collected. None count: {sum(1 for s in temp_dead_nodes if s is None)}\n')
+                dbg.flush()
+            
             dead_nodes = [
                 {element : node.get(element) for element in ['short_id','host_name', 'channels']}
                 for node in temp_dead_nodes
                 ]
+            
+            with open(DBG, 'a') as dbg:
+                dbg.write(f'  dead_nodes built successfully: {len(dead_nodes)}\n')
+                dbg.flush()
+                
         except Exception as e:
-            # something went wrong, count this test run as a failure and start again.
-            print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}")
+            with open(DBG, 'a') as dbg:
+                dbg.write(f'  EXCEPTION in takedown:\n')
+                dbg.write(f'  {e}\n')
+                dbg.write(_tb.format_exc())
+                dbg.flush()
+            print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}", flush=True)
             return False
             
         # add the nodes we shut down to the config
@@ -275,8 +314,12 @@ class NodeManager:
             'takendown_nodes': dead_nodes
         })
         # disconnect the nodes here
-        print(f"Takedown test:")
+        print(f"Takedown test:", flush=True)
         self.shutdown_nodes(nodes_to_kill)
+        
+        with open(DBG, 'a') as dbg:
+            dbg.write(f'  takedown() returning True\n')
+            dbg.flush()
         return True
 
     def _select_highest_degree(self, cc_nodes, num_to_kill):

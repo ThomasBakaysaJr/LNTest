@@ -201,14 +201,14 @@ def main():
 
         test_order = TEST_CONFIGS.keys()
         if args.command == 'full':
-            print(f'Running full testing suite.')
+            print(f'Running full testing suite.', flush=True)
         else:
-            print(f'Running small testing suite.')
+            print(f'Running small testing suite.', flush=True)
         if not confirm_test():
-            print(f'Exiting tester.')
+            print(f'Exiting tester.', flush=True)
             return
         else:
-            print(f'Continuing')
+            print(f'Continuing', flush=True)
         for test_mode in test_order:
             # if we're doing small test, we change the values here
             config = TEST_CONFIGS[test_mode].copy()
@@ -236,19 +236,19 @@ def main():
             if args.command == 'full':
                 testing = config['var_key']
                 if testing != NUM_CC and args.num_cc is not None:
-                    print(f'num_cc is set to {args.num_cc}')
+                    print(f'num_cc is set to {args.num_cc}', flush=True)
                     parameters[NUM_CC] = args.num_cc
                 if testing != ACTIVE_NODES and args.active_nodes is not None:
-                    print(f'active nodes is set to {args.active_nodes}')
+                    print(f'active nodes is set to {args.active_nodes}', flush=True)
                     parameters[ACTIVE_NODES] = args.active_nodes
                 if testing != BM_CC and args.bm_cc is not None:
-                    print(f'bm_cc is set to {args.bm_cc}')
+                    print(f'bm_cc is set to {args.bm_cc}', flush=True)
                     parameters[BM_CC] = args.bm_cc
                 if testing != BM_POS and args.bm_pos is not None:
-                    print(f'bm_pos is set to {args.bm_pos}')
+                    print(f'bm_pos is set to {args.bm_pos}', flush=True)
                     parameters[BM_POS] = args.bm_pos
                 if args.max_msg is not None:
-                    print(f'max_msg is set to {args.max_msg}')
+                    print(f'max_msg is set to {args.max_msg}', flush=True)
                     config['max_messages'] = args.max_msg
                         
             config['parameters'] = parameters
@@ -262,48 +262,48 @@ def main():
         config = TEST_CONFIGS[args.test_id].copy()
         parameters = config['parameters']
         if args.num_cc is not None:
-            print(f'num_cc is set to {args.num_cc}')
+            print(f'num_cc is set to {args.num_cc}', flush=True)
             parameters[NUM_CC] = args.num_cc
         if args.active_nodes is not None:
-            print(f'active nodes is set to {args.active_nodes}')
+            print(f'active nodes is set to {args.active_nodes}', flush=True)
             parameters[ACTIVE_NODES] = args.active_nodes
         if args.bm_cc is not None:
-            print(f'bm_cc is set to {args.bm_cc}')
+            print(f'bm_cc is set to {args.bm_cc}', flush=True)
             parameters[BM_CC] = args.bm_cc
         if args.bm_pos is not None:
-            print(f'bm_pos is set to {args.bm_pos}')
+            print(f'bm_pos is set to {args.bm_pos}', flush=True)
             parameters[BM_POS] = args.bm_pos
         if args.max_msg is not None:
-            print(f'max_msg is set to {args.max_msg}')
+            print(f'max_msg is set to {args.max_msg}', flush=True)
             config['max_messages'] = args.max_msg
         if args.max_range is not None:
-            print(f'max_range is set to {args.max_range}')
+            print(f'max_range is set to {args.max_range}', flush=True)
             temp_range = list(config['range'])
             temp_range[0] = args.max_range
             config['range'] = temp_range
         if args.step is not None:
-            print(f'step is set to {args.step}')
+            print(f'step is set to {args.step}', flush=True)
             temp_range = list(config['range'])
             temp_range[1] = args.step
             config['range'] = temp_range
         if args.takedown:
-            print(f'Takedown test is True')
+            print(f'Takedown test is True', flush=True)
             config['takedown'] = True
         if args.takedown_strategy is not None:
-            print(f'Takedown strategy is set to {args.takedown_strategy}')
+            print(f'Takedown strategy is set to {args.takedown_strategy}', flush=True)
             config['takedown_strategy'] = args.takedown_strategy
         if args.topology is not None:
-            print(f'Topology mode is set to {args.topology}')
+            print(f'Topology mode is set to {args.topology}', flush=True)
             config['topology'] = args.topology
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
-        print(f'Running test with:\n{parameters}')
+        print(f'Running test with:\n{parameters}', flush=True)
         if not confirm_test():
-            print(f'Exiting tester.')
+            print(f'Exiting tester.', flush=True)
             return
         else:
-            print(f'Continuing')
+            print(f'Continuing', flush=True)
 
         all_configs.append(config)
         run_test(config, manager)
@@ -315,7 +315,7 @@ def main():
     # we only kill the nodes here since we want to keep
     # the logs for the last run.
     manager.kill_all_nodes()
-    print(f'Testing finished. Exiting.')
+    print(f'Testing finished. Exiting.', flush=True)
 
 def run_test(in_config, manager : NodeManager):
     '''
@@ -353,38 +353,54 @@ def run_test(in_config, manager : NodeManager):
             monitor.start()
             
             if attempt > MAX_TRY:
-                print(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds")
+                print(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds", flush=True)
                 return
             
             cc_start_time = time.time()
             
-            print(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.')
+            print(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.', flush=True)
             channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES], topology=config.get('topology'))
 
-            print(f'Setup finished at {get_time()}')
+            print(f'Setup finished at {get_time()}', flush=True)
 
             # checkpoint, if channels aren't created then we start again.
             if not channels_created:
                 attempt += 1
-                print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+                print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}', flush=True)
                 continue            
             
             fund_nodes()
             total_setup_time = time.time() - cc_start_time
             
-            print(f'Channels created in {total_setup_time} seconds.')
+            print(f'Channels created in {total_setup_time} seconds.', flush=True)
+
+            # Debug log file — bypasses stdout buffering issues with tee
+            DBG = '/tmp/chain_debug.log'
+            import traceback as _tb
 
             # If uniform topology requested, prune excess channels from hub nodes
             if config.get('topology') == 'uniform':
-                print(f'Enforcing uniform topology (max {parameters[ACTIVE_NODES] * 2} channels per node)...')
+                print(f'Enforcing uniform topology (max {parameters[ACTIVE_NODES] * 2} channels per node)...', flush=True)
                 manager.enforce_uniform_topology(parameters[ACTIVE_NODES] * 2)
             elif config.get('topology') == 'chain':
-                print(f'Rebuilding as D-LNBot chain topology (m={parameters[ACTIVE_NODES]})...')
+                print(f'Rebuilding as D-LNBot chain topology (m={parameters[ACTIVE_NODES]})...', flush=True)
                 if not manager.build_chain_topology(parameters[ACTIVE_NODES]):
-                    print('Chain topology build failed. Retrying...')
+                    print('Chain topology build failed. Retrying...', flush=True)
                     success = False
                     attempt += 1
                     continue
+                print(f'Waiting 10s for node status updates...', flush=True)
+                time.sleep(10)
+
+            with open(DBG, 'a') as dbg:
+                dbg.write(f'\n{"="*60}\n')
+                dbg.write(f'DEBUG CHECKPOINT: after topology build\n')
+                dbg.write(f'  topology: {config.get("topology")}\n')
+                dbg.write(f'  takedown flag: {config.get("takedown")}\n')
+                dbg.write(f'  takedown_pct in params: {TAKEDOWN_PCT in parameters}\n')
+                dbg.write(f'  parameters: {parameters}\n')
+                dbg.write(f'  attempt: {attempt}, success: {success}\n')
+                dbg.flush()
 
             if config.get('takedown', False):
                 # Derive takedown percentage from parameter (integer %) or fallback
@@ -393,14 +409,42 @@ def run_test(in_config, manager : NodeManager):
                 else:
                     takedown_pct = config.get('takedown_percentage', 0.1)
                 takedown_strategy = config.get('takedown_strategy', 'random')
-                print(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.')
-                if not manager.takedown(config, takedown_pct, takedown_strategy):
-                    # we stop tracking containers here because we won't be reaching the !success block below
+                
+                with open(DBG, 'a') as dbg:
+                    dbg.write(f'  takedown_pct: {takedown_pct}\n')
+                    dbg.write(f'  takedown_strategy: {takedown_strategy}\n')
+                    dbg.write(f'  About to call manager.takedown()...\n')
+                    dbg.flush()
+                
+                print(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.', flush=True)
+                
+                try:
+                    takedown_result = manager.takedown(config, takedown_pct, takedown_strategy)
+                except Exception as e:
+                    with open(DBG, 'a') as dbg:
+                        dbg.write(f'  EXCEPTION in takedown: {e}\n')
+                        dbg.write(_tb.format_exc())
+                        dbg.flush()
+                    takedown_result = False
+                
+                with open(DBG, 'a') as dbg:
+                    dbg.write(f'  takedown_result: {takedown_result}\n')
+                    dbg.flush()
+                
+                if not takedown_result:
+                    with open(DBG, 'a') as dbg:
+                        dbg.write(f'  TAKEDOWN FAILED — triggering retry\n')
+                        dbg.flush()
+                    print(f'DEBUG: takedown returned False, retrying...', flush=True)
                     success = False
                     attempt += 1
                     continue
             
-            print(f'Waiting done, proceeding to testing.')
+            with open(DBG, 'a') as dbg:
+                dbg.write(f'  Reached "Waiting done" — takedown succeeded or no takedown\n')
+                dbg.flush()
+            
+            print(f'Waiting done, proceeding to testing.', flush=True)
             message_start_time = time.time()
             
             '''
@@ -431,7 +475,7 @@ def run_test(in_config, manager : NodeManager):
                         record['nodes_total'] = total
                         record['partitioned'] = True
                         test_data.append(record)
-                        print(f'Command {y} timed out at {get_time()}. Coverage: {coverage_pct*100:.1f}% ({received}/{total} surviving nodes)')
+                        print(f'Command {y} timed out at {get_time()}. Coverage: {coverage_pct*100:.1f}% ({received}/{total} surviving nodes)', flush=True)
                     break
 
                 # add the record of this data
@@ -444,8 +488,8 @@ def run_test(in_config, manager : NodeManager):
                 record['partitioned'] = False
                 test_data.append(record)
 
-                print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds. Coverage: {coverage_pct*100:.1f}%')
-                print(f'Time: {get_time()}')
+                print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds. Coverage: {coverage_pct*100:.1f}%', flush=True)
+                print(f'Time: {get_time()}', flush=True)
                 
             # record the test and set reset attempts
             total_send_time = time.time() - message_start_time
@@ -461,16 +505,16 @@ def run_test(in_config, manager : NodeManager):
                 attempt = 0
             else:
                 attempt += 1
-                print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+                print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}', flush=True)
         # out of the while loop
         monitor.stop()
         stop_bitcoinminer()           
 
-    print(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.")
-    print(f"Testing with: \n{config}")
+    print(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.", flush=True)
+    print(f"Testing with: \n{config}", flush=True)
 
 def wait_for_propagation(command, manager : NodeManager):
-    print(f'Now waiting for command {command} to propagate.')
+    print(f'Now waiting for command {command} to propagate.', flush=True)
     sending = True
     start_time = time.time()
     success = None
@@ -499,11 +543,11 @@ def wait_for_propagation(command, manager : NodeManager):
             break
         # Early exit: if coverage hasn't improved for STALE_TIMEOUT, network is partitioned
         if (time.time() - last_change_time) >= STALE_TIMEOUT and last_received > 0:
-            print(f'Coverage stalled at {last_received}/{len(data) if data else "?"} nodes for {STALE_TIMEOUT}s. Network likely partitioned.')
+            print(f'Coverage stalled at {last_received}/{len(data) if data else "?"} nodes for {STALE_TIMEOUT}s. Network likely partitioned.', flush=True)
             success = False
             break
     if success == None:
-        print(f'Somethin went wrong in the wait for propagation state. Success == None')
+        print(f'Somethin went wrong in the wait for propagation state. Success == None', flush=True)
     return time_interval, success
 
 def get_coverage(command, manager : NodeManager):
@@ -533,12 +577,12 @@ def fund_nodes():
         )
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
-        print(f"tester failed with exit code {e.returncode}")
-        print(f"  tester STDOUT: {e.stdout.strip()}")
-        print(f"  tester STDERR: {e.stderr.strip()}") 
+        print(f"tester failed with exit code {e.returncode}", flush=True)
+        print(f"  tester STDOUT: {e.stdout.strip()}", flush=True)
+        print(f"  tester STDERR: {e.stderr.strip()}", flush=True)
         raise # Re-raise the exception so your calling code can catch it
     except Exception as e:
-        print(f"tester: Exception occurred: {e}")
+        print(f"tester: Exception occurred: {e}", flush=True)
         return None
     
 def confirm_execution(message):
@@ -553,7 +597,7 @@ def confirm_execution(message):
         elif user_input in negation:
             return False
         else:
-            print(f'{user_input} is an invalid option')
+            print(f'{user_input} is an invalid option', flush=True)
 
 def record_test(config, test_data, setup_time, total_send_time):
     '''
@@ -628,7 +672,7 @@ def record_topology(config, manager : NodeManager):
     with open(top_name, 'w') as f:
         json.dump(data, f, indent=4, default = json_set_converter)
     
-    print(f'Topology data for {len(all_status)} nodes saved as {top_name}')
+    print(f'Topology data for {len(all_status)} nodes saved as {top_name}', flush=True)
     
 
 def get_record_name(config):
@@ -742,7 +786,7 @@ def stop_bitcoinminer():
     if pid := get_bitcoin_miner():
         for id in pid.split():
             subprocess.run(["kill", str(id)])
-            print(f"Found and killing the bitcoin miner with pid {id}.")
+            print(f"Found and killing the bitcoin miner with pid {id}.", flush=True)
 
 
 def get_time_interval(data, top_count):
@@ -769,7 +813,7 @@ def get_time_interval(data, top_count):
         interval = None
 
     if is_done:
-        print(f'done with counter at {top_count}')
+        print(f'done with counter at {top_count}', flush=True)
 
     return interval, is_done
 

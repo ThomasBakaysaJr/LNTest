@@ -61,12 +61,16 @@ def main():
     # try to connect to them.
     
     set_state(status,'initializing')
-    while not ln_checker.get_channels(): # need to make sure we're returning stuff
-        time.sleep(CONNECT_SLEEP)
-    while len(ln_checker.get_channels()) < 1:
-        set_state(status,'initializing')
-        time.sleep(CONNECT_SLEEP)
-    logging.info('Channels have started being created.')
+    if os.environ.get('SKIP_CC_MANAGER') != '1':
+        while not ln_checker.get_channels(): # need to make sure we're returning stuff
+            time.sleep(CONNECT_SLEEP)
+        while len(ln_checker.get_channels()) < 1:
+            set_state(status,'initializing')
+            time.sleep(CONNECT_SLEEP)
+        logging.info('Channels have started being created.')
+    else:
+        logging.info('Chain topology mode: skipping channel wait loop.')
+        set_state(status,'connected')
 
     update_counter = 0
     max_counter = (STATUS_TIMER // SLEEP_INT) # this is so that we don't update the node too often
