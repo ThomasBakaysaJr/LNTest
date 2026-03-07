@@ -11,6 +11,7 @@ A testbed for designing, deploying, and evaluating Lightning Network-based botne
 - [Set-up](#set-up)
 - [Running the Test Suite](#running-the-test-suite)
   - [Modes of Operation](#modes-of-operation)
+  - [Topology Modes](#topology-modes)
   - [Test Scenarios (Test IDs)](#test-scenarios-test-ids)
   - [Customization \& Flags](#customization--flags)
   - [Examples](#examples)
@@ -24,7 +25,7 @@ LNTest consists of five components:
 1. **Bitcoin Core** — runs on the host machine in regtest mode, providing the on-chain base layer for all Lightning nodes.
 2. **Innocent Node** — a CLN instance in a Docker container that acts as a rendezvous point for C&C server peer discovery during network formation.
 3. **Botmaster Node** — a CLN instance in a Docker container that issues commands by opening a temporary Lightning channel to a C&C server and injecting keysend payments.
-4. **C&C Server Nodes** — CLN instances, each in its own Docker container, forming a Lightning-based overlay by opening payment channels to one another. Commands propagate through this overlay via flooding.
+4. **C&C Server Nodes** — CLN instances, each in its own Docker container, forming a Lightning-based overlay by opening payment channels to one another. Commands propagate through this overlay via flooding. The overlay topology can be configured to form either naturally (hub-and-spoke via gossip-based peer discovery) or as an explicit chain (matching the D-LNBot paper's sequential model).
 5. **Test Orchestrator (`lntest.py`)** — a Python script on the host that automates experiment setup, monitors propagation via POSIX shared memory, and records results.
 
 Each test automatically resets the Bitcoin regtest environment with a fresh wallet. All nodes and their associated resources (containers, shared memory, logs) are cleaned up between test iterations to minimize cross-test interference.
@@ -36,7 +37,7 @@ All experimental data is saved to the `data/` directory. The testbed generates d
 ### Data Structure
 Filenames follow the convention: `data/<variable>_<value>_<unique_id>_<type>`.
 
-For takedown tests, filenames include a strategy marker: `T` for random takedown, `Ttargeted` for targeted takedown.
+For takedown tests, filenames include a strategy marker: `T` for random takedown, `Ttargeted` for targeted takedown. For chain topology tests, filenames include a `C` suffix (e.g., `TC` for random takedown on chain topology).
 
 * **Propagation Data** (`*_time_data.json`)
   * Contains the time it took for each message to propagate through the network.
@@ -249,6 +250,38 @@ sudo venv/bin/python3 lntest.py run <TEST_ID> [options]
 
 ---
 
+## Topology Modes
+
+The `--topology` flag controls how C&C nodes form their overlay network. This is one of the most important experimental parameters, as it directly affects resilience to takedown attacks.
+
+### Natural (default)
+
+```bash
+sudo venv/bin/python3 lntest.py run 5 --max-msg 3
+```
+
+Each C&C node runs CC_Manager, which discovers peers via the innocent node and CLN gossip, then opens channels autonomously. Because nodes are created sequentially, early nodes (CC1-CC6) accumulate many inbound connections from later nodes, producing a **hub-and-spoke topology**. This topology is highly resilient to random takedowns but vulnerable to targeted removal of hub nodes.
+
+### Chain
+
+```bash
+sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --topology chain
+```
+
+Reproduces the exact topology described in the D-LNBot paper. CC_Manager is disabled at startup via the `SKIP_CC_MANAGER` environment variable. After all nodes are created, the orchestrator builds the chain explicitly using CLN's `multifundchannel` command: CC_i opens channels to CC_{max(1, i-m)} through CC_{i-1}. This produces a **chain-like topology** where middle nodes have exactly 2×N_active channels, and edge nodes ramp up/down. Each channel is funded with `push_msat` to enable bidirectional message forwarding.
+
+### Comparison
+
+The two topologies produce meaningfully different resilience profiles under takedown:
+
+| Scenario | Natural | Chain |
+| --- | --- | --- |
+| Random 10-30% takedown | 100% coverage | 100% coverage |
+| Random 40-50% takedown | 100% coverage | May partition |
+| Targeted 20% takedown | ~35% coverage (partitioned) | Depends on which nodes removed |
+
+---
+
 ## Test Scenarios (Test IDs)
 
 | ID | Description | Variable Tested | Default Range |
@@ -279,6 +312,8 @@ sudo venv/bin/python3 lntest.py run <TEST_ID> [options]
 
 **Test 6 (Targeted takedown):** Same as Test 5, but removes the highest-degree (most-connected) nodes first. This simulates a law enforcement strategy that targets the most critical C&C servers.
 
+All tests can be run on either topology via `--topology natural` (default) or `--topology chain`. Running the same test on both topologies produces directly comparable results that show how overlay structure affects botnet resilience.
+
 ### Coverage and Partition Detection
 
 Tests 5 and 6 include coverage tracking and partition detection:
@@ -297,6 +332,7 @@ Override default parameters for any mode (`small`, `full`, or `run`):
 * `--active-nodes <INT>` — Active neighbor limit (N_active). Each node maintains up to this many outbound channels.
 * `--bm-cc <INT>` — Number of C&C nodes the botmaster connects to.
 * `--bm-pos <INT>` — Botmaster injection position (see Test 4 for values).
+* `--topology <natural|chain>` — Overlay topology mode. `natural` (default) lets CC_Manager form channels via gossip, producing a hub-and-spoke topology. `chain` disables CC_Manager and builds the D-LNBot sequential chain via the orchestrator.
 
 ### Simulation Control
 
@@ -335,6 +371,18 @@ sudo venv/bin/python3 lntest.py run 5 --max-msg 3
 sudo venv/bin/python3 lntest.py run 6 --max-msg 3
 ```
 
+**Run random takedown on chain topology (D-LNBot baseline):**
+
+```bash
+sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --topology chain
+```
+
+**Run targeted takedown on chain topology:**
+
+```bash
+sudo venv/bin/python3 lntest.py run 6 --max-msg 3 --topology chain
+```
+
 **Run botmaster injection point test with 3 messages:**
 
 ```bash
@@ -345,6 +393,12 @@ sudo venv/bin/python3 lntest.py run 4 --max-msg 3
 
 ```bash
 sudo venv/bin/python3 lntest.py full --active-nodes 8
+```
+
+**Run the full suite on chain topology:**
+
+```bash
+sudo venv/bin/python3 lntest.py full --topology chain
 ```
 
 **Enable takedown on an ad-hoc basis with 30% targeted removal:**
