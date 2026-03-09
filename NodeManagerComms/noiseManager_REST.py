@@ -152,9 +152,13 @@ def get_new_messages():
 
 def send_message_to_connected_nodes(status, message, counter):
     """
-    Send a message to all nodes connected to this node via channels and display the message content.
+    Send a message to all nodes connected to this node via channels.
+    Sends to all neighbors concurrently using threads for maximum
+    propagation speed.
     """
     global SENDING
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from pyln.client import LightningRpc
 
     connected_nodes = get_connected_nodes()
     if not connected_nodes:
@@ -165,34 +169,43 @@ def send_message_to_connected_nodes(status, message, counter):
     # scramble the list of nodes to randomize sending pattern
     random.shuffle(connected_nodes)
 
+    # Filter out nodes that already received this message
+    nodes_to_send = []
     for target_node in connected_nodes:
-
-        # we check first, no need to resend a message to a node that has already received it
         if target_node in status.get('tracking_dict').keys() and counter in status.get('tracking_dict')[target_node]:
             logging.info(f'Message {counter} has already been sent to {target_node}. Aborting send.')
-            logging.info(status.get('tracking_dict'))
             continue
+        nodes_to_send.append(target_node)
 
-        SENDING = True
-        ln_checker.set_sending(status, target_node) # for the status tracker
+    if not nodes_to_send:
+        return
 
-        ln_checker.check_funds()
-        # if we've sent more than 1 message, we should be connected so don't check. If we drop the channel, we start at 1 anyways
-        if int(counter) < 1:
-            logging.info(f'First message. Doing checks')
-            ln_checker.does_connection_exist(target_node)
-            ln_checker.wait_node_activated(target_node)
+    rpc_path = os.getenv("LIGHTNING_RPC_PATH", "/root/.lightning/regtest/lightning-rpc")
+    SENDING = True
+
+    def _keysend_worker(target_node):
+        """Each thread gets its own RPC connection for thread safety."""
         try:
-            result = ln_checker.lightning_rpc.keysend(target_node, 1, extratlvs=tlv_json)
-            if result: # success
-                if target_node in status.get('tracking_dict').keys(): # make a new entry for the first messages
-                    status.get('tracking_dict')[target_node].add(counter) # tracking invidual sends in case it drops
+            rpc = LightningRpc(rpc_path)
+            result = rpc.keysend(target_node, 1, extratlvs=tlv_json)
+            return (target_node, result, None)
+        except Exception as e:
+            return (target_node, None, e)
+
+    logging.info(f'Sending to {len(nodes_to_send)} nodes concurrently')
+
+    with ThreadPoolExecutor(max_workers=len(nodes_to_send)) as pool:
+        futures = {pool.submit(_keysend_worker, node): node for node in nodes_to_send}
+        for future in as_completed(futures):
+            target_node, result, error = future.result()
+            if result:
+                if target_node in status.get('tracking_dict').keys():
+                    status.get('tracking_dict')[target_node].add(counter)
                 else:
                     status.get('tracking_dict')[target_node] = {counter}
-                logging.info(f"Message: [{message}] sent to {target_node} successfully. Counter is {status.get('tracking_dict')[target_node]}")
-                continue
-        except Exception as e:
-            logging.error(f"Error sending message to {target_node}: {e}")
+                logging.info(f"Message: [{message}] sent to {target_node} successfully.")
+            elif error:
+                logging.error(f"Error sending message to {target_node}: {error}")
 
 def get_connected_nodes():
     """
