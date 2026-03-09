@@ -598,8 +598,9 @@ class NodeManager:
         # Final mining to ensure all channels reach CHANNELD_NORMAL
         print(f'    Mining 20 blocks to finalize...', flush=True)
         mine_blocks(20)
-        print(f'    Waiting 15s for channels to activate...', flush=True)
-        time.sleep(15)
+        wait_time = max(15, n // 3)
+        print(f'    Waiting {wait_time}s for channels to activate...', flush=True)
+        time.sleep(wait_time)
         
         # ── Phase 3: Verify final topology ──
         print(f'  Phase 3: Verifying topology...', flush=True)

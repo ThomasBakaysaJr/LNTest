@@ -19,11 +19,16 @@ import os
 import textwrap
 import datetime
 import copy
+import resource
 from dotenv import load_dotenv
 from utils import docker_utils
 from utils.node_manager import NodeManager
 from utils import record_total_time
 from utils import sys_monitor
+
+# Raise file descriptor limit to avoid "Too many open files" with large node counts
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (min(65536, hard), hard))
 
 load_dotenv('config.env')
 
