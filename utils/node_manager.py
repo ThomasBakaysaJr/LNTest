@@ -145,14 +145,17 @@ class NodeManager:
         self.nodes: dict[str, Node] = {}
         self.shm_blocks = {}  # Keep SHM references alive to prevent Python resource tracker GC
     
-    def setup_test(self, total_nodes, active_nodes, topology=None):
+    def setup_test(self, total_nodes, active_nodes, mode='dlnbot'):
         '''
         Setup the number of CC servers needed.
         Returns true when the CC servers have been made.
         
-        If topology='chain', CC_Manager is killed in each container immediately
-        after creation to prevent autonomous channel formation.
+        Modes:
+          'dlnbot' or 'custom': SKIP_CC_MANAGER=1, launch all at once.
+          'dlnbot-formation': SKIP_CC_MANAGER=0, stagger container launches
+              to simulate realistic malware setup delay (SEI model).
         '''
+        import math
         try:
             subprocess.run(
                 [INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}']
@@ -176,8 +179,10 @@ class NodeManager:
         # create the node configs
         self.create_status_config()
 
+        # Determine CC_Manager behavior
+        skip_flag = '1' if mode in ('dlnbot', 'custom') else '0'
+
         counter = 1
-        skip_flag = '1' if topology in ('chain', 'custom') else '0'
         while counter <= total_nodes:
             try:
                 self.setup_shm("CC" + str(counter), True)
@@ -194,14 +199,25 @@ class NodeManager:
             except Exception as e:
                 print(f"setup_test: Exception occurred: {e}")
                 return None
+
+            # Stagger launches for dlnbot-formation mode
+            # Simulates variable LN setup time from D-LNBot's malware pipeline:
+            # download LN client → sync blockchain → fetch funding → open channels
+            # Log-normal distribution: median ~30s, range ~10-90s on regtest
+            if mode == 'dlnbot-formation' and counter < total_nodes:
+                delay = random.lognormvariate(math.log(30), 0.5)
+                delay = max(10, min(delay, 90))  # clamp to [10, 90]s
+                print(f'  Staggered launch: waiting {delay:.0f}s before next container (simulating LN setup delay)...', flush=True)
+                time.sleep(delay)
+
             counter += 1
 
-        # For chain/custom topology, skip channel readiness - no natural channels exist
-        if topology in ('chain', 'custom'):
+        # For orchestrator-controlled modes, skip channel readiness
+        if mode in ('dlnbot', 'custom'):
             print(f'Orchestrator-controlled topology: skipping channel readiness check.', flush=True)
             return True
 
-        # Wait for all channels to be established
+        # dlnbot-formation: wait for CC_Manager to establish channels
         if not self.are_channels_ready():
             print(f'Channels were not ready in time')
             return False

@@ -30,6 +30,37 @@ from utils import sys_monitor
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (min(65536, hard), hard))
 
+# Global reference to active monitor for cleanup on exit
+_active_monitor = None
+
+import atexit
+import signal
+
+def _cleanup_on_exit():
+    """Kill orphan child processes (monitor, miner) on exit or Ctrl+C."""
+    global _active_monitor
+    if _active_monitor is not None:
+        try:
+            _active_monitor.stop()
+        except Exception:
+            pass
+        _active_monitor = None
+    try:
+        stop_bitcoinminer()
+    except Exception:
+        pass
+
+atexit.register(_cleanup_on_exit)
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT/SIGTERM: cleanup then exit."""
+    print(f'\nReceived signal {signum}. Cleaning up...', flush=True)
+    _cleanup_on_exit()
+    raise SystemExit(1)
+
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
 load_dotenv('config.env')
 
 BITCOIND_CLI = os.getenv('BITCOIN_CLI')
@@ -164,8 +195,9 @@ def add_common_arguments(parser):
     takedown.add_argument('--takedown-strategy', dest='takedown_strategy', choices=['random', 'targeted'], default=None, help='Takedown strategy: random or targeted (highest-degree nodes).')
 
     topology = parser.add_argument_group('Topology Settings')
-    topology.add_argument('--topology', dest='topology', choices=['chain', 'natural', 'custom'], default='chain', help='Topology mode: chain (default, D-LNBot sequential chain), natural (autonomous formation via CC_Manager), or custom (user-supplied JSON topology file).')
+    topology.add_argument('--topology', dest='topology', choices=['dlnbot', 'custom'], default=None, help='Topology mode: dlnbot (D-LNBot sequential chain, built by orchestrator) or custom (user-supplied JSON topology file, built by orchestrator). Default is dlnbot unless --dlnbot-formation is used.')
     topology.add_argument('--topology-file', dest='topology_file', default=None, help='Path to custom topology JSON file (required when --topology custom).')
+    topology.add_argument('--dlnbot-formation', dest='dlnbot_formation', action='store_true', default=False, help='Enable autonomous D-LNBot formation with staggered container launches. CC_Manager discovers peers via innocent node. Mutually exclusive with --topology.')
 
 def main():
     '''
@@ -259,10 +291,19 @@ def main():
                         
             config['parameters'] = parameters
             config['takedown_percentage'] = args.takedown_pct
-            config['topology'] = args.topology
+            # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
+            if args.dlnbot_formation and args.topology is not None:
+                print('ERROR: --dlnbot-formation and --topology are mutually exclusive.', flush=True)
+                return
+            if args.dlnbot_formation:
+                config['mode'] = 'dlnbot-formation'
+            elif args.topology is not None:
+                config['mode'] = args.topology
+            else:
+                config['mode'] = 'dlnbot'
             if args.topology_file is not None:
                 config['topology_file'] = args.topology_file
-            if args.topology == 'custom' and args.topology_file is None:
+            if config['mode'] == 'custom' and args.topology_file is None:
                 print('ERROR: --topology custom requires --topology-file.', flush=True)
                 return
             all_configs.append(config)
@@ -302,11 +343,20 @@ def main():
         if args.takedown_strategy is not None:
             print(f'Takedown strategy is set to {args.takedown_strategy}', flush=True)
             config['takedown_strategy'] = args.takedown_strategy
-        print(f'Topology mode is set to {args.topology}', flush=True)
-        config['topology'] = args.topology
+        # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
+        if args.dlnbot_formation and args.topology is not None:
+            print('ERROR: --dlnbot-formation and --topology are mutually exclusive.', flush=True)
+            return
+        if args.dlnbot_formation:
+            config['mode'] = 'dlnbot-formation'
+        elif args.topology is not None:
+            config['mode'] = args.topology
+        else:
+            config['mode'] = 'dlnbot'
+        print(f'Mode is set to {config["mode"]}', flush=True)
         if args.topology_file is not None:
             config['topology_file'] = args.topology_file
-        if args.topology == 'custom' and args.topology_file is None:
+        if config['mode'] == 'custom' and args.topology_file is None:
             print('ERROR: --topology custom requires --topology-file.', flush=True)
             return
 
@@ -363,17 +413,22 @@ def run_test(in_config, manager : NodeManager):
                 monitor.stop()
                 
             # create a new system monitor for this test
+            global _active_monitor
             monitor = sys_monitor.HardwareMonitor(f"{get_record_name(config)}_system_metrics.csv")
             monitor.start()
+            _active_monitor = monitor
             
             if attempt > MAX_TRY:
                 print(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds", flush=True)
+                monitor.stop()
+                _active_monitor = None
+                stop_bitcoinminer()
                 return
             
             cc_start_time = time.time()
             
             print(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.', flush=True)
-            channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES], topology=config.get('topology'))
+            channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES], mode=config.get('mode', 'dlnbot'))
 
             print(f'Setup finished at {get_time()}', flush=True)
 
@@ -389,8 +444,8 @@ def run_test(in_config, manager : NodeManager):
             print(f'Channels created in {total_setup_time} seconds.', flush=True)
 
             # Build topology based on mode
-            topo_mode = config.get('topology', 'chain')
-            if topo_mode == 'chain':
+            mode = config.get('mode', 'dlnbot')
+            if mode == 'dlnbot':
                 edges = NodeManager.build_chain_edges(parameters[NUM_CC], parameters[ACTIVE_NODES])
                 print(f'Building D-LNBot chain topology (n={parameters[NUM_CC]}, m={parameters[ACTIVE_NODES]}, {len(edges)} edges)...', flush=True)
                 if not manager.build_topology(edges):
@@ -400,10 +455,13 @@ def run_test(in_config, manager : NodeManager):
                     continue
                 print(f'Waiting 10s for node status updates...', flush=True)
                 time.sleep(10)
-            elif topo_mode == 'custom':
+            elif mode == 'custom':
                 edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[NUM_CC])
                 if edges is None:
                     print('Custom topology loading failed. Aborting.', flush=True)
+                    monitor.stop()
+                    _active_monitor = None
+                    stop_bitcoinminer()
                     return
                 print(f'Building custom topology ({len(edges)} edges)...', flush=True)
                 if not manager.build_topology(edges):
@@ -413,7 +471,7 @@ def run_test(in_config, manager : NodeManager):
                     continue
                 print(f'Waiting 10s for node status updates...', flush=True)
                 time.sleep(10)
-            # natural: CC_Manager handles formation, nothing to do here
+            # dlnbot-formation: CC_Manager handles formation, nothing to build here
 
             if config.get('takedown', False):
                 # Derive takedown percentage from parameter (integer %) or fallback
@@ -438,7 +496,7 @@ def run_test(in_config, manager : NodeManager):
             for y in range(1, config['max_messages'] + 1):
                 # another wait, just in case we got nodes disconnecting or something
                 # Skip for orchestrator-controlled topologies — CC_Manager is not running
-                if config.get('topology', 'chain') == 'natural':
+                if config.get('mode', 'dlnbot') == 'dlnbot-formation':
                     manager.are_channels_ready()
 
                 manager.send_botmaster_command(y, parameters[BM_CC], parameters[BM_POS])
@@ -493,6 +551,7 @@ def run_test(in_config, manager : NodeManager):
                 print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}', flush=True)
         # out of the while loop
         monitor.stop()
+        _active_monitor = None
         stop_bitcoinminer()           
 
     print(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.", flush=True)
@@ -639,7 +698,7 @@ def create_meta_data(config):
         meta_data['takendown_nodes'] = config['takendown_nodes']
         meta_data['takedown_strategy'] = config.get('takedown_strategy', 'random')
 
-    meta_data['topology'] = config.get('topology', 'chain')
+    meta_data['mode'] = config.get('mode', 'dlnbot')
     if config.get('topology_file'):
         meta_data['topology_file'] = config['topology_file']
 
@@ -676,13 +735,13 @@ def get_record_name(config):
     if config.get('takedown', False):
         strategy = config.get('takedown_strategy', 'random')
         id += 'T' if strategy == 'random' else 'Ttargeted'
-    # Topology suffix in filename
-    topo = config.get('topology', 'chain')
-    if topo == 'chain':
-        id += 'C'
-    elif topo == 'natural':
-        id += 'N'
-    elif topo == 'custom':
+    # Mode suffix in filename
+    mode = config.get('mode', 'dlnbot')
+    if mode == 'dlnbot':
+        id += 'D'
+    elif mode == 'dlnbot-formation':
+        id += 'F'
+    elif mode == 'custom':
         id += 'X'
     
     filename = f'{DATA_DIR}/{var_key}_{values[var_key]}_{id}'
