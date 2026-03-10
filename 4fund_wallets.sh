@@ -10,6 +10,20 @@ source config.env
 CC_CONTAINERS=$(docker ps --filter "name=CC" --format "{{.Names}}")
 BM_CONTAINER=$(docker ps --filter "name=BM" --format "{{.Names}}")
 
+# Mine blocks first to ensure enough mature UTXOs for funding all nodes.
+# Each block yields 50 BTC in regtest; we need ~10 BTC per node.
+# Mining 200 blocks guarantees sufficient funds even after prior iterations.
+echo "Pre-mining 200 blocks to ensure sufficient funds..."
+premining_address=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
+    --data-binary '{"jsonrpc": "1.0", "id": "premining", "method": "getnewaddress", "params": []}' \
+    -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
+
+curl -s --user $RPC_USER:$RPC_PASSWORD \
+    --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"premining\", \"method\": \"generatetoaddress\", \"params\": [200, \"$premining_address\"]}" \
+    -H 'content-type: text/plain;' $BITCOIND_RPC > /dev/null
+
+echo "Pre-mining complete."
+
 # Function to fund a node's wallet
 fund_node() {
     local node=$1
