@@ -1,5 +1,5 @@
 #!/bin/bash
-# create_CC_nodesV2.sh
+# create_cc_node.sh
 
 set -e
 
@@ -23,7 +23,7 @@ else
     active_nodes="$2"
 fi
 
-# Optional: skip CC_Manager for chain topology mode
+# Optional: skip cc_manager for chain topology mode
 skip_cc_manager="${3:-0}"
 
 wait_for_node_ready() {

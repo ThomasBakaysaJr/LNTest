@@ -196,7 +196,7 @@ def add_common_arguments(parser):
     topology = parser.add_argument_group('Topology Settings')
     topology.add_argument('--topology', dest='topology', choices=['dlnbot', 'custom'], default=None, help='Topology mode: dlnbot (D-LNBot sequential chain, built by orchestrator) or custom (user-supplied JSON topology file, built by orchestrator). Default is dlnbot unless --dlnbot-formation is used.')
     topology.add_argument('--topology-file', dest='topology_file', default=None, help='Path to custom topology JSON file (required when --topology custom).')
-    topology.add_argument('--dlnbot-formation', dest='dlnbot_formation', action='store_true', default=False, help='Enable autonomous D-LNBot formation with staggered container launches. CC_Manager discovers peers via innocent node. Mutually exclusive with --topology.')
+    topology.add_argument('--dlnbot-formation', dest='dlnbot_formation', action='store_true', default=False, help='Enable autonomous D-LNBot formation with staggered container launches. cc_manager discovers peers via innocent node. Mutually exclusive with --topology.')
 
 def main():
     '''
@@ -470,7 +470,7 @@ def run_test(in_config, manager : NodeManager):
                     continue
                 print(f'Waiting 10s for node status updates...', flush=True)
                 time.sleep(10)
-            # dlnbot-formation: CC_Manager handles formation, nothing to build here
+            # dlnbot-formation: cc_manager handles formation, nothing to build here
 
             if config.get('takedown', False):
                 # Derive takedown percentage from parameter (integer %) or fallback
@@ -494,7 +494,7 @@ def run_test(in_config, manager : NodeManager):
             '''
             for y in range(1, config['max_messages'] + 1):
                 # another wait, just in case we got nodes disconnecting or something
-                # Skip for orchestrator-controlled topologies — CC_Manager is not running
+                # Skip for orchestrator-controlled topologies — cc_manager is not running
                 if config.get('mode', 'dlnbot') == 'dlnbot-formation':
                     manager.are_channels_ready()
 

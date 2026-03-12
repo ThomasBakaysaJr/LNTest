@@ -60,8 +60,8 @@ For takedown tests, filenames include a strategy marker: `T` for random takedown
 
 ### Logs
 Detailed logs for debugging specific node behaviors are stored in:
-* `NodeManagerComms/logs/` — individual logs for every C&C node.
-* `BotMasterComms/` — logs for the Botmaster node.
+* `cc_node/logs/` — individual logs for every C&C node.
+* `botmaster/` — logs for the Botmaster node.
 
 
 # Pre-requisites & Compatibility
@@ -262,7 +262,7 @@ sudo venv/bin/python3 lntest.py run 5 --max-msg 3
 sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --topology dlnbot
 ```
 
-Reproduces the exact topology described in the D-LNBot paper. CC_Manager is disabled at startup via the `SKIP_CC_MANAGER` environment variable. After all nodes are created, the orchestrator builds the chain explicitly using CLN's `multifundchannel` command: CC_i opens channels to CC_{max(1, i-m)} through CC_{i-1}. This produces a **uniform chain topology** where middle nodes have exactly 2×N_active channels, and edge nodes ramp up/down. Each channel is funded with `push_msat` to enable bidirectional message forwarding.
+Reproduces the exact topology described in the D-LNBot paper. cc_manager is disabled at startup via the `SKIP_CC_MANAGER` environment variable. After all nodes are created, the orchestrator builds the chain explicitly using CLN's `multifundchannel` command: CC_i opens channels to CC_{max(1, i-m)} through CC_{i-1}. This produces a **uniform chain topology** where middle nodes have exactly 2×N_active channels, and edge nodes ramp up/down. Each channel is funded with `push_msat` to enable bidirectional message forwarding.
 
 ### D-LNBot Formation
 
@@ -270,7 +270,7 @@ Reproduces the exact topology described in the D-LNBot paper. CC_Manager is disa
 sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --dlnbot-formation
 ```
 
-Simulates a realistic D-LNBot deployment where C&C servers join the network autonomously. Containers are launched with staggered delays drawn from a log-normal distribution (median ~30s on regtest), modeling the variable LN setup time in D-LNBot's malware pipeline: downloading an LN light client, syncing with the blockchain, fetching funding from a pre-funded wallet, and opening+confirming channels. Each node runs CC_Manager, which discovers peers via the innocent node and opens channels autonomously. The staggering ensures gossip has time to propagate between node arrivals. This mode produces a **clustered chain topology** — groups of fully-connected cliques linked by bridge nodes — which differs from both the idealized D-LNBot chain and a hub-and-spoke topology. The `--dlnbot-formation` flag is mutually exclusive with `--topology`.
+Simulates a realistic D-LNBot deployment where C&C servers join the network autonomously. Containers are launched with staggered delays drawn from a log-normal distribution (median ~30s on regtest), modeling the variable LN setup time in D-LNBot's malware pipeline: downloading an LN light client, syncing with the blockchain, fetching funding from a pre-funded wallet, and opening+confirming channels. Each node runs cc_manager, which discovers peers via the innocent node and opens channels autonomously. The staggering ensures gossip has time to propagate between node arrivals. This mode produces a **clustered chain topology** — groups of fully-connected cliques linked by bridge nodes — which differs from both the idealized D-LNBot chain and a hub-and-spoke topology. The `--dlnbot-formation` flag is mutually exclusive with `--topology`.
 
 ### Custom
 
@@ -278,7 +278,7 @@ Simulates a realistic D-LNBot deployment where C&C servers join the network auto
 sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --topology custom --topology-file topologies/ring_20.json
 ```
 
-Lets researchers supply any arbitrary topology as a JSON file. CC_Manager is disabled, and the orchestrator builds the exact graph specified. This enables testing with real-world LN snapshots, random graphs, scale-free networks, or any theoretical model on real CLN nodes.
+Lets researchers supply any arbitrary topology as a JSON file. cc_manager is disabled, and the orchestrator builds the exact graph specified. This enables testing with real-world LN snapshots, random graphs, scale-free networks, or any theoretical model on real CLN nodes.
 
 #### JSON Format
 
@@ -451,7 +451,7 @@ sudo venv/bin/python3 lntest.py run 1 --takedown --takedown-pct 0.3 --takedown-s
 sudo ./kill_nodes.sh
 ```
 
-Stops and removes all Docker containers created during the test. Clears shared memory. Removes persistent Docker directories. Does not remove logs in `NodeManagerComms/logs/`.
+Stops and removes all Docker containers created during the test. Clears shared memory. Removes persistent Docker directories. Does not remove logs in `cc_node/logs/`.
 
 ### cleanup_lightning_nodes.sh
 

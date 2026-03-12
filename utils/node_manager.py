@@ -14,7 +14,7 @@ SLEEP_INTERVAL = int(os.getenv('NM_SLEEP', 2))  # seconds
 MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450))  # seconds
 WAIT_MULT = int(os.getenv('NM_MAX_WAIT_MULT', 2))  # multiplier for wait time
 
-# Directories for NodeManagerComms and BotMasterComms
+# Directories for cc_node and botmaster
 NODEMAN_CCADDRESS_FILE = os.getenv('NODE_MANAGER_ADDRESS_LIST')
 BOTMASTER_CCADDRESS_FILE = os.getenv('BOT_MASTER_ADDRESS_LIST')
 
@@ -179,7 +179,7 @@ class NodeManager:
         # create the node configs
         self.create_status_config()
 
-        # Determine CC_Manager behavior
+        # Determine cc_manager behavior
         skip_flag = '1' if mode in ('dlnbot', 'custom') else '0'
 
         counter = 1
@@ -217,7 +217,7 @@ class NodeManager:
             print(f'Orchestrator-controlled topology: skipping channel readiness check.', flush=True)
             return True
 
-        # dlnbot-formation: wait for CC_Manager to establish channels
+        # dlnbot-formation: wait for cc_manager to establish channels
         if not self.are_channels_ready():
             print(f'Channels were not ready in time')
             return False

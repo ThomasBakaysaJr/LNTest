@@ -3,7 +3,7 @@
 
 set -e
 
-# Base directories for lightning
+# Load config
 source config.env
 
 # Stop and remove all containers

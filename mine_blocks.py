@@ -24,7 +24,7 @@ def get_new_address(user, password):
 
 def main(user, password):
     if BITCOIN_CLI == '':
-        print(f'mineBlocks: Path to bitcoin-cli not available. Exiting.')
+        print(f'mine_blocks: Path to bitcoin-cli not available. Exiting.')
         return
     # Get an initial valid address
     address = get_new_address(user, password)
@@ -55,13 +55,13 @@ if __name__ == "__main__":
         BITCOIN_CLI = sys.argv[3]
         main(sys.argv[1], sys.argv[2])
     if len(sys.argv) > 2:
-        print(f'mineBlocks: No path to bitcoin-cli given. attempting to load from config.env')
+        print(f'mine_blocks: No path to bitcoin-cli given. attempting to load from config.env')
         try:
             load_dotenv('config.env')
             BITCOIN_CLI = os.getenv('BITCOIN_CLI')
-            print(f'mineBlocks: Loading success. Starting bitcoin miner')
+            print(f'mine_blocks: Loading success. Starting bitcoin miner')
             main(sys.argv[1], sys.argv[2])
         except Exception as  e:
-            print(f'mineBlocks: ERROR: {e}')
+            print(f'mine_blocks: ERROR: {e}')
     else:
-        print(f'mineBlocks: ERROR: Not enough arguments. Please provide an rpc username and password for bitcoin-core')
+        print(f'mine_blocks: ERROR: Not enough arguments. Please provide an rpc username and password for bitcoin-core')

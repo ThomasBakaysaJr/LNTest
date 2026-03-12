@@ -62,21 +62,21 @@ extract_address_and_id() {
     # Use explicitly configured host and port instead of parsing dynamic bindings
     NODE_ADDRESS="${NODE_ID}@${BITCOIN_HOST}:${INNOCENT_PORT}"
 
-    # Clear the NodeManagerComms files before writing
+    # Clear the cc_node files before writing
     > $NODE_ADDRESS_FILE
     > $NODE_ID_FILE
 
-    # Write the address and ID to NodeManagerComms files
+    # Write the address and ID to cc_node files
     echo $NODE_ADDRESS > $NODE_ADDRESS_FILE
     echo $NODE_ID > $NODE_ID_FILE
 
     echo "Address and ID have been written to $NODE_ADDRESS_FILE and $NODE_ID_FILE."
 
-    # Clear the BotMasterComms files before writing
+    # Clear the botmaster files before writing
     > $BOT_ADDRESS_FILE
     > $BOT_ID_FILE
 
-    # Write the address and ID to BotMasterComms files
+    # Write the address and ID to botmaster files
     echo $NODE_ADDRESS > $BOT_ADDRESS_FILE
     echo $NODE_ID > $BOT_ID_FILE
 

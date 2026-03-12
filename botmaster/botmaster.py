@@ -1,4 +1,4 @@
-#NOTE!! this file should be in the BotMasterCommsComms(directory in home address) directory that gets mounted to the BM docker container
+#NOTE!! this file should be in the botmaster/ directory that gets mounted to the BM docker container
 import subprocess
 import argparse
 import json

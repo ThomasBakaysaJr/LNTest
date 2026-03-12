@@ -34,11 +34,11 @@ echo "Lightningd is online."
 echo "Starting background services..."
 cd "$NODE_CONTAINER_DIR" 
 if [ "${SKIP_CC_MANAGER}" = "1" ]; then
-    echo "SKIP_CC_MANAGER=1: CC_Manager will NOT start (orchestrator-controlled topology)."
+    echo "SKIP_CC_MANAGER=1: cc_manager will NOT start (orchestrator-controlled topology)."
 else
-    python3 CC_Manager.py &
+    python3 cc_manager.py &
 fi
-python3 noiseManager_REST.py &
+python3 message_relay.py &
 echo "Background services started."
 
 # Ensures the container dies if the lightning daemon dies

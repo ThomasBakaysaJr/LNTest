@@ -1,4 +1,4 @@
-#NOTE!!! this file should be in the NodeManagerComms(directory in home address) directory that gets mounted to the CC docker container
+#NOTE!!! this file should be in the cc_node/ directory that gets mounted to the CC docker container
 
 #This script is used to relay commands to all CC nodes it has channels with, it connects to the REST server and passes the commands to the server.   
 
