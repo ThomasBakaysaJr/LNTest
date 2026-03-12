@@ -69,8 +69,6 @@ def run_bitcoin_cli(command):
             text=True,
             check=True
         )
-        # logging.info(f"run_bitcoin_cli: stdout: {result.stdout}")
-        # logging.info(f"run_bitcoin_cli: stderr: {result.stderr}")
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         # This is where the error from bitcoin-cli lives!
@@ -126,17 +124,6 @@ def wait_node_activated(target_node):
     logging.warning(f'ln_checker: wait_node_activated: {target_node} not active after {attempt * SLEEP_INT} seconds.')
     return False
 
-def wait_connection_exists(target_node):
-    '''
-    wait for a connection between this node and target_node to exists.
-    Used to before funding a channel since we need to wait for a connection first.
-    '''
-    for attempt in range(RETRY_INT):
-        # check to make sure we're not waiting on a channel that no longer exists
-        if does_connection_exist(target_node):
-            return True
-        time.sleep(SLEEP_INT)
-    logging.warning(f'ln_checker: wait_connection_exists: {target_node} not a peer after {attempt * SLEEP_INT} seconds.')
 
 def does_connection_exist(target_node):
     '''
@@ -181,17 +168,6 @@ def has_channel_with(target_node):
         logging.error(f'has_channel_with: Error {e}')
     return False
 
-def check_channels(channels: set) -> set:
-    '''
-    Check a list of multiple nodes and return a list of nodes from that list that have active connections.
-    Args:
-        channels : Set of channels to check the connection status of.
-    Returns:
-        A set of channels from the incoming list that have an active channel.
-    '''
-    return_list = [channel for channel in channels if has_channel_with(channel)]
-
-    return set(return_list)
 
 def get_channels():
     """

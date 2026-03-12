@@ -16,7 +16,6 @@ import time
 import subprocess
 import json
 import os
-import textwrap
 import datetime
 import copy
 import resource
@@ -568,7 +567,6 @@ def wait_for_propagation(command, manager : NodeManager):
     STALE_TIMEOUT = 60  # If no new node receives the message for 60s, network is partitioned
     while sending:
         data = manager.retrieve_all_status()
-        # manager.update()
         if data:
             time_interval, done = get_time_interval(data, command)
             # Track coverage progress for early partition detection
@@ -629,19 +627,6 @@ def fund_nodes():
         print(f"tester: Exception occurred: {e}", flush=True)
         return None
     
-def confirm_execution(message):
-    confirmation = ['y','yes','ye']
-    negation = ['n','no']
-    
-    while True:
-        user_input = input(f'{message} y/n? :')
-        user_input = str.lower(user_input)
-        if user_input in confirmation:
-            return True
-        elif user_input in negation:
-            return False
-        else:
-            print(f'{user_input} is an invalid option', flush=True)
 
 def record_test(config, test_data, setup_time, total_send_time):
     '''
@@ -869,8 +854,6 @@ def get_time_interval(data, top_count):
 def get_time():
     return datetime.datetime.now().strftime('%H:%M:%S')
 
-def get_date():
-    return datetime.datetime.now().date()
 
 def json_set_converter(obj):
     if isinstance(obj, set):

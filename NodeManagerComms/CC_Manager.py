@@ -170,66 +170,6 @@ def create_channels():
         if new_valid_nodes == valid_nodes:
             break
 
-def channeled_with_peer(node_id, peer_channel_list):
-    """
-    Check if any of our channel peers (excluding the Innocent node) have a channel with the given node_id.
-    """
-
-    #For Regtest with mesh connected CCs, Get the list of peers we have channels with (excluding the Innocent node)
-    peer_ids = peer_channel_list - {INNOCENT_NODE_ID}
-
-    if not peer_ids:
-        logging.info("channeled_with_peer: No channel peers to check.")
-        return False
-    
-    channels = ln_checker.lightning_rpc.listchannels().get('channels', [])
-    for channel in channels:
-        source = channel["source"]
-        destination = channel["destination"]
-        if source in peer_ids and destination == node_id:
-            return True
-    return False
-
-def check_channel_states():
-    ''''
-    Check each channel. If it's been too long and it hasn't gone to normal we drop it.
-    On the main net this wouldn't be a problem, probably.
-    '''
-    global CHANNEL_OPENING_TIMES
-
-    if len(CHANNEL_OPENING_TIMES) == 0:
-        return
-
-    # check if any channels got stuck in AWAITING and thus weren't added to the dicitionary
-    channels = ln_checker.get_channels()
-    for channel in channels:
-        channel_state = channels[channel].get('state')
-        if channel not in CHANNEL_OPENING_TIMES.keys() and channel_state not in ln_checker.NOT_CONNECTING:
-            logging.warning(f'check_channel_states: Channel with {channel} is abnormal and not tracked. Tracking. . .')
-            CHANNEL_OPENING_TIMES[channel] = time.time()
-
-    logging.info(f'check_channel_states: Checking channel states for {len(CHANNEL_OPENING_TIMES)} nodes')
-
-    to_remove = []
-    for node in CHANNEL_OPENING_TIMES.keys():
-        start_time = CHANNEL_OPENING_TIMES[node]
-        elasped_time = time.time() - start_time
-        logging.info(f'check_channel_states: Checking node {node}')
-        if not ln_checker.has_channel_with(node): # check first that we still have a channel with this node
-            logging.info(f'check_channel_states: Channel with {node} no longer exists. Removing from pending list.')
-            to_remove.append(node)
-        elif ln_checker.is_node_active(node): # channel is normal, we're no longer watching this channel now
-            logging.info(f'check_channel_states: Channel with {node} is normal. Removing from pending list.')
-            to_remove.append(node)
-        elif elasped_time >= CHANNEL_CHECK_SLEEP_INT: # channel took too long to become normal, close the channel
-            logging.warning(f'check_channel_states: Channel with node {node} took too long to become normal. Closing channel.')
-            ln_checker.lightning_rpc.close(node)
-            to_remove.append(node)
-    if len(to_remove) > 0:
-        for node in to_remove:
-            CHANNEL_OPENING_TIMES.pop(node)
-            logging.info(f'Popped {node}')
-    logging.info(f'check_channel_states: Finished checking channels')
 
 #this is for the demo instead of using meshconnect, CCs can look at the shared address list and connect to each other by themselves
 def demoGetAddressAndConnect(node_ID):
@@ -351,34 +291,6 @@ def close_and_disconnect_innocent():
     except Exception as e:
         logging.warning(f'close_and_disconnect_innocent: Error {e}')
     
-#DON'T TAKE THIS OUT this won't get used in Regtest
-def get_node_address(node_id):
-    """
-    Retrieve the address and port for a specific node ID using the 'listnodes' command.
-
-    Args:
-        node_id (str): The node ID of the target node.
-
-    Returns:
-        tuple: A tuple containing the IP address and port, or (None, None) if not found.
-    """
-    try:
-        node_details = ln_checker.lightning_rpc.listnodes(node_id).get('nodes', [])
-        if not node_details:
-            logging.warning(f"No details found for node ID: {node_id}.")
-            return None, None
-
-        addresses = node_details[0].get("addresses", [])
-        if addresses:
-            ip_address = addresses[0].get("address")
-            port = addresses[0].get("port", 9735)  # Default port
-            return ip_address, port
-        else:
-            logging.warning(f"No address found for node ID: {node_id}.")
-            return None, None
-    except json.JSONDecodeError:
-        logging.error("Error parsing listnodes output.")
-        return None, None
 
 def fund_channel(node):
     logging.info(f'fund_channel: Connected to {node}. Funding.')
@@ -465,66 +377,6 @@ def discover_nodes():
     logging.info(f"discover_nodes: Valid nodes discovered: \n{valid_nodes}")
     return valid_nodes
 
-def get_channel_counts():
-    '''
-    return a dictionary containing all destination nodes and how many connections they have
-    '''
-    return channel_counter(False)
-
-def get_channel_counts_exclude_inno():
-    '''
-    return a dictionary containing all destination nodes and how many connections they have.
-    does not count connections to the innocent node
-    '''
-    return channel_counter(True)
-
-def channel_counter(exclude_inno):
-    '''
-    Helper that does the actual channel counting
-    Shouldn't be calling this directly.
-    '''
-    channels = ln_checker.lightning_rpc.listchannels().get('channels', [])
-    channels_counted = dict()
-
-    for channel in channels:
-        destination = channel['destination']
-        source = channel['source']
-
-        if (exclude_inno and destination == INNOCENT_NODE_ID) or is_bm_node(destination): # skip counting the innocent node or BM node
-            continue
-
-        # using sets, so duplicates shouldn't matter
-        if source in channels_counted.keys(): # we have counted a channel FROM this source
-            channels_counted[source].add(destination)
-        else: # We haven't counted a channel FROM this source
-            channels_counted[source] = set()
-            channels_counted[source].add(destination)
-
-    channel_counts = {source: len(channels) for source, channels in channels_counted.items()}
-    return channel_counts
-
-def close_and_disconnect_nodes(num_nodes_close, channel_list):
-    '''
-    Close num_nodes_close channels from channel_list to keep within MAX_PEERS
-    Args:
-        num_nodes_close : number of channels to close
-        channel_list : list of channels to select from
-    '''
-    # so this is goin to first check to make sure that we do have a channel with this node
-    # then we disconnect. 
-    # The list shouldn't contain the innocent node, but I'm not going to check for that
-
-    # check against len of the channel list
-    if len(channel_list) < num_nodes_close:
-        logging.error(f'close_and_disconnect_nodes: Just tried to close {num_nodes_close} channels on a channel list of length {len(channel_list)}')
-        return
-
-    # check to make sure we're not trying to close the connection to the BM node
-    channel_list = [channel for channel in channel_list if not is_bm_node(channel)]
-
-    nodes_to_close = random.sample(channel_list, num_nodes_close)
-    for node_id in nodes_to_close:
-        ln_checker.lightning_rpc.close(node_id)
 
 def is_bm_node(node_id):
     '''
@@ -553,14 +405,6 @@ def check_outbound_channels():
     
     return outbound_connected
 
-def remove_outbound_channel(node_id):
-    '''
-    Remove the channel from outbound connections.
-    '''
-    global OUTBOUND_CHANNELS
-    if not ln_checker.has_channel_with(node_id):
-        OUTBOUND_CHANNELS = OUTBOUND_CHANNELS - {node_id}
-    
 
 def load_this_node ():
     """

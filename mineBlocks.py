@@ -57,8 +57,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 2:
         print(f'mineBlocks: No path to bitcoin-cli given. attempting to load from config.env')
         try:
-            import os
-            from dotenv import load_dotenv
             load_dotenv('config.env')
             BITCOIN_CLI = os.getenv('BITCOIN_CLI')
             print(f'mineBlocks: Loading success. Starting bitcoin miner')

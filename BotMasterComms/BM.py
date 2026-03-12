@@ -77,8 +77,6 @@ def run_lightning_cli(command):
             stderr=subprocess.PIPE,
             text=True,
         )
-        # logging.debug(f"run_lightning_cli: stdout: {result.stdout}")
-        #logging.debug(f"run_lightning_cli: stderr: {result.stderr}")
         if result.returncode != 0:
             logging.info(f"run_lightning_cli: Command failed with error: {result.stderr.strip()}")
             return None
@@ -110,40 +108,6 @@ def connect_to_innocent():
     else:
         logging.info(f"Connecting to Innocent node: {INNOCENT_NODE_ADDRESS}")
         run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
-
-#this wont be used since in regtest i had to mesh connect all nodes, but in testnet or mainnet this would be useful. In regtest, addresses are not properly displayed
-def get_node_address(node_id):
-    """
-    Retrieve the address and port for a specific node ID using the 'listnodes' command.
-
-    Args:
-        node_id (str): The node ID of the target node.
-
-    Returns:
-        tuple: A tuple containing the IP address and port, or (None, None) if not found.
-    """
-    output = run_lightning_cli(["listnodes", node_id])
-    if not output:
-        logging.warning(f"Failed to retrieve node details for node ID: {node_id}.")
-        return None, None
-
-    try:
-        node_details = json.loads(output).get("nodes", [])
-        if not node_details:
-            logging.warning(f"No details found for node ID: {node_id}.")
-            return None, None
-
-        addresses = node_details[0].get("addresses", [])
-        if addresses:
-            ip_address = addresses[0].get("address")
-            port = addresses[0].get("port", 9735)  # Default port
-            return ip_address, port
-        else:
-            logging.warning(f"No address found for node ID: {node_id}.")
-            return None, None
-    except json.JSONDecodeError:
-        logging.error("Error parsing listnodes output.")
-        return None, None
 
 
 #this is for the demo instead of using meshconnect, CCs can look at the shared address list and connect to each other by themselves
@@ -344,18 +308,6 @@ def pick_random_nodes(num_nodes, valid_nodes):
     return random.sample(valid_nodes, num_nodes)
     
 
-def save_funded_nodes(nodes):
-    '''
-    Save the funded nodes into a file. 
-    Comma delineated.
-    '''
-    nodes_text = ",".join(nodes)
-
-    with open(FUNDED_NODE_FILE, 'w') as file:
-        file.write(nodes_text)
-    
-    logging.debug(f'save_funded_nodes: Funded nodes saved')
-
 
 def load_funded_nodes() -> set:
     '''
@@ -413,10 +365,7 @@ def send_msg(message, counter, funded_nodes):
     # Concatenate the user input with the counter
     message_with_counter = f"{message}|{counter}"
 
-    # # Ensure the message is enclosed in double quotes
-    # message = f'"{message_with_counter}"'
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
-    # amount = 5  # Minimal msat for sending a message
 
     while load_counter() == counter:
         for node in funded_nodes:

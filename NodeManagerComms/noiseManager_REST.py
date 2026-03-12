@@ -435,8 +435,6 @@ def load_this_node ():
     global THIS_NODE 
     THIS_NODE = ln_checker.lightning_rpc.getinfo().get('id')
 
-def decode_msg(in_msg):
-    return bytes.fromhex(in_msg).decode('utf-8', errors='ignore')
 
 def encode_msg(in_msg):
     return in_msg.encode('utf-8').hex()
