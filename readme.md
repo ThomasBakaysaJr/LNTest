@@ -148,7 +148,7 @@ Note: `lntest.py` runs with `sudo` (required for Docker and shared memory manage
 sudo venv/bin/python3 lntest.py small
 ```
 
-This runs a quick sanity check across all test scenarios with minimal parameters. Data is saved to the `data/` directory.
+This runs a quick sanity check (4 nodes, 1 message, 1 iteration) to verify everything is set up correctly. Data is saved to the `data/` directory.
 
 **Tip:** To save terminal output to a file while still seeing it live:
 
@@ -165,23 +165,15 @@ sudo venv/bin/python3 lntest.py <command> [options]
 
 ## Modes of Operation
 
-### Small Check (`small`)
+### Sanity Check (`small`)
 
-Runs a minimal version of every test to verify the environment is configured correctly.
+Quick end-to-end verification: creates 4 nodes, builds a minimal topology, and sends 1 message. Takes a few minutes.
 
 ```bash
 sudo venv/bin/python3 lntest.py small
 ```
 
-### Full Suite (`full`)
-
-Runs the complete battery of experiments (Test IDs 1 through 6).
-
-```bash
-sudo venv/bin/python3 lntest.py full
-```
-
-### Specific Test (`run`)
+### Run a Test (`run`)
 
 Runs a specific test scenario with full control over variable ranges and steps.
 
@@ -298,7 +290,7 @@ Tests 5 and 6 include coverage tracking and partition detection:
 
 ## CLI Flags
 
-Override default parameters for any mode (`small`, `full`, or `run`):
+Override default parameters for the `run` mode:
 
 ### Topology Parameters
 
@@ -364,18 +356,6 @@ sudo venv/bin/python3 lntest.py run 5 --num-msg 3 --num-cc 20 --topology custom 
 
 ```bash
 sudo venv/bin/python3 lntest.py run 4 --num-msg 3
-```
-
-**Run the full suite with a custom active node count:**
-
-```bash
-sudo venv/bin/python3 lntest.py full --active-nodes 8
-```
-
-**Run the full suite with autonomous D-LNBot formation:**
-
-```bash
-sudo venv/bin/python3 lntest.py full --dlnbot-formation
 ```
 
 **Enable takedown on an ad-hoc basis with 30% targeted removal:**

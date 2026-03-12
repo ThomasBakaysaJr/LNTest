@@ -198,15 +198,10 @@ def main():
 
     subparsers = parser.add_subparsers(dest='command', required=True, help='Mode of operation')
 
-    # Subcommand: full
-    parser_full = subparsers.add_parser('full', help='Run the full testing suite.')
-    add_common_arguments(parser_full)
-
     # Subcommand: small
-    parser_small = subparsers.add_parser('small', help='Run a small sanity check suite.')
-    add_common_arguments(parser_small)
+    parser_small = subparsers.add_parser('small', help='Quick sanity check: 4 nodes, 1 message, 1 iteration.')
 
-    # Subcommand: run (was --test)
+    # Subcommand: run
     parser_run = subparsers.add_parser('run', help='Run a specific test configuration.')
     parser_run.add_argument('test_id', choices=TEST_CONFIGS.keys(), help='ID of the test to run.')
     parser_run.add_argument('--sweep-start', dest='sweep_start', type=int, help='Override the starting value of the sweep variable.')
@@ -222,83 +217,25 @@ def main():
     start_time = time.time()
     all_configs = []
 
-    if args.command in ['full', 'small']:
-
-        # print out warning that max_range does nothing with this test
-        # Note: In the new structure, max_range isn't even in the namespace for full/small,
-        # so we don't need to check for it, preventing user error by design.
-
-        test_order = TEST_CONFIGS.keys()
-        if args.command == 'full':
-            log.info('Running full testing suite.')
-        else:
-            log.info('Running small testing suite.')
-        if not confirm_test():
-            log.info('Exiting tester.')
-            return
-        else:
-            log.info('Continuing')
-        for test_mode in test_order:
-            # if we're doing small test, we change the values here
-            config = TEST_CONFIGS[test_mode].copy()
-            parameters = config['parameters']
-            # specific changes for small tester
-            if args.command == 'small':
-                config['max_messages'] = 2
-                parameters[NUM_CC] = 6
-                parameters[ACTIVE_NODES] = 2
-                parameters[BM_SEEDS] = 1
-                parameters[BM_POS] = 50
-
-                if config['var_key'] == NUM_CC:
-                    config['range'] = (8, 2)
-                elif config['var_key'] == ACTIVE_NODES:
-                    config['range'] = (3, 1)
-                elif config['var_key'] == BM_SEEDS:
-                    config['range'] = (2, 1)
-                elif config['var_key'] == BM_POS:
-                    config['range'] = (100, 50)
-                elif config['var_key'] == TAKEDOWN_PCT:
-                    config['range'] = (30, 10)
-            # Implement changes to full testings
-            # like if the user wants to change the number of bm_seeds connections
-            if args.command == 'full':
-                testing = config['var_key']
-                if testing != NUM_CC and args.num_cc is not None:
-                    log.info(f'num_cc is set to {args.num_cc}')
-                    parameters[NUM_CC] = args.num_cc
-                if testing != ACTIVE_NODES and args.active_nodes is not None:
-                    log.info(f'active nodes is set to {args.active_nodes}')
-                    parameters[ACTIVE_NODES] = args.active_nodes
-                if testing != BM_SEEDS and args.bm_seeds is not None:
-                    log.info(f'bm_seeds is set to {args.bm_seeds}')
-                    parameters[BM_SEEDS] = args.bm_seeds
-                if testing != BM_POS and args.bm_pos is not None:
-                    log.info(f'bm_pos is set to {args.bm_pos}')
-                    parameters[BM_POS] = args.bm_pos
-                if args.num_msg is not None:
-                    log.info(f'num_msg is set to {args.num_msg}')
-                    config['max_messages'] = args.num_msg
-
-            config['parameters'] = parameters
-            config['takedown_percentage'] = args.takedown_pct
-            # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
-            if args.dlnbot_formation and args.topology is not None:
-                log.error('--dlnbot-formation and --topology are mutually exclusive.')
-                return
-            if args.dlnbot_formation:
-                config['mode'] = 'dlnbot-formation'
-            elif args.topology is not None:
-                config['mode'] = args.topology
-            else:
-                config['mode'] = 'dlnbot'
-            if args.topology_file is not None:
-                config['topology_file'] = args.topology_file
-            if config['mode'] == 'custom' and args.topology_file is None:
-                log.error('--topology custom requires --topology-file.')
-                return
-            all_configs.append(config)
-            run_test(config, manager)
+    if args.command == 'small':
+        # Quick sanity check: 4 nodes, 1 message, 1 iteration
+        log.info('Running sanity check: 4 nodes, active_nodes=2, 1 message.')
+        config = {
+            'description': 'sanity check',
+            'var_key': NUM_CC,
+            'range': (4, 1),
+            'max_messages': 1,
+            'mode': 'dlnbot',
+            'parameters': {
+                NUM_CC: 4,
+                ACTIVE_NODES: 2,
+                BM_SEEDS: 1,
+                BM_POS: 50
+            }
+        }
+        config['takedown_percentage'] = 0.1
+        all_configs.append(config)
+        run_test(config, manager)
 
     elif args.command == 'run':
         config = TEST_CONFIGS[args.test_id].copy()
