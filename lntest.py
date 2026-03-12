@@ -82,7 +82,7 @@ BITCOIN_MINER_PY = os.getenv('MINER_SCRIPT')
 TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
 NUM_CC = 'num_cc'
 ACTIVE_NODES = 'active_nodes'
-BM_CC = 'bm_cc'
+BM_SEEDS = 'bm_seeds'
 BM_POS = 'bm_pos'
 TAKEDOWN_PCT = 'takedown_pct'
 
@@ -98,11 +98,11 @@ TEST_CONFIGS = {
         'var_key' : NUM_CC,
         'range' : (100, 10),
         'multiplier': 1,
-        'max_messages' : 30,
+        'max_messages' : 10,
         'parameters': {
             NUM_CC: 10,
             ACTIVE_NODES: 4,
-            BM_CC: 1,
+            BM_SEEDS: 1,
             BM_POS: 50
         }
     },
@@ -111,24 +111,24 @@ TEST_CONFIGS = {
         'var_key' : ACTIVE_NODES,
         'range' : (6, 1),
         'multiplier': 1,
-        'max_messages' : 30,
+        'max_messages' : 10,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 2,
-            BM_CC: 1,
+            BM_SEEDS: 1,
             BM_POS: 50
         }
     },
     '3' : {
-        'description': 'increasing number of channels the botmaster makes',
-        'var_key' : BM_CC,
+        'description': 'increasing number of botmaster seed connections',
+        'var_key' : BM_SEEDS,
         'range' : (6, 1),
         'multiplier': 1,
-        'max_messages' : 30,
+        'max_messages' : 10,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
-            BM_CC: 1,
+            BM_SEEDS: 1,
             BM_POS: 50
         }
     },
@@ -137,11 +137,11 @@ TEST_CONFIGS = {
         'var_key' : BM_POS,
         'range' : (150, 50),
         'multiplier': 1,
-        'max_messages' : 30,
+        'max_messages' : 10,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
-            BM_CC: 1,
+            BM_SEEDS: 1,
             BM_POS: -50
         }
     },
@@ -152,11 +152,11 @@ TEST_CONFIGS = {
         'takedown_strategy': 'random',
         'range' : (50, 10),
         'multiplier': 1,
-        'max_messages' : 30,
+        'max_messages' : 10,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
-            BM_CC: 1,
+            BM_SEEDS: 1,
             BM_POS: 50,
             TAKEDOWN_PCT: 10
         }
@@ -168,11 +168,11 @@ TEST_CONFIGS = {
         'takedown_strategy': 'targeted',
         'range' : (50, 10),
         'multiplier': 1,
-        'max_messages' : 30,
+        'max_messages' : 10,
         'parameters': {
             NUM_CC: 50,
             ACTIVE_NODES: 4,
-            BM_CC: 1,
+            BM_SEEDS: 1,
             BM_POS: 50,
             TAKEDOWN_PCT: 10
         }
@@ -184,9 +184,9 @@ def add_common_arguments(parser):
     group = parser.add_argument_group('Simulation Parameters')
     group.add_argument('--num-cc', dest='num_cc', type=int, help='Starting number of CC servers.')
     group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Starting number of active nodes.')
-    group.add_argument('--bm-cc', dest='bm_cc', type=int, help='Number of nodes the botmaster will send commands to.')
+    group.add_argument('--bm-seeds', dest='bm_seeds', type=int, help='Number of seed nodes the botmaster connects to.')
     group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Botmaster connection position (e.g., 50 for middle).')
-    group.add_argument('--max-msg', dest='max_msg', type=int, help='Number of messages to send per test.')
+    group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
     
     takedown = parser.add_argument_group('Takedown Settings')
     takedown.add_argument('--takedown', action='store_true', help='Enable node takedown during test.')
@@ -218,8 +218,9 @@ def main():
     # Subcommand: run (was --test)
     parser_run = subparsers.add_parser('run', help='Run a specific test configuration.')
     parser_run.add_argument('test_id', choices=TEST_CONFIGS.keys(), help='ID of the test to run.')
-    parser_run.add_argument('--max-range', dest='max_range', type=int, help='Override the max range for the test variable.')
-    parser_run.add_argument('--step', dest='step', type=int, help='Override the step size for the test variable.')
+    parser_run.add_argument('--sweep-start', dest='sweep_start', type=int, help='Override the starting value of the sweep variable.')
+    parser_run.add_argument('--sweep-end', dest='sweep_end', type=int, help='Override the ending value of the sweep variable.')
+    parser_run.add_argument('--sweep-step', dest='sweep_step', type=int, help='Override the step size for the sweep variable.')
     add_common_arguments(parser_run)
 
     args = parser.parse_args()
@@ -255,21 +256,21 @@ def main():
                 config['max_messages'] = 2
                 parameters[NUM_CC] = 6
                 parameters[ACTIVE_NODES] = 2
-                parameters[BM_CC] = 1
+                parameters[BM_SEEDS] = 1
                 parameters[BM_POS] = 50
 
                 if config['var_key'] == NUM_CC:
                     config['range'] = (8, 2)
                 elif config['var_key'] == ACTIVE_NODES:
                     config['range'] = (3, 1)
-                elif config['var_key'] == BM_CC:
+                elif config['var_key'] == BM_SEEDS:
                     config['range'] = (2, 1)
                 elif config['var_key'] == BM_POS:
                     config['range'] = (100, 50)
                 elif config['var_key'] == TAKEDOWN_PCT:
                     config['range'] = (30, 10)
             # Implement changes to full testings
-            # like if the user wants to change the number of bm_cc connections
+            # like if the user wants to change the number of bm_seeds connections
             if args.command == 'full':
                 testing = config['var_key']
                 if testing != NUM_CC and args.num_cc is not None:
@@ -278,15 +279,15 @@ def main():
                 if testing != ACTIVE_NODES and args.active_nodes is not None:
                     print(f'active nodes is set to {args.active_nodes}', flush=True)
                     parameters[ACTIVE_NODES] = args.active_nodes
-                if testing != BM_CC and args.bm_cc is not None:
-                    print(f'bm_cc is set to {args.bm_cc}', flush=True)
-                    parameters[BM_CC] = args.bm_cc
+                if testing != BM_SEEDS and args.bm_seeds is not None:
+                    print(f'bm_seeds is set to {args.bm_seeds}', flush=True)
+                    parameters[BM_SEEDS] = args.bm_seeds
                 if testing != BM_POS and args.bm_pos is not None:
                     print(f'bm_pos is set to {args.bm_pos}', flush=True)
                     parameters[BM_POS] = args.bm_pos
-                if args.max_msg is not None:
-                    print(f'max_msg is set to {args.max_msg}', flush=True)
-                    config['max_messages'] = args.max_msg
+                if args.num_msg is not None:
+                    print(f'num_msg is set to {args.num_msg}', flush=True)
+                    config['max_messages'] = args.num_msg
                         
             config['parameters'] = parameters
             config['takedown_percentage'] = args.takedown_pct
@@ -311,30 +312,35 @@ def main():
     elif args.command == 'run':
         config = TEST_CONFIGS[args.test_id].copy()
         parameters = config['parameters']
-        if args.num_cc is not None:
+        testing = config['var_key']
+        # Only override fixed parameters; sweep variable is set via --sweep-start
+        if testing != NUM_CC and args.num_cc is not None:
             print(f'num_cc is set to {args.num_cc}', flush=True)
             parameters[NUM_CC] = args.num_cc
-        if args.active_nodes is not None:
-            print(f'active nodes is set to {args.active_nodes}', flush=True)
+        if testing != ACTIVE_NODES and args.active_nodes is not None:
+            print(f'active_nodes is set to {args.active_nodes}', flush=True)
             parameters[ACTIVE_NODES] = args.active_nodes
-        if args.bm_cc is not None:
-            print(f'bm_cc is set to {args.bm_cc}', flush=True)
-            parameters[BM_CC] = args.bm_cc
-        if args.bm_pos is not None:
+        if testing != BM_SEEDS and args.bm_seeds is not None:
+            print(f'bm_seeds is set to {args.bm_seeds}', flush=True)
+            parameters[BM_SEEDS] = args.bm_seeds
+        if testing != BM_POS and args.bm_pos is not None:
             print(f'bm_pos is set to {args.bm_pos}', flush=True)
             parameters[BM_POS] = args.bm_pos
-        if args.max_msg is not None:
-            print(f'max_msg is set to {args.max_msg}', flush=True)
-            config['max_messages'] = args.max_msg
-        if args.max_range is not None:
-            print(f'max_range is set to {args.max_range}', flush=True)
+        if args.num_msg is not None:
+            print(f'num_msg is set to {args.num_msg}', flush=True)
+            config['max_messages'] = args.num_msg
+        if args.sweep_start is not None:
+            print(f'sweep_start is set to {args.sweep_start}', flush=True)
+            parameters[config['var_key']] = args.sweep_start
+        if args.sweep_end is not None:
+            print(f'sweep_end is set to {args.sweep_end}', flush=True)
             temp_range = list(config['range'])
-            temp_range[0] = args.max_range
+            temp_range[0] = args.sweep_end
             config['range'] = temp_range
-        if args.step is not None:
-            print(f'step is set to {args.step}', flush=True)
+        if args.sweep_step is not None:
+            print(f'sweep_step is set to {args.sweep_step}', flush=True)
             temp_range = list(config['range'])
-            temp_range[1] = args.step
+            temp_range[1] = args.sweep_step
             config['range'] = temp_range
         if args.takedown:
             print(f'Takedown test is True', flush=True)
@@ -361,7 +367,7 @@ def main():
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
-        print(f'Running test with:\n{parameters}', flush=True)
+        print_execution_plan(config)
         if not confirm_test():
             print(f'Exiting tester.', flush=True)
             return
@@ -498,7 +504,7 @@ def run_test(in_config, manager : NodeManager):
                 if config.get('mode', 'dlnbot') == 'dlnbot-formation':
                     manager.are_channels_ready()
 
-                manager.send_botmaster_command(y, parameters[BM_CC], parameters[BM_POS])
+                manager.send_botmaster_command(y, parameters[BM_SEEDS], parameters[BM_POS])
                 cmd_start_time = time.time()
                 send_time, success = wait_for_propagation(y, manager)
                 
@@ -605,6 +611,41 @@ def get_coverage(command, manager : NodeManager):
     received = sum(1 for s in data if int(s.get('counter', 0)) >= int(command))
     coverage = received / total if total > 0 else 0.0
     return coverage, received, total
+
+def print_execution_plan(config):
+    '''Print a human-readable execution plan before confirmation.'''
+    params = config['parameters']
+    var_key = config['var_key']
+    start = params[var_key]
+    end, step = config['range']
+    iterations = list(range(start, end + 1, step))
+    mode = config.get('mode', 'dlnbot')
+
+    print(f'\n{"="*60}', flush=True)
+    print(f'  EXECUTION PLAN: {config["description"]}', flush=True)
+    print(f'{"="*60}', flush=True)
+    print(f'  Sweep variable : {var_key}', flush=True)
+    print(f'  Sweep range    : {start} -> {end} (step {step})', flush=True)
+    print(f'  Iterations     : {len(iterations)} values: {iterations}', flush=True)
+    print(f'  Messages/iter  : {config["max_messages"]}', flush=True)
+    print(f'  Topology mode  : {mode}', flush=True)
+
+    # Show fixed parameters (everything except the sweep variable)
+    fixed = {k: v for k, v in params.items() if k != var_key}
+    if fixed:
+        print(f'  Fixed params   : {fixed}', flush=True)
+
+    if config.get('takedown', False):
+        strategy = config.get('takedown_strategy', 'random')
+        if var_key == TAKEDOWN_PCT:
+            print(f'  Takedown       : {strategy}, sweep {start}%-{end}%', flush=True)
+        else:
+            pct = config.get('takedown_percentage', 0.1)
+            print(f'  Takedown       : {strategy}, {pct*100:.0f}%', flush=True)
+
+    if config.get('topology_file'):
+        print(f'  Topology file  : {config["topology_file"]}', flush=True)
+    print(f'{"="*60}', flush=True)
 
 def confirm_test():
     if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
