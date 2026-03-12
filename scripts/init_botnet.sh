@@ -15,11 +15,15 @@ else
     ACTIVE_NODES="$2"
 fi
 
+# Resolve LNTest root (one level up from scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
+
 # We start fresh
-./cleanup_lightning_nodes.sh
+"$SCRIPT_DIR/cleanup.sh" all
 
 # Base directories for lightning and Bitcoin
-source config.env
+source "$LNTEST_ROOT/config.env"
 
 # Default BITCOIN_HOST if not set
 BITCOIN_HOST=${BITCOIN_HOST:-"127.0.0.1"}

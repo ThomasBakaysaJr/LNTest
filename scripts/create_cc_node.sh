@@ -3,7 +3,11 @@
 
 set -e
 
-source config.env
+# Resolve LNTest root (one level up from scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
+
+source "$LNTEST_ROOT/config.env"
 
 # Default BITCOIN_HOST if not set
 BITCOIN_HOST=${BITCOIN_HOST:-"127.0.0.1"}

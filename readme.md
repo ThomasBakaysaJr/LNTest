@@ -7,16 +7,15 @@ A testbed for designing, deploying, and evaluating Lightning Network-based botne
 - [Table of Contents](#table-of-contents)
 - [Architecture](#architecture)
   - [Generated Data \& Output](#generated-data--output)
-- [Pre-requisites \& Compatibility](#pre-requisites--compatibility)
-- [Set-up](#set-up)
-- [Running the Test Suite](#running-the-test-suite)
+- [Setup](#setup)
+- [Usage](#usage)
   - [Modes of Operation](#modes-of-operation)
   - [Topology Modes](#topology-modes)
   - [Test Scenarios (Test IDs)](#test-scenarios-test-ids)
-  - [Customization \& Flags](#customization--flags)
+  - [CLI Flags](#cli-flags)
   - [Examples](#examples)
 - [Utility Scripts](#utility-scripts)
-- [Common Problems and Fixes](#common-problems-and-fixes)
+- [Troubleshooting](#troubleshooting)
 
 # Architecture
 
@@ -58,51 +57,32 @@ For takedown tests, filenames include a strategy marker: `T` for random takedown
   * A running log of how long each test run took to execute.
   * Timestamped by date (e.g., `YYYY-MM-DD_total_times_log.json`).
 
+* **Orchestrator Log** (`orchestrator.log`)
+  * Detailed log of orchestrator decisions, warnings, and errors with timestamps and log levels.
+
 ### Logs
 Detailed logs for debugging specific node behaviors are stored in:
 * `cc_node/logs/` — individual logs for every C&C node.
 * `botmaster/` — logs for the Botmaster node.
 
 
-# Pre-requisites & Compatibility
+# Setup
 
-This testbed has been verified on the following Linux distributions:
+This testbed has been verified on Ubuntu 24.04 LTS and Ubuntu 25.04. The instructions below assume a fresh Ubuntu install.
 
-* Ubuntu 24.04 LTS
-* Ubuntu 25.04
+## 1. Install system dependencies
 
-This guide assumes a fresh install of Ubuntu.
-
-### Update Ubuntu
-
-Ensure your system is up to date.
+Update your system and install required packages:
 
 ```bash
-sudo apt update  
-sudo apt upgrade
+sudo apt update && sudo apt upgrade
+sudo apt install python3-venv git -y
 ```
 
-### Python
-
-This project uses bash and Python scripts with a dedicated virtual environment.
-
-Install venv:
-
-```bash
-sudo apt install python3-venv -y
-```
-
-### Docker
-
-All Lightning nodes run as individual Docker containers. Follow the official Docker installation guide for Ubuntu:
-
-- [https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository) 
-
-Install the apt resources:
+Install Docker following the official guide for Ubuntu: [https://docs.docker.com/engine/install/ubuntu/](https://docs.docker.com/engine/install/ubuntu/)
 
 ```bash
 # Add Docker's official GPG key:
-sudo apt update
 sudo apt install ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
@@ -118,12 +98,7 @@ Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 
 sudo apt update
-```
-
-Install Docker:
-
-```bash
-sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
 Verify Docker is running:
@@ -132,33 +107,14 @@ Verify Docker is running:
 sudo systemctl status docker
 ```
 
-### Git
+## 2. Install Bitcoin Core
 
-Install git:
-
-```bash
-sudo apt install git
-```
-
-# Set-up
-
-Note: The setup script should handle different directory names, but this has only been tested inside the user's home directory.
-
-## 1. Create directory for LNTest and the Bitcoin-Core files
+Create a working directory, download Bitcoin Core from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/), and extract it:
 
 ```bash
-cd ~/Documents
-mkdir LNBot_research_project  
-cd LNBot_research_project
-```
-
-## 2. Install Bitcoin-core
-
-Download the Bitcoin Core tar file from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/) and move it into the `LNBot_research_project` directory.
-
-Extract, rename, and clean up:
-
-```bash
+mkdir -p ~/Documents/LNBot_research_project
+cd ~/Documents/LNBot_research_project
+# Move the downloaded tar file here, then:
 tar -xvzf bitcoin-*
 mv bitcoin-*/ bitcoin
 rm bitcoin-*.tar.gz
@@ -166,57 +122,42 @@ rm bitcoin-*.tar.gz
 
 Do not run Bitcoin Core yet.
 
-## 3. Setting up LNTest
-
-### 3.1 Clone the repo
+## 3. Clone and configure LNTest
 
 ```bash
-cd ~/Documents/LNBot_research_project  
+cd ~/Documents/LNBot_research_project
 git clone https://github.com/LN-Testbed/DSN2026.git LNTest
-```
-
-### 3.2 Add execute permissions to bash files
-
-```bash
 cd LNTest
-chmod +x *.sh
-```
-
-### 3.3 Run setup.sh
-
-```bash
+chmod +x setup.sh scripts/*.sh
 ./setup.sh
 ```
 
 The setup script will:
-* Check dependencies
-* Create the Python virtual environment
-* Install required Python packages
+* Check dependencies (Docker, Python, jq)
+* Create the Python virtual environment and install packages
 * Create config files in `~/.lightning` and `~/.bitcoin`
-* Ask for RPC username and password
+* Prompt for RPC username and password
 
 You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
 
-Note: The script uses paths in `config.env` to locate files. Since `lntest.py` runs with `sudo` (required for Docker and shared memory management), it needs absolute paths rather than relative ones.
+Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
 
-## 4. Running lntest
-
-Because this script manages Docker containers and shared memory, it must be run with `sudo`. To use the correct Python interpreter with all dependencies, provide the absolute path to the virtual environment's interpreter:
+## 4. Verify the installation
 
 ```bash
 sudo venv/bin/python3 lntest.py small
 ```
 
-This runs a quick sanity check to verify everything is set up correctly. Data is saved to the `data/` directory.
+This runs a quick sanity check across all test scenarios with minimal parameters. Data is saved to the `data/` directory.
 
-**Tip:** To save terminal output to a file while still seeing it live, use `tee`:
+**Tip:** To save terminal output to a file while still seeing it live:
 
 ```bash
-sudo venv/bin/python3 lntest.py run 1 --max-msg 3 2>&1 | tee /tmp/test_output.log
+sudo venv/bin/python3 lntest.py run 1 --num-msg 3 2>&1 | tee /tmp/test_output.log
 ```
 
 
-# Running the Test Suite
+# Usage
 
 ```bash
 sudo venv/bin/python3 lntest.py <command> [options]
@@ -224,7 +165,7 @@ sudo venv/bin/python3 lntest.py <command> [options]
 
 ## Modes of Operation
 
-### 1. Small Check (`small`)
+### Small Check (`small`)
 
 Runs a minimal version of every test to verify the environment is configured correctly.
 
@@ -232,7 +173,7 @@ Runs a minimal version of every test to verify the environment is configured cor
 sudo venv/bin/python3 lntest.py small
 ```
 
-### 2. Full Suite (`full`)
+### Full Suite (`full`)
 
 Runs the complete battery of experiments (Test IDs 1 through 6).
 
@@ -240,7 +181,7 @@ Runs the complete battery of experiments (Test IDs 1 through 6).
 sudo venv/bin/python3 lntest.py full
 ```
 
-### 3. Specific Test Run (`run`)
+### Specific Test (`run`)
 
 Runs a specific test scenario with full control over variable ranges and steps.
 
@@ -257,17 +198,17 @@ LNTest supports three modes that control how the C&C overlay network is formed. 
 ### D-LNBot Topology (default)
 
 ```bash
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3
 # or explicitly:
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --topology dlnbot
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3 --topology dlnbot
 ```
 
-Reproduces the exact topology described in the D-LNBot paper. cc_manager is disabled at startup via the `SKIP_CC_MANAGER` environment variable. After all nodes are created, the orchestrator builds the chain explicitly using CLN's `multifundchannel` command: CC_i opens channels to CC_{max(1, i-m)} through CC_{i-1}. This produces a **uniform chain topology** where middle nodes have exactly 2×N_active channels, and edge nodes ramp up/down. Each channel is funded with `push_msat` to enable bidirectional message forwarding.
+Reproduces the exact topology described in the D-LNBot paper. cc_manager is disabled at startup via the `SKIP_CC_MANAGER` environment variable. After all nodes are created, the orchestrator builds the chain explicitly using CLN's `multifundchannel` command: CC_i opens channels to CC_{max(1, i-m)} through CC_{i-1}. This produces a **uniform chain topology** where middle nodes have exactly 2*N_active channels, and edge nodes ramp up/down. Each channel is funded with `push_msat` to enable bidirectional message forwarding.
 
 ### D-LNBot Formation
 
 ```bash
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --dlnbot-formation
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3 --dlnbot-formation
 ```
 
 Simulates a realistic D-LNBot deployment where C&C servers join the network autonomously. Containers are launched with staggered delays drawn from a log-normal distribution (median ~30s on regtest), modeling the variable LN setup time in D-LNBot's malware pipeline: downloading an LN light client, syncing with the blockchain, fetching funding from a pre-funded wallet, and opening+confirming channels. Each node runs cc_manager, which discovers peers via the innocent node and opens channels autonomously. The staggering ensures gossip has time to propagate between node arrivals. This mode produces a **clustered chain topology** — groups of fully-connected cliques linked by bridge nodes — which differs from both the idealized D-LNBot chain and a hub-and-spoke topology. The `--dlnbot-formation` flag is mutually exclusive with `--topology`.
@@ -275,7 +216,7 @@ Simulates a realistic D-LNBot deployment where C&C servers join the network auto
 ### Custom
 
 ```bash
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --topology custom --topology-file topologies/ring_20.json
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3 --topology custom --topology-file topologies/ring_20.json
 ```
 
 Lets researchers supply any arbitrary topology as a JSON file. cc_manager is disabled, and the orchestrator builds the exact graph specified. This enables testing with real-world LN snapshots, random graphs, scale-free networks, or any theoretical model on real CLN nodes.
@@ -321,7 +262,7 @@ The three modes produce meaningfully different topologies and resilience profile
 | --- | --- | --- | --- |
 | **1** | Scale C&C nodes | `num_cc` | 10 to 100, step 10 |
 | **2** | Scale active nodes (N_active) | `active_nodes` | 2 to 6, step 1 |
-| **3** | Botmaster connectivity | `bm_cc` | 1 to 6, step 1 |
+| **3** | Botmaster connectivity | `bm_seeds` | 1 to 6, step 1 |
 | **4** | Botmaster injection point | `bm_pos` | -50 to 150, step 50 |
 | **5** | Random takedown sweep | `takedown_pct` | 10% to 50%, step 10% |
 | **6** | Targeted takedown sweep | `takedown_pct` | 10% to 50%, step 10% |
@@ -345,7 +286,7 @@ The three modes produce meaningfully different topologies and resilience profile
 
 **Test 6 (Targeted takedown):** Same as Test 5, but removes the highest-degree (most-connected) nodes first. This simulates a law enforcement strategy that targets the most critical C&C servers.
 
-All tests can be run with any mode via `--topology dlnbot` (default), `--dlnbot-formation`, or `--topology custom --topology-file <path>`. Running the same test on different modes produces directly comparable results that show how overlay structure affects botnet resilience.
+All tests can be run with any topology mode via `--topology dlnbot` (default), `--dlnbot-formation`, or `--topology custom --topology-file <path>`. Running the same test on different modes produces directly comparable results that show how overlay structure affects botnet resilience.
 
 ### Coverage and Partition Detection
 
@@ -355,7 +296,7 @@ Tests 5 and 6 include coverage tracking and partition detection:
 
 ---
 
-## Customization & Flags
+## CLI Flags
 
 Override default parameters for any mode (`small`, `full`, or `run`):
 
@@ -363,7 +304,7 @@ Override default parameters for any mode (`small`, `full`, or `run`):
 
 * `--num-cc <INT>` — Number of C&C nodes.
 * `--active-nodes <INT>` — Active neighbor limit (N_active). Each node maintains up to this many outbound channels.
-* `--bm-cc <INT>` — Number of C&C nodes the botmaster connects to.
+* `--bm-seeds <INT>` — Number of C&C nodes the botmaster connects to.
 * `--bm-pos <INT>` — Botmaster injection position (see Test 4 for values).
 * `--topology <dlnbot|custom>` — Overlay topology mode. `dlnbot` (default) builds the D-LNBot sequential chain via the orchestrator. `custom` reads an arbitrary graph from a JSON file.
 * `--topology-file <PATH>` — Path to custom topology JSON file (required when `--topology custom`).
@@ -371,7 +312,7 @@ Override default parameters for any mode (`small`, `full`, or `run`):
 
 ### Simulation Control
 
-* `--max-msg <INT>` — Number of messages to propagate per test iteration.
+* `--num-msg <INT>` — Number of messages to propagate per test iteration.
 
 ### Takedown Simulation
 
@@ -379,10 +320,11 @@ Override default parameters for any mode (`small`, `full`, or `run`):
 * `--takedown-pct <FLOAT>` — Fraction of nodes to remove (e.g., `0.2` for 20%). Default: `0.1`.
 * `--takedown-strategy <random|targeted>` — `random` selects nodes uniformly at random. `targeted` removes the highest-degree nodes first. Default: `random`.
 
-### Range Control (only for `run` mode)
+### Sweep Control (`run` mode only)
 
-* `--max-range <INT>` — Override the upper limit of the test variable.
-* `--step <INT>` — Override the step size.
+* `--sweep-start <INT>` — Override the starting value of the sweep variable.
+* `--sweep-end <INT>` — Override the upper limit of the sweep variable.
+* `--sweep-step <INT>` — Override the step size.
 
 ---
 
@@ -391,37 +333,37 @@ Override default parameters for any mode (`small`, `full`, or `run`):
 **Run the scaling test up to 200 nodes in steps of 20:**
 
 ```bash
-sudo venv/bin/python3 lntest.py run 1 --max-range 200 --step 20
+sudo venv/bin/python3 lntest.py run 1 --sweep-end 200 --sweep-step 20
 ```
 
-**Run random takedown sweep with 3 messages per iteration (uses D-LNBot topology by default):**
+**Run random takedown sweep with 3 messages per iteration (D-LNBot topology by default):**
 
 ```bash
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3
 ```
 
 **Run targeted takedown sweep with 3 messages per iteration:**
 
 ```bash
-sudo venv/bin/python3 lntest.py run 6 --max-msg 3
+sudo venv/bin/python3 lntest.py run 6 --num-msg 3
 ```
 
 **Run random takedown with autonomous D-LNBot formation:**
 
 ```bash
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --dlnbot-formation
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3 --dlnbot-formation
 ```
 
 **Run takedown sweep on a custom ring topology:**
 
 ```bash
-sudo venv/bin/python3 lntest.py run 5 --max-msg 3 --num-cc 20 --topology custom --topology-file topologies/ring_20.json
+sudo venv/bin/python3 lntest.py run 5 --num-msg 3 --num-cc 20 --topology custom --topology-file topologies/ring_20.json
 ```
 
 **Run botmaster injection point test with 3 messages:**
 
 ```bash
-sudo venv/bin/python3 lntest.py run 4 --max-msg 3
+sudo venv/bin/python3 lntest.py run 4 --num-msg 3
 ```
 
 **Run the full suite with a custom active node count:**
@@ -442,29 +384,36 @@ sudo venv/bin/python3 lntest.py full --dlnbot-formation
 sudo venv/bin/python3 lntest.py run 1 --takedown --takedown-pct 0.3 --takedown-strategy targeted
 ```
 
+**Start the scaling test from 50 nodes instead of the default:**
+
+```bash
+sudo venv/bin/python3 lntest.py run 1 --sweep-start 50
+```
+
 
 # Utility Scripts
 
-### kill_nodes.sh
+All operational scripts are in the `scripts/` directory.
+
+### cleanup.sh
+
+Unified cleanup script with three modes:
 
 ```bash
-sudo ./kill_nodes.sh
+# Stop containers, clear shared memory and node data (between iterations)
+sudo ./scripts/cleanup.sh nodes
+
+# Full cleanup including logs, status files, and address lists
+sudo ./scripts/cleanup.sh all
+
+# Stop bitcoind and delete regtest data
+sudo ./scripts/cleanup.sh bitcoin
 ```
-
-Stops and removes all Docker containers created during the test. Clears shared memory. Removes persistent Docker directories. Does not remove logs in `cc_node/logs/`.
-
-### cleanup_lightning_nodes.sh
-
-```bash
-sudo ./cleanup_lightning_nodes.sh  
-```
-
-Same as `kill_nodes.sh` but also clears logs. This is the script that `lntest.py` calls between test iterations.
 
 ### restart_bitcoin.sh
 
 ```bash
-sudo ./restart_bitcoin.sh  
+sudo ./scripts/restart_bitcoin.sh
 ```
 
 Stops Bitcoin Core, deletes regtest data for a fresh start, creates a new wallet, and starts a background block miner.
@@ -472,7 +421,7 @@ Stops Bitcoin Core, deletes regtest data for a fresh start, creates a new wallet
 Note: Does not kill any existing background miner process — that is handled by `lntest.py`.
 
 
-# Common Problems and Fixes
+# Troubleshooting
 
 ### Bitcoin error
 

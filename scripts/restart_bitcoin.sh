@@ -1,15 +1,13 @@
 #!/bin/bash
 # restart_bitcoin.sh
 
-# make sure this directory is actually where the bitcoin core lives
-source config.env
+# Resolve LNTest root (one level up from scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
 
-if [ -f "./kill_bitcoin.sh" ]; then
-    ./kill_bitcoin.sh
-else
-    echo "Error: kill_bitcoin.sh not found."
-    exit 1
-fi
+source "$LNTEST_ROOT/config.env"
+
+"$SCRIPT_DIR/cleanup.sh" bitcoin
 
 sleep 0.5
 sudo -u $USER_NAME "$BITCOIND" -datadir="$BITCOIN_DIR"

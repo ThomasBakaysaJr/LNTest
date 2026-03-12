@@ -21,9 +21,8 @@ import copy
 import resource
 from utils.config import cfg
 from utils.log import setup_logging, add_file_handler
-from utils import docker_utils
+from utils.docker_helpers import ensure_custom_image
 from utils.node_manager import NodeManager
-from utils import record_total_time
 from utils import sys_monitor
 
 log = logging.getLogger(__name__)
@@ -217,7 +216,7 @@ def main():
 
     args = parser.parse_args()
 
-    docker_utils.ensure_custom_image(cfg.LNTEST_VERSION, cfg.LIGHTNINGD_VERSION)
+    ensure_custom_image(cfg.LNTEST_VERSION, cfg.LIGHTNINGD_VERSION)
     manager = NodeManager()
     # start recording time for total testing
     start_time = time.time()
@@ -371,7 +370,7 @@ def main():
 
     # record total time
     total_time = time.time() - start_time
-    record_total_time.record_total_time(total_time, all_configs)
+    record_total_time(total_time, all_configs)
 
     # we only kill the nodes here since we want to keep
     # the logs for the last run.
@@ -663,6 +662,27 @@ def fund_nodes():
     except Exception as e:
         log.error(f"tester: Exception occurred: {e}")
         return None
+
+
+def record_total_time(total_time, config, output_suffix="total_times_log.json"):
+    '''
+    Create a running record of the total time taken for test runs
+    along with their configuration(s) to a JSON file.
+    '''
+    import os
+    os.makedirs(cfg.TEST_DATA_DIR, exist_ok=True)
+    filename = datetime.datetime.now().strftime(f"data/%Y-%m-%d_{output_suffix}")
+
+    log_entry = {
+        'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_time": total_time,
+        "config": config
+    }
+
+    with open(filename, 'a') as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+    log.info(f'Recorded total time: {total_time} seconds to {filename}')
 
 
 def record_test(config, test_data, setup_time, total_send_time):

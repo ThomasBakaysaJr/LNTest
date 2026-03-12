@@ -64,7 +64,7 @@ class ShmStatus:
         Setup the shm block for this node using incoming suffix counter.
         Make sure node_name and block_size matches the name and block_size in ln_checker.
         Unregisters from Python's resource_tracker to prevent automatic cleanup.
-        Explicit cleanup is handled by remove_shm() and cleanup_lightning_nodes.sh.
+        Explicit cleanup is handled by remove_shm() and scripts/cleanup.sh.
         '''
         node_name = f'{suffix}_status'
         if first_block:

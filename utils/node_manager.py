@@ -1,15 +1,13 @@
-import json
 import logging
 import time
 import random
 import subprocess
 import docker
-from multiprocessing import shared_memory, resource_tracker
 
 from utils.config import cfg
 
 log = logging.getLogger(__name__)
-from utils.docker_ops import get_all_nodes, get_cc_nodes, sort_containers
+from utils.docker_helpers import get_all_nodes, get_cc_nodes, sort_containers
 from utils.shm_status import ShmStatus
 from utils import topology
 
@@ -19,12 +17,9 @@ ACTIVE_NODES = 'active_nodes'
 class Node:
     '''
     Represents a single LN node container.
-    Handles shared memory access for status retrieval.
     '''
-    def __init__(self, container_name, block_size = 5012):
+    def __init__(self, container_name):
         self.name = container_name
-        self.block_size = block_size
-        self.shm_name = f'{self.name}_status'
         self.client = docker.from_env()
         self._container = None
 
@@ -51,32 +46,6 @@ class Node:
             self.container.reload()
             return self.container.status == 'running'
         return False
-
-    def get_node_status(self):
-        '''
-        Get the status of an individual node.
-        If shm doesn't exist or if there is no data stored, returns None
-        '''
-        try:
-            shm = shared_memory.SharedMemory(self.shm_name)
-            try:
-                resource_tracker.unregister(shm._name, 'shared_memory')
-            except Exception:
-                pass
-            data = shm.buf.tobytes().split(b'\x00', 1)[0]
-            shm.close()
-
-            if not data:
-                return None
-
-            return json.loads(data.decode('utf-8'))
-
-        except FileNotFoundError:
-            # shm block doesn't exist or node is dead
-            return None
-        except Exception as e:
-            log.error(f'get_node_status: Error accessing shared memory for {self.name}: {e}')
-            return None
 
     def stop(self):
         '''
@@ -351,15 +320,15 @@ class NodeManager:
     # ── Container operations delegation ──
 
     def get_all_nodes(self):
-        '''Delegate to docker_ops.'''
+        '''Delegate to docker_helpers.'''
         return get_all_nodes(self.nodes)
 
     def get_cc_nodes(self):
-        '''Delegate to docker_ops.'''
+        '''Delegate to docker_helpers.'''
         return get_cc_nodes(self.nodes, self.CC_PREFIX)
 
     def sort_containers(self, in_containers):
-        '''Delegate to docker_ops.'''
+        '''Delegate to docker_helpers.'''
         return sort_containers(in_containers)
 
     def kill_node(self, node: Node):

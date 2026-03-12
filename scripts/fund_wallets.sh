@@ -3,8 +3,12 @@
 
 set -e
 
+# Resolve LNTest root (one level up from scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
+
 # RPC details for Bitcoin Core
-source config.env
+source "$LNTEST_ROOT/config.env"
 
 # Discover all CC and BM containers dynamically
 CC_CONTAINERS=$(docker ps --filter "name=CC" --format "{{.Names}}")

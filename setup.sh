@@ -13,7 +13,7 @@ if pgrep -x "bitcoind" > /dev/null; then
     echo "Please stop Bitcoin Core before running setup to avoid credential mismatches."
     echo "Warning: The suggested command below will FORCE KILL all 'bitcoind' processes."
     echo "Ensure no other important Bitcoin nodes are running!"
-    echo "You can stop it using: ./kill_bitcoin.sh"
+    echo "You can stop it using: ./scripts/cleanup.sh bitcoin"
     exit 1
 fi
 
@@ -106,10 +106,10 @@ install_config "$TEMPLATE_DIR/bitcoin.conf.template" "$HOME_DIR/.bitcoin" "bitco
 install_config "$TEMPLATE_DIR/lightning.conf.template" "$HOME_DIR/.lightning" "lightning.conf"
 
 # 6. Check System Dependencies
-if [ -f "./check_dependencies.sh" ]; then
-    ./check_dependencies.sh
+if [ -f "./scripts/check_dependencies.sh" ]; then
+    ./scripts/check_dependencies.sh
 else
-    echo "Warning: check_dependencies.sh not found. Skipping dependency check."
+    echo "Warning: scripts/check_dependencies.sh not found. Skipping dependency check."
 fi
 
 # 7. Setup Python Environment
