@@ -8,9 +8,12 @@ os.getenv() directly.
 Container scripts (botmaster.py, cc_manager.py, message_relay.py, ln_checker.py)
 are NOT affected — they receive env vars from Docker.
 '''
+import logging
 import os
 import sys
 from dotenv import load_dotenv
+
+log = logging.getLogger(__name__)
 
 
 class _Config:
@@ -97,8 +100,8 @@ class _Config:
         ]
         missing = [name for name in required if getattr(self, name, None) is None]
         if missing:
-            print(f'ERROR: Missing required config values: {", ".join(missing)}', flush=True)
-            print(f'Run setup.sh or check config.env.', flush=True)
+            log.error(f'Missing required config values: {", ".join(missing)}')
+            log.error('Run setup.sh or check config.env.')
             sys.exit(1)
 
 

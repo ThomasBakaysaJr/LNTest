@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 import time
 from multiprocessing import shared_memory, resource_tracker
 
 from utils.config import cfg
+
+log = logging.getLogger(__name__)
 
 
 class ShmStatus:
@@ -36,9 +39,9 @@ class ShmStatus:
             os.makedirs(self.node_config_dir, exist_ok=True)
             with open(self.node_config_path, 'w') as f:
                 json.dump(config_data, f, indent=4)
-            print(f'Generated {self.node_config_path} with block size : {block_size}')
+            log.info(f'Generated {self.node_config_path} with block size : {block_size}')
         except Exception as e:
-            print(f'Error generating node status config. {e}')
+            log.error(f'Error generating node status config. {e}')
 
     def calculate_blocksize(self, active_nodes, total_nodes):
         '''
@@ -65,7 +68,7 @@ class ShmStatus:
         '''
         node_name = f'{suffix}_status'
         if first_block:
-            print(f'Creating shared memory buffer for {node_name}')
+            log.info(f'Creating shared memory buffer for {node_name}')
 
         try:
             shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
@@ -76,7 +79,7 @@ class ShmStatus:
             self.shm_blocks[node_name] = shm  # Keep reference alive
         except FileExistsError:
             # Found a block by this name still, probably from bad cleanup. Clear and prepare it again
-            print(f'setup_shm: warning: Shared memory block found for {node_name}.')
+            log.warning(f'setup_shm: Shared memory block found for {node_name}.')
             if first_block:
                 # if first_block is true, we want this to the first block of memory
                 # so get rid of anything that may be here and re-create it.
@@ -103,7 +106,7 @@ class ShmStatus:
             # we don't care if the file doesn't exists, something else probably took care of it
             pass
         except Exception as e:
-            print(f'remove_shm: ERROR in cleaning up memory. Error: {e}')
+            log.error(f'remove_shm: Error cleaning up memory: {e}')
 
     def get_node_status(self, suffix):
         '''
@@ -123,7 +126,7 @@ class ShmStatus:
             try:
                 status = json.loads(data.decode('utf-8'))
             except Exception as e:
-                print(f'retrieve_all_status: Error: json data is \n{data} with error: {e}')
+                log.error(f'retrieve_all_status: Error: json data is \n{data} with error: {e}')
                 return None
             return status
         else:
@@ -145,7 +148,7 @@ class ShmStatus:
 
                 all_status.append(status)
             except Exception as e:
-                print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}\nRecreating shm.')
+                log.warning(f'retrieve_all_status: {node_name} failed to retrieve shm because {e}. Recreating shm.')
                 self.setup_shm(node_name, True)
                 continue
         return all_status

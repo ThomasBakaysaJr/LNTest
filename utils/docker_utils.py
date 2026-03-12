@@ -1,4 +1,7 @@
+import logging
 import docker
+
+log = logging.getLogger(__name__)
 
 def ensure_custom_image(image_name, cln_version):
     """
@@ -8,22 +11,22 @@ def ensure_custom_image(image_name, cln_version):
     
     try:
 
-        print(f"Checking for image {image_name}...")
+        log.info(f"Checking for image {image_name}...")
         client.images.get(image_name)
-        print(f"Image {image_name} found.")
+        log.info(f"Image {image_name} found.")
     except docker.errors.ImageNotFound:
-        print(f"Image {image_name} not found. Building... (This may take a minute)")
+        log.info(f"Image {image_name} not found. Building... (This may take a minute)")
         try:
             # Assumes Dockerfile is in the same directory as lntest.py
             # 'path' is the directory containing the Dockerfile
             image, build_logs = client.images.build(
-                path=".", 
+                path=".",
                 tag=image_name,
                 buildargs={"CLN_VERSION" : cln_version})
             for chunk in build_logs:
                 if 'stream' in chunk:
-                    print(chunk['stream'].strip())
-            print(f"Successfully built {image_name}.")
+                    log.info(chunk['stream'].strip())
+            log.info(f"Successfully built {image_name}.")
         except docker.errors.BuildError as e:
-            print(f"Error building image: {e}")
+            log.error(f"Error building image: {e}")
             exit(1)

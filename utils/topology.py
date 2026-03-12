@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 import time
 import subprocess
 
 from utils.config import cfg
+
+log = logging.getLogger(__name__)
 
 
 def build_chain_edges(n, m):
@@ -33,24 +36,24 @@ def load_and_validate_topology(file_path, n):
     Returns a set of (from, to) tuples.
     '''
     if not os.path.exists(file_path):
-        print(f'  ERROR: Topology file not found: {file_path}', flush=True)
+        log.error(f'Topology file not found: {file_path}')
         return None
 
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
     except Exception as e:
-        print(f'  ERROR: Could not parse topology file: {e}', flush=True)
+        log.error(f'Could not parse topology file: {e}')
         return None
 
     # Validate structure
     if 'edges' not in data:
-        print(f'  ERROR: Topology file missing "edges" field.', flush=True)
+        log.error('Topology file missing "edges" field.')
         return None
 
     file_nodes = data.get('nodes', n)
     if file_nodes != n:
-        print(f'  WARNING: Topology file specifies {file_nodes} nodes but LNTest is running {n} nodes. Using {n}.', flush=True)
+        log.warning(f'Topology file specifies {file_nodes} nodes but LNTest is running {n} nodes. Using {n}.')
 
     raw_edges = data['edges']
     edges = set()
@@ -60,7 +63,7 @@ def load_and_validate_topology(file_path, n):
 
     for edge in raw_edges:
         if len(edge) != 2:
-            print(f'  WARNING: Skipping malformed edge: {edge}', flush=True)
+            log.warning(f'Skipping malformed edge: {edge}')
             continue
         src, dst = int(edge[0]), int(edge[1])
 
@@ -81,16 +84,16 @@ def load_and_validate_topology(file_path, n):
 
         edges.add((src, dst))
 
-    # Print warnings
+    # Log warnings
     if skipped_self > 0:
-        print(f'  WARNING: Filtered {skipped_self} self-loop(s).', flush=True)
+        log.warning(f'Filtered {skipped_self} self-loop(s).')
     if skipped_dup > 0:
-        print(f'  WARNING: Filtered {skipped_dup} duplicate edge(s).', flush=True)
+        log.warning(f'Filtered {skipped_dup} duplicate edge(s).')
     if skipped_range > 0:
-        print(f'  WARNING: Filtered {skipped_range} out-of-range edge(s) (valid range: 1-{n}).', flush=True)
+        log.warning(f'Filtered {skipped_range} out-of-range edge(s) (valid range: 1-{n}).')
 
     if len(edges) == 0:
-        print(f'  ERROR: No valid edges in topology file.', flush=True)
+        log.error('No valid edges in topology file.')
         return None
 
     # Connectivity check (BFS from node 1)
@@ -112,16 +115,16 @@ def load_and_validate_topology(file_path, n):
 
     isolated = [i for i in range(1, n + 1) if i not in visited]
     if isolated:
-        print(f'  WARNING: Graph is disconnected. {len(isolated)} node(s) unreachable from CC1: '
-              f'{isolated[:10]}{"..." if len(isolated) > 10 else ""}', flush=True)
-        print(f'  These nodes will not receive commands. Proceeding anyway.', flush=True)
+        log.warning(f'Graph is disconnected. {len(isolated)} node(s) unreachable from CC1: '
+                    f'{isolated[:10]}{"..." if len(isolated) > 10 else ""}')
+        log.warning('These nodes will not receive commands. Proceeding anyway.')
 
     # Summary
     max_degree = max(len(adj[i]) for i in range(1, n + 1))
     min_degree = min(len(adj[i]) for i in range(1, n + 1))
     avg_degree = sum(len(adj[i]) for i in range(1, n + 1)) / n
-    print(f'  Loaded {len(edges)} edges for {n} nodes '
-          f'(avg_degree={avg_degree:.1f}, min={min_degree}, max={max_degree}).', flush=True)
+    log.info(f'  Loaded {len(edges)} edges for {n} nodes '
+             f'(avg_degree={avg_degree:.1f}, min={min_degree}, max={max_degree}).')
 
     return edges
 
@@ -138,7 +141,7 @@ def build_topology(edges, cc_nodes):
     no autonomous channels exist. This method only opens channels.
     '''
     if not cc_nodes:
-        print('build_topology: No CC nodes found.', flush=True)
+        log.error('build_topology: No CC nodes found.')
         return False
 
     def cc_num(container):
@@ -175,10 +178,10 @@ def build_topology(edges, cc_nodes):
                         capture_output=True
                     )
             except Exception as e:
-                print(f'    Warning: could not mine blocks: {e}', flush=True)
+                log.warning(f'Could not mine blocks: {e}')
 
     # ── Phase 1: Gather node info ──
-    print(f'  Phase 1: Gathering node info for {n} nodes...', flush=True)
+    log.info(f'  Phase 1: Gathering node info for {n} nodes...')
     node_info = {}
 
     for container in cc_nodes_sorted:
@@ -199,13 +202,13 @@ def build_topology(edges, cc_nodes):
                     'name': container.name
                 }
             else:
-                print(f'  ERROR: Could not get info for CC{num}', flush=True)
+                log.error(f'Could not get info for CC{num}')
                 return False
         except Exception as e:
-            print(f'  ERROR: Exception getting info for CC{num}: {e}', flush=True)
+            log.error(f'Exception getting info for CC{num}: {e}')
             return False
 
-    print(f'  Target: {len(edges)} edges for {n} nodes', flush=True)
+    log.info(f'  Target: {len(edges)} edges for {n} nodes')
 
     # ── Phase 2: Open channels using multifundchannel ──
     # Group edges by source node so each node opens all its outbound channels in one tx
@@ -214,7 +217,7 @@ def build_topology(edges, cc_nodes):
     for src, dst in edges:
         outbound[src].append(dst)
 
-    print(f'  Phase 2: Opening channels via multifundchannel...', flush=True)
+    log.info('  Phase 2: Opening channels via multifundchannel...')
     total_opened = 0
     total_failed = 0
 
@@ -248,27 +251,27 @@ def build_topology(edges, cc_nodes):
         target_names = ','.join([f'CC{j}' for j in targets])
         if exit_code == 0:
             total_opened += len(targets)
-            print(f'    CC{src_num} -> [{target_names}]: {len(targets)} channels opened', flush=True)
+            log.info(f'    CC{src_num} -> [{target_names}]: {len(targets)} channels opened')
         else:
             err = get_cli_error(output)
-            print(f'    CC{src_num} -> [{target_names}]: FAILED - {err}', flush=True)
+            log.error(f'    CC{src_num} -> [{target_names}]: FAILED - {err}')
             total_failed += len(targets)
 
         # Mine after each source node to confirm the funding tx
         mine_blocks(6)
         time.sleep(1)
 
-    print(f'  Opened {total_opened} channels ({total_failed} failed).', flush=True)
+    log.info(f'  Opened {total_opened} channels ({total_failed} failed).')
 
     # Final mining to ensure all channels reach CHANNELD_NORMAL
-    print(f'    Mining 20 blocks to finalize...', flush=True)
+    log.info('    Mining 20 blocks to finalize...')
     mine_blocks(20)
     wait_time = max(15, n // 3)
-    print(f'    Waiting {wait_time}s for channels to activate...', flush=True)
+    log.info(f'    Waiting {wait_time}s for channels to activate...')
     time.sleep(wait_time)
 
     # ── Phase 3: Verify final topology ──
-    print(f'  Phase 3: Verifying topology...', flush=True)
+    log.info('  Phase 3: Verifying topology...')
     degree_counts = {}
     for num, info in node_info.items():
         try:
@@ -291,8 +294,8 @@ def build_topology(edges, cc_nodes):
             expected_degrees[dst] += 1
         expected_avg = sum(expected_degrees.values()) / n
 
-        print(f'  Final topology: avg_degree={avg:.1f} (expected={expected_avg:.1f}), '
-              f'min={min(degree_counts.values())}, max={max(degree_counts.values())}', flush=True)
+        log.info(f'  Final topology: avg_degree={avg:.1f} (expected={expected_avg:.1f}), '
+                 f'min={min(degree_counts.values())}, max={max(degree_counts.values())}')
 
         mismatches = 0
         for i in sorted(degree_counts.keys()):
@@ -300,7 +303,7 @@ def build_topology(edges, cc_nodes):
             actual = degree_counts[i]
             if actual != expected:
                 mismatches += 1
-                print(f'    CC{i}: {actual} channels MISMATCH (expected {expected})', flush=True)
+                log.warning(f'    CC{i}: {actual} channels MISMATCH (expected {expected})')
 
         # Show edge nodes for reference
         edge_nodes = [i for i in sorted(degree_counts.keys())
@@ -309,12 +312,12 @@ def build_topology(edges, cc_nodes):
             # Show first/last few nodes
             show = edge_nodes[:3] + edge_nodes[-3:] if len(edge_nodes) > 6 else edge_nodes
             for i in show:
-                print(f'    CC{i}: {degree_counts[i]} channels OK', flush=True)
+                log.info(f'    CC{i}: {degree_counts[i]} channels OK')
 
         if mismatches == 0:
-            print(f'  All nodes match expected topology!', flush=True)
+            log.info('  All nodes match expected topology!')
         else:
-            print(f'  {mismatches} nodes have mismatched channel counts.', flush=True)
+            log.warning(f'  {mismatches} nodes have mismatched channel counts.')
 
-    print(f'  Topology build complete.', flush=True)
+    log.info('  Topology build complete.')
     return True

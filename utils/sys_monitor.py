@@ -1,8 +1,11 @@
 import time
 import csv
+import logging
 import sys
 import subprocess
 import json
+
+log = logging.getLogger(__name__)
 
 
 def get_docker_stats():
@@ -97,12 +100,12 @@ class HardwareMonitor:
         self._process = subprocess.Popen(
             [sys.executable, __file__, "--run-worker", self.output_file]
         )
-        print(f" [Monitor] Started background process (PID: {self._process.pid})")
+        log.info(f"[Monitor] Started background process (PID: {self._process.pid})")
 
     def stop(self):
         """Kills the background process."""
         if self._process:
-            print(f" [Monitor] [PID: {self._process.pid}] Stopping...")
+            log.info(f"[Monitor] [PID: {self._process.pid}] Stopping...")
             self._process.terminate()
             self._process.wait()
             self._process = None

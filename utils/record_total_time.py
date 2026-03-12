@@ -1,8 +1,11 @@
 import datetime
 import json
+import logging
 import os
 
 from utils.config import cfg
+
+log = logging.getLogger(__name__)
 
 def record_total_time(total_time, config, output_suffix="total_times_log.json"):
     '''
@@ -28,4 +31,4 @@ def record_total_time(total_time, config, output_suffix="total_times_log.json"):
         # Write the line + a newline character
         f.write(json.dumps(log_entry) + "\n")
 
-    print(f'Recorded total time: {total_time} seconds to {filename}')
+    log.info(f'Recorded total time: {total_time} seconds to {filename}')

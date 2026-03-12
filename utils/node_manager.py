@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 import random
 import subprocess
@@ -6,6 +7,8 @@ import docker
 from multiprocessing import shared_memory, resource_tracker
 
 from utils.config import cfg
+
+log = logging.getLogger(__name__)
 from utils.docker_ops import get_all_nodes, get_cc_nodes, sort_containers
 from utils.shm_status import ShmStatus
 from utils import topology
@@ -34,7 +37,7 @@ class Node:
             try:
                 self._container = self.client.containers.get(self.name)
             except docker.errors.NotFound:
-                print(f'Container {self.name} not found.')
+                log.warning(f'Container {self.name} not found.')
                 return None
         return self._container
 
@@ -72,7 +75,7 @@ class Node:
             # shm block doesn't exist or node is dead
             return None
         except Exception as e:
-            print(f'get_node_status: ERROR accessing shared memory for {self.name}. Error: {e}')
+            log.error(f'get_node_status: Error accessing shared memory for {self.name}: {e}')
             return None
 
     def stop(self):
@@ -81,9 +84,9 @@ class Node:
         '''
         if self.is_running:
             self.container.stop()
-            print(f'Stopped container {self.name}')
+            log.info(f'Stopped container {self.name}')
         else:
-            print(f'Container {self.name} is not running.')
+            log.info(f'Container {self.name} is not running.')
 
     def kill(self):
         '''
@@ -94,17 +97,17 @@ class Node:
             if self.container:
                 self.container.remove(force=True, v = True)
         except Exception as e:
-            print(f'kill: Error killing container {self.name}: {e}')
+            log.error(f'kill: Error killing container {self.name}: {e}')
 
         if self.client:
             try:
                 self.client.close()
             except Exception as e:
-                print(f'kill: Error closing Docker client for container {self.name}: {e}')
+                log.error(f'kill: Error closing Docker client for container {self.name}: {e}')
 
         self._container = None
 
-        print(f'Killed container {self.name}')
+        log.info(f'Killed container {self.name}')
 
     def send_botmaster_command(self, command):
         '''
@@ -114,10 +117,10 @@ class Node:
         if self.is_running:
             exit_code, exec_log = self.container.exec_run(command, workdir=cfg.BOT_MASTER_CONTAINER_DIR)
             if exit_code != 0:
-                print(f'Command "{command}" failed in container {self.name} with exit code {exit_code}.')
-                print(f'Error output: {exec_log.decode("utf-8")}')
+                log.error(f'Command "{command}" failed in container {self.name} with exit code {exit_code}.')
+                log.error(f'Error output: {exec_log.decode("utf-8")}')
         else:
-            print(f'Container {self.name} is not running.')
+            log.warning(f'Container {self.name} is not running.')
 
 class NodeManager:
     def __init__(self):
@@ -153,12 +156,12 @@ class NodeManager:
             self.nodes[inno_node.name] = inno_node
             self.nodes[bm_node.name] = bm_node
         except subprocess.CalledProcessError as e:
-            print(f"testsetup_tester failed with exit code {e.returncode}")
-            print(f"  setup_test STDOUT: {e.stdout.strip()}")
-            print(f"  setup_test STDERR: {e.stderr.strip()}")
+            log.error(f"testsetup_tester failed with exit code {e.returncode}")
+            log.error(f"  setup_test STDOUT: {e.stdout.strip()}")
+            log.error(f"  setup_test STDERR: {e.stderr.strip()}")
             raise
         except Exception as e:
-            print(f"setup_test: Exception occurred: {e}")
+            log.error(f"setup_test: Exception occurred: {e}")
             return None
 
         # create the node configs
@@ -177,12 +180,12 @@ class NodeManager:
                 new_node = Node(f'CC{counter}')
                 self.nodes[new_node.name] = new_node
             except subprocess.CalledProcessError as e:
-                print(f"setup_test failed with exit code {e.returncode}")
-                print(f"  setup_test STDOUT: {e.stdout.strip()}")
-                print(f"  setup_test STDERR: {e.stderr.strip()}")
+                log.error(f"setup_test failed with exit code {e.returncode}")
+                log.error(f"  setup_test STDOUT: {e.stdout.strip()}")
+                log.error(f"  setup_test STDERR: {e.stderr.strip()}")
                 raise
             except Exception as e:
-                print(f"setup_test: Exception occurred: {e}")
+                log.error(f"setup_test: Exception occurred: {e}")
                 return None
 
             # Stagger launches for dlnbot-formation mode
@@ -192,19 +195,19 @@ class NodeManager:
             if mode == 'dlnbot-formation' and counter < total_nodes:
                 delay = random.lognormvariate(math.log(30), 0.5)
                 delay = max(10, min(delay, 90))  # clamp to [10, 90]s
-                print(f'  Staggered launch: waiting {delay:.0f}s before next container (simulating LN setup delay)...', flush=True)
+                log.info(f'  Staggered launch: waiting {delay:.0f}s before next container (simulating LN setup delay)...')
                 time.sleep(delay)
 
             counter += 1
 
         # For orchestrator-controlled modes, skip channel readiness
         if mode in ('dlnbot', 'custom'):
-            print(f'Orchestrator-controlled topology: skipping channel readiness check.', flush=True)
+            log.info('Orchestrator-controlled topology: skipping channel readiness check.')
             return True
 
         # dlnbot-formation: wait for cc_manager to establish channels
         if not self.are_channels_ready():
-            print(f'Channels were not ready in time')
+            log.warning('Channels were not ready in time')
             return False
 
         return True
@@ -270,10 +273,10 @@ class NodeManager:
                                         'our_amount': ch.get('to_us_msat', 0) // 1000 if ch.get('to_us_msat') else 0
                                     }
                     except Exception as e:
-                        print(f'  Warning: could not query container {node.name}: {e}', flush=True)
+                        log.warning(f'  Could not query container {node.name}: {e}')
                     dead_nodes.append(node_data)
         except Exception as e:
-            print(f"run_test: ERROR: Failure in recording takedown nodes, restarting. Error is \n{e}", flush=True)
+            log.error(f"Failure in recording takedown nodes, restarting. Error: {e}")
             return False
 
         # add the nodes we shut down to the config
@@ -281,7 +284,7 @@ class NodeManager:
             'takendown_nodes': dead_nodes
         })
         # disconnect the nodes here
-        print(f"Takedown test:", flush=True)
+        log.info("Takedown test:")
         self.shutdown_nodes(nodes_to_kill)
         return True
 
@@ -307,9 +310,9 @@ class NodeManager:
         node_degrees.sort(key=lambda x: -x[1])
         selected = [nd[0] for nd in node_degrees[:num_to_kill]]
 
-        print(f'Targeted takedown selecting {num_to_kill} highest-degree nodes:')
+        log.info(f'Targeted takedown selecting {num_to_kill} highest-degree nodes:')
         for nd in node_degrees[:num_to_kill]:
-            print(f'  {nd[0].name}: {nd[1]} channels')
+            log.info(f'  {nd[0].name}: {nd[1]} channels')
 
         return selected
 
@@ -381,8 +384,7 @@ class NodeManager:
         Remove them from the tracker so that the tester won't
         wait for them. Will also unlink them from shared memory.
         '''
-        print(f'Shutting down nodes. Nodes being shut down are:\n\
-            {[node.name for node in nodes]}')
+        log.info(f'Shutting down nodes: {[node.name for node in nodes]}')
 
         # stop nodes and remove them from shared memory.
         for node in nodes:
@@ -438,7 +440,7 @@ class NodeManager:
 
         bm_node = self.nodes.get(self.bm_name)
         if not bm_node:
-            print(f'BotMaster node not found.')
+            log.error('BotMaster node not found.')
             return None
         command_str = (f"--msg {message} --cc {seeds} --init {position}")
         command = f'python3 -u {self.bm_script} {command_str}'

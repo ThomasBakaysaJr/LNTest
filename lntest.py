@@ -12,6 +12,7 @@ Logs for the Botmaster are in Botmaster/
 Most errors can be solved by crtl+c and then running the script again.
 '''
 import argparse
+import logging
 import time
 import subprocess
 import json
@@ -19,10 +20,13 @@ import datetime
 import copy
 import resource
 from utils.config import cfg
+from utils.log import setup_logging, add_file_handler
 from utils import docker_utils
 from utils.node_manager import NodeManager
 from utils import record_total_time
 from utils import sys_monitor
+
+log = logging.getLogger(__name__)
 
 # Raise file descriptor limit to avoid "Too many open files" with large node counts
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -52,13 +56,14 @@ atexit.register(_cleanup_on_exit)
 
 def _signal_handler(signum, frame):
     """Handle SIGINT/SIGTERM: cleanup then exit."""
-    print(f'\nReceived signal {signum}. Cleaning up...', flush=True)
+    log.info(f'\nReceived signal {signum}. Cleaning up...')
     _cleanup_on_exit()
     raise SystemExit(1)
 
 signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 
+setup_logging()
 cfg.load()
 cfg.validate()
 
@@ -174,7 +179,7 @@ def add_common_arguments(parser):
     group.add_argument('--bm-seeds', dest='bm_seeds', type=int, help='Number of seed nodes the botmaster connects to.')
     group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Botmaster connection position (e.g., 50 for middle).')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
-    
+
     takedown = parser.add_argument_group('Takedown Settings')
     takedown.add_argument('--takedown', action='store_true', help='Enable node takedown during test.')
     takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Percentage of nodes to take down (default: 0.1).')
@@ -189,9 +194,9 @@ def main():
     '''
     Main entry point for the LNBot Testing Orchestrator.
     '''
-    parser = argparse.ArgumentParser(description="LNBot Testing Orchestrator", 
+    parser = argparse.ArgumentParser(description="LNBot Testing Orchestrator",
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    
+
     subparsers = parser.add_subparsers(dest='command', required=True, help='Mode of operation')
 
     # Subcommand: full
@@ -221,19 +226,19 @@ def main():
     if args.command in ['full', 'small']:
 
         # print out warning that max_range does nothing with this test
-        # Note: In the new structure, max_range isn't even in the namespace for full/small, 
+        # Note: In the new structure, max_range isn't even in the namespace for full/small,
         # so we don't need to check for it, preventing user error by design.
 
         test_order = TEST_CONFIGS.keys()
         if args.command == 'full':
-            print(f'Running full testing suite.', flush=True)
+            log.info('Running full testing suite.')
         else:
-            print(f'Running small testing suite.', flush=True)
+            log.info('Running small testing suite.')
         if not confirm_test():
-            print(f'Exiting tester.', flush=True)
+            log.info('Exiting tester.')
             return
         else:
-            print(f'Continuing', flush=True)
+            log.info('Continuing')
         for test_mode in test_order:
             # if we're doing small test, we change the values here
             config = TEST_CONFIGS[test_mode].copy()
@@ -261,26 +266,26 @@ def main():
             if args.command == 'full':
                 testing = config['var_key']
                 if testing != NUM_CC and args.num_cc is not None:
-                    print(f'num_cc is set to {args.num_cc}', flush=True)
+                    log.info(f'num_cc is set to {args.num_cc}')
                     parameters[NUM_CC] = args.num_cc
                 if testing != ACTIVE_NODES and args.active_nodes is not None:
-                    print(f'active nodes is set to {args.active_nodes}', flush=True)
+                    log.info(f'active nodes is set to {args.active_nodes}')
                     parameters[ACTIVE_NODES] = args.active_nodes
                 if testing != BM_SEEDS and args.bm_seeds is not None:
-                    print(f'bm_seeds is set to {args.bm_seeds}', flush=True)
+                    log.info(f'bm_seeds is set to {args.bm_seeds}')
                     parameters[BM_SEEDS] = args.bm_seeds
                 if testing != BM_POS and args.bm_pos is not None:
-                    print(f'bm_pos is set to {args.bm_pos}', flush=True)
+                    log.info(f'bm_pos is set to {args.bm_pos}')
                     parameters[BM_POS] = args.bm_pos
                 if args.num_msg is not None:
-                    print(f'num_msg is set to {args.num_msg}', flush=True)
+                    log.info(f'num_msg is set to {args.num_msg}')
                     config['max_messages'] = args.num_msg
-                        
+
             config['parameters'] = parameters
             config['takedown_percentage'] = args.takedown_pct
             # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
             if args.dlnbot_formation and args.topology is not None:
-                print('ERROR: --dlnbot-formation and --topology are mutually exclusive.', flush=True)
+                log.error('--dlnbot-formation and --topology are mutually exclusive.')
                 return
             if args.dlnbot_formation:
                 config['mode'] = 'dlnbot-formation'
@@ -291,7 +296,7 @@ def main():
             if args.topology_file is not None:
                 config['topology_file'] = args.topology_file
             if config['mode'] == 'custom' and args.topology_file is None:
-                print('ERROR: --topology custom requires --topology-file.', flush=True)
+                log.error('--topology custom requires --topology-file.')
                 return
             all_configs.append(config)
             run_test(config, manager)
@@ -302,42 +307,42 @@ def main():
         testing = config['var_key']
         # Only override fixed parameters; sweep variable is set via --sweep-start
         if testing != NUM_CC and args.num_cc is not None:
-            print(f'num_cc is set to {args.num_cc}', flush=True)
+            log.info(f'num_cc is set to {args.num_cc}')
             parameters[NUM_CC] = args.num_cc
         if testing != ACTIVE_NODES and args.active_nodes is not None:
-            print(f'active_nodes is set to {args.active_nodes}', flush=True)
+            log.info(f'active_nodes is set to {args.active_nodes}')
             parameters[ACTIVE_NODES] = args.active_nodes
         if testing != BM_SEEDS and args.bm_seeds is not None:
-            print(f'bm_seeds is set to {args.bm_seeds}', flush=True)
+            log.info(f'bm_seeds is set to {args.bm_seeds}')
             parameters[BM_SEEDS] = args.bm_seeds
         if testing != BM_POS and args.bm_pos is not None:
-            print(f'bm_pos is set to {args.bm_pos}', flush=True)
+            log.info(f'bm_pos is set to {args.bm_pos}')
             parameters[BM_POS] = args.bm_pos
         if args.num_msg is not None:
-            print(f'num_msg is set to {args.num_msg}', flush=True)
+            log.info(f'num_msg is set to {args.num_msg}')
             config['max_messages'] = args.num_msg
         if args.sweep_start is not None:
-            print(f'sweep_start is set to {args.sweep_start}', flush=True)
+            log.info(f'sweep_start is set to {args.sweep_start}')
             parameters[config['var_key']] = args.sweep_start
         if args.sweep_end is not None:
-            print(f'sweep_end is set to {args.sweep_end}', flush=True)
+            log.info(f'sweep_end is set to {args.sweep_end}')
             temp_range = list(config['range'])
             temp_range[0] = args.sweep_end
             config['range'] = temp_range
         if args.sweep_step is not None:
-            print(f'sweep_step is set to {args.sweep_step}', flush=True)
+            log.info(f'sweep_step is set to {args.sweep_step}')
             temp_range = list(config['range'])
             temp_range[1] = args.sweep_step
             config['range'] = temp_range
         if args.takedown:
-            print(f'Takedown test is True', flush=True)
+            log.info('Takedown test is True')
             config['takedown'] = True
         if args.takedown_strategy is not None:
-            print(f'Takedown strategy is set to {args.takedown_strategy}', flush=True)
+            log.info(f'Takedown strategy is set to {args.takedown_strategy}')
             config['takedown_strategy'] = args.takedown_strategy
         # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
         if args.dlnbot_formation and args.topology is not None:
-            print('ERROR: --dlnbot-formation and --topology are mutually exclusive.', flush=True)
+            log.error('--dlnbot-formation and --topology are mutually exclusive.')
             return
         if args.dlnbot_formation:
             config['mode'] = 'dlnbot-formation'
@@ -345,21 +350,21 @@ def main():
             config['mode'] = args.topology
         else:
             config['mode'] = 'dlnbot'
-        print(f'Mode is set to {config["mode"]}', flush=True)
+        log.info(f'Mode is set to {config["mode"]}')
         if args.topology_file is not None:
             config['topology_file'] = args.topology_file
         if config['mode'] == 'custom' and args.topology_file is None:
-            print('ERROR: --topology custom requires --topology-file.', flush=True)
+            log.error('--topology custom requires --topology-file.')
             return
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
         print_execution_plan(config)
         if not confirm_test():
-            print(f'Exiting tester.', flush=True)
+            log.info('Exiting tester.')
             return
         else:
-            print(f'Continuing', flush=True)
+            log.info('Continuing')
 
         all_configs.append(config)
         run_test(config, manager)
@@ -371,7 +376,7 @@ def main():
     # we only kill the nodes here since we want to keep
     # the logs for the last run.
     manager.kill_all_nodes()
-    print(f'Testing finished. Exiting.', flush=True)
+    log.info('Testing finished. Exiting.')
 
 def run_test(in_config, manager : NodeManager):
     '''
@@ -382,6 +387,10 @@ def run_test(in_config, manager : NodeManager):
     overall_test_time = time.time()
     attempt = 0
     testing = config['var_key']
+
+    # Add file handler for this test run
+    log_file = f'{cfg.TEST_DATA_DIR}/orchestrator.log'
+    add_file_handler(log_file)
 
     parameters = config['parameters']
     start = parameters[testing]
@@ -394,74 +403,74 @@ def run_test(in_config, manager : NodeManager):
         parameters[testing] = test_value
         # placeholder for system monitor
         monitor = None
-        
+
         # try up to MAX_TRY times to get a successful test
         while not success:
             # cleanup from any previous runs
             test_data = []
-            manager.cleanup_test() 
+            manager.cleanup_test()
             # stop any system monitor that may be running
             if monitor:
                 monitor.stop()
-                
+
             # create a new system monitor for this test
             global _active_monitor
             monitor = sys_monitor.HardwareMonitor(f"{get_record_name(config)}_system_metrics.csv")
             monitor.start()
             _active_monitor = monitor
-            
+
             if attempt > MAX_TRY:
-                print(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds", flush=True)
+                log.error(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds")
                 monitor.stop()
                 _active_monitor = None
                 stop_bitcoinminer()
                 return
-            
+
             cc_start_time = time.time()
-            
-            print(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.', flush=True)
+
+            log.info(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.')
             channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES], mode=config.get('mode', 'dlnbot'))
 
-            print(f'Setup finished at {get_time()}', flush=True)
+            log.info(f'Setup finished at {get_time()}')
 
             # checkpoint, if channels aren't created then we start again.
             if not channels_created:
                 attempt += 1
-                print(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}', flush=True)
-                continue            
-            
+                log.warning(f'Nodes have not finished creating channels in over {MAX_WAIT} seconds. Attempt is now {attempt}')
+                continue
+
             fund_nodes()
             total_setup_time = time.time() - cc_start_time
-            
-            print(f'Channels created in {total_setup_time} seconds.', flush=True)
+
+            log.info(f'Channels created in {total_setup_time} seconds.')
 
             # Build topology based on mode
             mode = config.get('mode', 'dlnbot')
             if mode == 'dlnbot':
                 edges = NodeManager.build_chain_edges(parameters[NUM_CC], parameters[ACTIVE_NODES])
-                print(f'Building D-LNBot chain topology (n={parameters[NUM_CC]}, m={parameters[ACTIVE_NODES]}, {len(edges)} edges)...', flush=True)
+                log.info(f'Building D-LNBot chain topology (n={parameters[NUM_CC]}, m={parameters[ACTIVE_NODES]}, {len(edges)} edges)...')
                 if not manager.build_topology(edges):
-                    print('Topology build failed. Retrying...', flush=True)
+                    log.warning('Topology build failed. Retrying...')
                     success = False
                     attempt += 1
                     continue
-                print(f'Waiting 10s for node status updates...', flush=True)
+                log.info('Waiting 10s for node status updates...')
                 time.sleep(10)
             elif mode == 'custom':
                 edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[NUM_CC])
                 if edges is None:
-                    print('Custom topology loading failed. Aborting.', flush=True)
+                    log.error('Custom topology loading failed. Aborting.')
                     monitor.stop()
                     _active_monitor = None
                     stop_bitcoinminer()
                     return
-                print(f'Building custom topology ({len(edges)} edges)...', flush=True)
+                log.info(f'Building custom topology ({len(edges)} edges)...')
                 if not manager.build_topology(edges):
-                    print('Topology build failed. Retrying...', flush=True)
+                    log.warning('Topology build failed. Retrying...')
                     success = False
                     attempt += 1
                     continue
-                print(f'Waiting 10s for node status updates...', flush=True)
+                log.info('Waiting 10s for node status updates...')
                 time.sleep(10)
             # dlnbot-formation: cc_manager handles formation, nothing to build here
 
@@ -472,16 +481,16 @@ def run_test(in_config, manager : NodeManager):
                 else:
                     takedown_pct = config.get('takedown_percentage', 0.1)
                 takedown_strategy = config.get('takedown_strategy', 'random')
-                print(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.', flush=True)
+                log.info(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.')
                 if not manager.takedown(config, takedown_pct, takedown_strategy):
-                    print(f'Takedown failed, retrying...', flush=True)
+                    log.warning('Takedown failed, retrying...')
                     success = False
                     attempt += 1
                     continue
-            
-            print(f'Waiting done, proceeding to testing.', flush=True)
+
+            log.info('Waiting done, proceeding to testing.')
             message_start_time = time.time()
-            
+
             '''
             ACTUAL SENDING OF MESSAGES
             '''
@@ -494,7 +503,7 @@ def run_test(in_config, manager : NodeManager):
                 manager.send_botmaster_command(y, parameters[BM_SEEDS], parameters[BM_POS])
                 cmd_start_time = time.time()
                 send_time, success = wait_for_propagation(y, manager)
-                
+
                 # Calculate coverage (what fraction of surviving nodes received the command)
                 coverage_pct, received, total = get_coverage(y, manager)
 
@@ -510,7 +519,7 @@ def run_test(in_config, manager : NodeManager):
                         record['nodes_total'] = total
                         record['partitioned'] = True
                         test_data.append(record)
-                        print(f'Command {y} timed out at {get_time()}. Coverage: {coverage_pct*100:.1f}% ({received}/{total} surviving nodes)', flush=True)
+                        log.info(f'Command {y} timed out at {get_time()}. Coverage: {coverage_pct*100:.1f}% ({received}/{total} surviving nodes)')
                     break
 
                 # add the record of this data
@@ -523,9 +532,9 @@ def run_test(in_config, manager : NodeManager):
                 record['partitioned'] = False
                 test_data.append(record)
 
-                print(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds. Coverage: {coverage_pct*100:.1f}%', flush=True)
-                print(f'Time: {get_time()}', flush=True)
-                
+                log.info(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds. Coverage: {coverage_pct*100:.1f}%')
+                log.info(f'Time: {get_time()}')
+
             # record the test and set reset attempts
             total_send_time = time.time() - message_start_time
             record_test(config, test_data, total_setup_time, total_send_time)
@@ -540,17 +549,17 @@ def run_test(in_config, manager : NodeManager):
                 attempt = 0
             else:
                 attempt += 1
-                print(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}', flush=True)
+                log.warning(f'Nodes have not sent propagated message in over {MAX_WAIT} seconds. Attempt is now {attempt}')
         # out of the while loop
         monitor.stop()
         _active_monitor = None
-        stop_bitcoinminer()           
+        stop_bitcoinminer()
 
-    print(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.", flush=True)
-    print(f"Testing with: \n{config}", flush=True)
+    log.info(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.")
+    log.info(f"Testing with: \n{config}")
 
 def wait_for_propagation(command, manager : NodeManager):
-    print(f'Now waiting for command {command} to propagate.', flush=True)
+    log.info(f'Now waiting for command {command} to propagate.')
     sending = True
     start_time = time.time()
     success = None
@@ -571,18 +580,18 @@ def wait_for_propagation(command, manager : NodeManager):
             done = False
         if done:
             sending = False
-            success = True 
+            success = True
         time.sleep(SLEEP_INTERVAL)
         if manager.is_kill_time(start_time, MAX_WAIT):
             success = False
             break
         # Early exit: if coverage hasn't improved for STALE_TIMEOUT, network is partitioned
         if (time.time() - last_change_time) >= STALE_TIMEOUT and last_received > 0:
-            print(f'Coverage stalled at {last_received}/{len(data) if data else "?"} nodes for {STALE_TIMEOUT}s. Network likely partitioned.', flush=True)
+            log.warning(f'Coverage stalled at {last_received}/{len(data) if data else "?"} nodes for {STALE_TIMEOUT}s. Network likely partitioned.')
             success = False
             break
     if success == None:
-        print(f'Somethin went wrong in the wait for propagation state. Success == None', flush=True)
+        log.warning('Something went wrong in the wait for propagation state. Success == None')
     return time_interval, success
 
 def get_coverage(command, manager : NodeManager):
@@ -608,31 +617,31 @@ def print_execution_plan(config):
     iterations = list(range(start, end + 1, step))
     mode = config.get('mode', 'dlnbot')
 
-    print(f'\n{"="*60}', flush=True)
-    print(f'  EXECUTION PLAN: {config["description"]}', flush=True)
-    print(f'{"="*60}', flush=True)
-    print(f'  Sweep variable : {var_key}', flush=True)
-    print(f'  Sweep range    : {start} -> {end} (step {step})', flush=True)
-    print(f'  Iterations     : {len(iterations)} values: {iterations}', flush=True)
-    print(f'  Messages/iter  : {config["max_messages"]}', flush=True)
-    print(f'  Topology mode  : {mode}', flush=True)
+    log.info(f'\n{"="*60}')
+    log.info(f'  EXECUTION PLAN: {config["description"]}')
+    log.info(f'{"="*60}')
+    log.info(f'  Sweep variable : {var_key}')
+    log.info(f'  Sweep range    : {start} -> {end} (step {step})')
+    log.info(f'  Iterations     : {len(iterations)} values: {iterations}')
+    log.info(f'  Messages/iter  : {config["max_messages"]}')
+    log.info(f'  Topology mode  : {mode}')
 
     # Show fixed parameters (everything except the sweep variable)
     fixed = {k: v for k, v in params.items() if k != var_key}
     if fixed:
-        print(f'  Fixed params   : {fixed}', flush=True)
+        log.info(f'  Fixed params   : {fixed}')
 
     if config.get('takedown', False):
         strategy = config.get('takedown_strategy', 'random')
         if var_key == TAKEDOWN_PCT:
-            print(f'  Takedown       : {strategy}, sweep {start}%-{end}%', flush=True)
+            log.info(f'  Takedown       : {strategy}, sweep {start}%-{end}%')
         else:
             pct = config.get('takedown_percentage', 0.1)
-            print(f'  Takedown       : {strategy}, {pct*100:.0f}%', flush=True)
+            log.info(f'  Takedown       : {strategy}, {pct*100:.0f}%')
 
     if config.get('topology_file'):
-        print(f'  Topology file  : {config["topology_file"]}', flush=True)
-    print(f'{"="*60}', flush=True)
+        log.info(f'  Topology file  : {config["topology_file"]}')
+    log.info(f'{"="*60}')
 
 def confirm_test():
     if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
@@ -647,14 +656,14 @@ def fund_nodes():
         )
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
-        print(f"tester failed with exit code {e.returncode}", flush=True)
-        print(f"  tester STDOUT: {e.stdout.strip()}", flush=True)
-        print(f"  tester STDERR: {e.stderr.strip()}", flush=True)
+        log.error(f"tester failed with exit code {e.returncode}")
+        log.error(f"  tester STDOUT: {e.stdout.strip()}")
+        log.error(f"  tester STDERR: {e.stderr.strip()}")
         raise # Re-raise the exception so your calling code can catch it
     except Exception as e:
-        print(f"tester: Exception occurred: {e}", flush=True)
+        log.error(f"tester: Exception occurred: {e}")
         return None
-    
+
 
 def record_test(config, test_data, setup_time, total_send_time):
     '''
@@ -678,15 +687,15 @@ def record_test(config, test_data, setup_time, total_send_time):
         'total_times' :  total_times,
         'test_data' : test_data
         }
-    
+
     with open(file_name, 'w') as f:
         json.dump(data, f, indent = 4, default = json_set_converter)
-    
+
 
 def create_meta_data(config):
     '''
     Create the record for the recording test data.
-    Write the meta_data to the file and then return 
+    Write the meta_data to the file and then return
     that to the calling function.
     '''
     variable = config['var_key']
@@ -730,9 +739,9 @@ def record_topology(config, manager : NodeManager):
 
     with open(top_name, 'w') as f:
         json.dump(data, f, indent=4, default = json_set_converter)
-    
-    print(f'Topology data for {len(all_status)} nodes saved as {top_name}', flush=True)
-    
+
+    log.info(f'Topology data for {len(all_status)} nodes saved as {top_name}')
+
 
 def get_record_name(config):
     '''
@@ -740,7 +749,7 @@ def get_record_name(config):
     '''
     values = config.get('parameters')
     var_key = config['var_key']
-    
+
     # get a unique code to distinguish this run
     parts = map(str, values.values())
     id = ''.join(parts)
@@ -756,7 +765,7 @@ def get_record_name(config):
         id += 'F'
     elif mode == 'custom':
         id += 'X'
-    
+
     filename = f'{cfg.TEST_DATA_DIR}/{var_key}_{values[var_key]}_{id}'
 
     return filename
@@ -774,12 +783,12 @@ def init_bitcoin_server():
         if not get_bitcoin_miner():
             start_miner()
         return
-    
+
     # Full restart needed (first time or after crash)
     stop_bitcoinminer()
     time.sleep(0.5)
     restart_bitcoind()
-    
+
     balance = 0.0
     while balance <= 0.0:
         time.sleep(1)
@@ -848,7 +857,7 @@ def stop_bitcoinminer():
     if pid := get_bitcoin_miner():
         for id in pid.split():
             subprocess.run(["kill", str(id)])
-            print(f"Found and killing the bitcoin miner with pid {id}.", flush=True)
+            log.info(f"Found and killing the bitcoin miner with pid {id}.")
 
 
 def get_time_interval(data, top_count):
@@ -864,7 +873,7 @@ def get_time_interval(data, top_count):
     '''
     # Retrieve the status of all nodes with their counter at top count
     top_data = [status for status in data if int(status.get('counter')) == int(top_count)]
-    
+
     # propagation is done when all of statuses have the same counter
     is_done = len(top_data) == len(data)
 
@@ -875,7 +884,7 @@ def get_time_interval(data, top_count):
         interval = None
 
     if is_done:
-        print(f'done with counter at {top_count}', flush=True)
+        log.info(f'done with counter at {top_count}')
 
     return interval, is_done
 
