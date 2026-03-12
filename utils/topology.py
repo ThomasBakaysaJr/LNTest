@@ -3,6 +3,8 @@ import os
 import time
 import subprocess
 
+from utils.config import cfg
+
 
 def build_chain_edges(n, m):
     '''
@@ -157,8 +159,8 @@ def build_topology(edges, cc_nodes):
         return 'unknown'
 
     def mine_blocks(num_blocks=6):
-        bitcoin_cli = os.getenv('BITCOIN_CLI')
-        bitcoin_dir = os.getenv('BITCOIN_DIR')
+        bitcoin_cli = cfg.BITCOIN_CLI
+        bitcoin_dir = cfg.BITCOIN_DIR
         if bitcoin_cli and bitcoin_dir:
             try:
                 result = subprocess.run(

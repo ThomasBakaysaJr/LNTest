@@ -1,20 +1,20 @@
 import datetime
 import json
 import os
-from dotenv import load_dotenv
+
+from utils.config import cfg
 
 def record_total_time(total_time, config, output_suffix="total_times_log.json"):
     '''
-    Create a running record of the total time taken for test runs 
+    Create a running record of the total time taken for test runs
     along with their configuration(s) to a JSON file.
     Parameters:
         total_time (float): The total time taken for the test run in seconds.
         config (dict): The configuration dictionary used for the test run.
             Can be a single config or a list of configs.
         output_file (str): The path to the JSON file where the log will be stored.'''
-    
-    load_dotenv('config.env')
-    os.makedirs(os.getenv('TEST_DATA_DIR'), exist_ok=True)
+
+    os.makedirs(cfg.TEST_DATA_DIR, exist_ok=True)
     filename = datetime.datetime.now().strftime(f"data/%Y-%m-%d_{output_suffix}")
 
     log_entry = {

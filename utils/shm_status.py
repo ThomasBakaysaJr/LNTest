@@ -3,16 +3,14 @@ import os
 import time
 from multiprocessing import shared_memory, resource_tracker
 
-SLEEP_INTERVAL = int(os.getenv('NM_SLEEP', 2))
-MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450))
-WAIT_MULT = int(os.getenv('NM_MAX_WAIT_MULT', 2))
+from utils.config import cfg
 
 
 class ShmStatus:
     def __init__(self):
         self.shm_blocks = {}  # Keep SHM references alive to prevent Python resource tracker GC
         self.block_size = 5012  # default, overridden by calculate_blocksize()
-        self.node_config_dir = os.getenv('TEST_STATE_DIR')
+        self.node_config_dir = cfg.TEST_STATE_DIR
         self.node_config_path = f'{self.node_config_dir}/node_config.json'
 
     def create_status_config(self, active_nodes, block_size):
@@ -23,15 +21,15 @@ class ShmStatus:
             'active_nodes' : active_nodes,
             'max_peers' : active_nodes * 2,
             'block_size' : block_size,
-            'discovery_rule' : int(os.getenv('DISCOVERY_RULE', 19)),
-            'botmaster_rule' : int(os.getenv('BOTMASTER_RULE', 123123)),
-            'channel_creation_sleep' : int(os.getenv('NODE_CHANNEL_SLEEP', 10)),
-            'status_update_interval' : float(os.getenv('NODE_UPDATE_INTERVAL', 1.5)),
-            'channel_balance_counter' : int(os.getenv('NODE_BALANCE_COUNTER', 3)),
-            'min_channel_capacity' : int(os.getenv('MIN_CHANNEL_CAPACITY', 50000)),
-            'max_channel_capacity' : int(os.getenv('MAX_CHANNEL_CAPACITY', 150000)),
-            'sleep_interval' : int(os.getenv('NODE_SLEEP_INTERVAL', 3)),
-            'retry_interval' : int(os.getenv('NODE_RETRY_INTERVAL', 5))
+            'discovery_rule' : cfg.DISCOVERY_RULE,
+            'botmaster_rule' : cfg.BOTMASTER_RULE,
+            'channel_creation_sleep' : cfg.NODE_CHANNEL_SLEEP,
+            'status_update_interval' : cfg.NODE_UPDATE_INTERVAL,
+            'channel_balance_counter' : cfg.NODE_BALANCE_COUNTER,
+            'min_channel_capacity' : cfg.MIN_CHANNEL_CAPACITY,
+            'max_channel_capacity' : cfg.MAX_CHANNEL_CAPACITY,
+            'sleep_interval' : cfg.NODE_SLEEP_INTERVAL,
+            'retry_interval' : cfg.NODE_RETRY_INTERVAL
         }
 
         try:
@@ -50,9 +48,9 @@ class ShmStatus:
         For small m (especially m=1), dev-fast-gossip causes nodes to accumulate
         extra channels via gossip discovery, so we enforce a minimum of 20 channel slots.
         '''
-        overhead_size = int(os.getenv('SHM_OVERHEAD', 512))
-        per_peer_size = int(os.getenv('SHM_PER_PEER', 256))
-        buffer = float(os.getenv('SHM_BUFFER', 1.2))
+        overhead_size = cfg.SHM_OVERHEAD
+        per_peer_size = cfg.SHM_PER_PEER
+        buffer = cfg.SHM_BUFFER
         # 2*m channels + 6 for safety, but at least 20 slots for small-m gossip effects
         max_channels = max(active_nodes * 2 + 6, 20)
 
@@ -164,11 +162,11 @@ class ShmStatus:
         start_time = time.time()
 
         while True:
-            time.sleep(SLEEP_INTERVAL)
+            time.sleep(cfg.NM_SLEEP)
             cc_nodes = cc_nodes_fn()
             all_status = self.retrieve_all_status(cc_nodes)
 
-            if (time.time() - start_time) >= MAX_WAIT * WAIT_MULT:
+            if (time.time() - start_time) >= cfg.NM_MAX_WAIT * cfg.NM_MAX_WAIT_MULT:
                 return False
             if len(cc_nodes) == len(all_status) and all_status:
                 channels_created = True

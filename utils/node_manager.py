@@ -3,32 +3,15 @@ import time
 import random
 import subprocess
 import docker
-import os
-from dotenv import load_dotenv
 from multiprocessing import shared_memory, resource_tracker
 
+from utils.config import cfg
 from utils.docker_ops import get_all_nodes, get_cc_nodes, sort_containers
 from utils.shm_status import ShmStatus
 from utils import topology
 
-load_dotenv('config.env')
-
-SLEEP_INTERVAL = int(os.getenv('NM_SLEEP', 2))  # seconds
-MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450))  # seconds
-WAIT_MULT = int(os.getenv('NM_MAX_WAIT_MULT', 2))  # multiplier for wait time
-
-# Directories for cc_node and botmaster
-NODEMAN_CCADDRESS_FILE = os.getenv('NODE_MANAGER_ADDRESS_LIST')
-BOTMASTER_CCADDRESS_FILE = os.getenv('BOT_MASTER_ADDRESS_LIST')
-
-KILL_NODES_BASH = os.getenv('KILL_NODES_BASH')
-INIT_BOTNET_BASH = os.getenv('INIT_BOTNET_BASH')
-CREATE_CC_SERVER_BASH = os.getenv('CREATE_CC_SERVER_BASH')
-
-BM_DIR = os.getenv('BOT_MASTER_CONTAINER_DIR')
-
-NUM_CC = os.getenv('NUM_CC', 'num_cc')
-ACTIVE_NODES = os.getenv('ACTIVE_NODES', 'active_nodes')
+NUM_CC = 'num_cc'
+ACTIVE_NODES = 'active_nodes'
 
 class Node:
     '''
@@ -129,7 +112,7 @@ class Node:
         if this is the botmaster.
         '''
         if self.is_running:
-            exit_code, exec_log = self.container.exec_run(command, workdir=BM_DIR)
+            exit_code, exec_log = self.container.exec_run(command, workdir=cfg.BOT_MASTER_CONTAINER_DIR)
             if exit_code != 0:
                 print(f'Command "{command}" failed in container {self.name} with exit code {exit_code}.')
                 print(f'Error output: {exec_log.decode("utf-8")}')
@@ -138,13 +121,12 @@ class Node:
 
 class NodeManager:
     def __init__(self):
-        self.node_config_dir = os.getenv('TEST_STATE_DIR')
-        # CHANGE to use the OS path making
+        self.node_config_dir = cfg.TEST_STATE_DIR
         self.node_config_path = f'{self.node_config_dir}/node_config.json'
         self.CC_PREFIX = 'CC'
-        self.bm_name = os.getenv('BOTMASTER_NODE', 'BM')
-        self.bm_script = os.getenv('BOTMASTER_SCRIPT')
-        self.inno_name = os.getenv('INNOCENT_NODE', 'InnocentNode')
+        self.bm_name = cfg.BOTMASTER_NODE
+        self.bm_script = cfg.BOTMASTER_SCRIPT
+        self.inno_name = cfg.INNOCENT_NODE
         self.nodes: dict[str, Node] = {}
         self.shm = ShmStatus()
 
@@ -161,7 +143,7 @@ class NodeManager:
         import math
         try:
             subprocess.run(
-                [INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}']
+                [cfg.INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}']
             )
             inno_node = Node(self.inno_name)
             bm_node = Node(self.bm_name)
@@ -190,7 +172,7 @@ class NodeManager:
             try:
                 self.shm.setup_shm("CC" + str(counter), True)
                 subprocess.run(
-                    [CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag]
+                    [cfg.CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag]
                 )
                 new_node = Node(f'CC{counter}')
                 self.nodes[new_node.name] = new_node
@@ -247,7 +229,7 @@ class NodeManager:
         # get the list of running CC nodes
         while not cc_nodes:
             cc_nodes = self.get_cc_nodes()
-            time.sleep(SLEEP_INTERVAL)
+            time.sleep(cfg.NM_SLEEP)
 
         if strategy == 'targeted':
             nodes_to_kill = self._select_highest_degree(cc_nodes, num_nodes_kill)
@@ -411,7 +393,7 @@ class NodeManager:
         # to all containers.
         node_names = [node.name for node in nodes]
 
-        with open(NODEMAN_CCADDRESS_FILE, 'r') as file:
+        with open(cfg.NODE_MANAGER_ADDRESS_LIST, 'r') as file:
             cc_file = file.readlines()
 
         new_cc_list = []
@@ -420,9 +402,9 @@ class NodeManager:
             if name not in node_names:
                 new_cc_list.append(line)
 
-        with open(NODEMAN_CCADDRESS_FILE, 'w') as file:
+        with open(cfg.NODE_MANAGER_ADDRESS_LIST, 'w') as file:
             file.write(''.join(new_cc_list))
-        with open(BOTMASTER_CCADDRESS_FILE, 'w') as file:
+        with open(cfg.BOT_MASTER_ADDRESS_LIST, 'w') as file:
             file.write(''.join(new_cc_list))
 
     def cleanup_test(self):
@@ -431,7 +413,7 @@ class NodeManager:
         '''
         self.kill_all_nodes()
 
-        subprocess.run([KILL_NODES_BASH])
+        subprocess.run([cfg.KILL_NODES_BASH])
 
     # will enventually goto into a utils file
     def is_kill_time(self, start_time, wait_time):

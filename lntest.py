@@ -15,11 +15,10 @@ import argparse
 import time
 import subprocess
 import json
-import os
 import datetime
 import copy
 import resource
-from dotenv import load_dotenv
+from utils.config import cfg
 from utils import docker_utils
 from utils.node_manager import NodeManager
 from utils import record_total_time
@@ -60,23 +59,11 @@ def _signal_handler(signum, frame):
 signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 
-load_dotenv('config.env')
-
-BITCOIND_CLI = os.getenv('BITCOIN_CLI')
-BITCOIND_DATA_DIR = os.getenv('BITCOIN_DIR')
-
-LIGHTNINGD_VERSION = os.getenv('LIGHTNINGD_VERSION')
-LNTEST_VERSION = os.getenv('LNTEST_VERSION')
-
-DATA_DIR = os.getenv('TEST_DATA_DIR')
+cfg.load()
+cfg.validate()
 
 TIMES_JSON = 'time_data.json'
 TOPO_JSON = 'topology_data.json'
-
-# scripts to use
-RESTART_BITCOIND_BASH = os.getenv('RESTART_BITCOIND_BASH')
-FUND_WALLETS_BASH = os.getenv('FUND_WALLETS_BASH')
-BITCOIN_MINER_PY = os.getenv('MINER_SCRIPT')
 
 # constant names for the variables we use
 TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
@@ -87,9 +74,9 @@ BM_POS = 'bm_pos'
 TAKEDOWN_PCT = 'takedown_pct'
 
 # Unless the script isn't working properly, best to leave these values alone
-MAX_WAIT = int(os.getenv('NM_MAX_WAIT', 450)) # max wait for propagation before we move on (default = 450)
-MAX_TRY = 5 # number of tries per iteration before we shut this thing down (default = 5) (1 means we only try once)
-SLEEP_INTERVAL = int(os.getenv('NM_SLEEP', 1))
+MAX_WAIT = cfg.NM_MAX_WAIT
+MAX_TRY = 5
+SLEEP_INTERVAL = cfg.NM_SLEEP
 
 # configurations for the tests
 TEST_CONFIGS = {
@@ -225,7 +212,7 @@ def main():
 
     args = parser.parse_args()
 
-    docker_utils.ensure_custom_image(LNTEST_VERSION, LIGHTNINGD_VERSION)
+    docker_utils.ensure_custom_image(cfg.LNTEST_VERSION, cfg.LIGHTNINGD_VERSION)
     manager = NodeManager()
     # start recording time for total testing
     start_time = time.time()
@@ -656,7 +643,7 @@ def confirm_test():
 def fund_nodes():
     try:
         subprocess.run(
-            [FUND_WALLETS_BASH]
+            [cfg.FUND_WALLETS_BASH]
         )
     except subprocess.CalledProcessError as e:
         # This is where the error from lightning-cli lives!
@@ -708,7 +695,7 @@ def create_meta_data(config):
 
     meta_data = {
         'experiment' : 'LNBot Simulation Experiment',
-        'version' : LNTEST_VERSION,
+        'version' : cfg.LNTEST_VERSION,
         'description' : 'This file contains the individual propagation times for messages being distributed across the simulated network.',
         'testing': config['description'],
         'variable' : variable,
@@ -770,7 +757,7 @@ def get_record_name(config):
     elif mode == 'custom':
         id += 'X'
     
-    filename = f'{DATA_DIR}/{var_key}_{values[var_key]}_{id}'
+    filename = f'{cfg.TEST_DATA_DIR}/{var_key}_{values[var_key]}_{id}'
 
     return filename
 
@@ -796,7 +783,7 @@ def init_bitcoin_server():
     balance = 0.0
     while balance <= 0.0:
         time.sleep(1)
-        balance = subprocess.run([BITCOIND_CLI, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'], capture_output=True)
+        balance = subprocess.run([cfg.BITCOIN_CLI, f'-datadir={cfg.BITCOIN_DIR}', '-regtest', 'getbalance'], capture_output=True)
         balance = balance.stdout.strip().decode()
         if balance == '':
             balance = 0
@@ -810,7 +797,7 @@ def is_bitcoind_ready():
     '''
     try:
         result = subprocess.run(
-            [BITCOIND_CLI, f'-datadir={BITCOIND_DATA_DIR}', '-regtest', 'getbalance'],
+            [cfg.BITCOIN_CLI, f'-datadir={cfg.BITCOIN_DIR}', '-regtest', 'getbalance'],
             capture_output=True, timeout=5
         )
         balance_str = result.stdout.strip().decode()
@@ -826,10 +813,10 @@ def start_miner():
     Uses sys.executable to ensure the same Python (venv) is used.
     '''
     import sys
-    rpc_user = os.getenv('RPC_USER')
-    rpc_password = os.getenv('RPC_PASSWORD')
+    rpc_user = cfg.RPC_USER
+    rpc_password = cfg.RPC_PASSWORD
     subprocess.Popen(
-        [sys.executable, BITCOIN_MINER_PY, rpc_user, rpc_password, BITCOIND_CLI],
+        [sys.executable, cfg.MINER_SCRIPT, rpc_user, rpc_password, cfg.BITCOIN_CLI],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
@@ -839,7 +826,7 @@ def restart_bitcoind():
     Shut down and restart bitcoind for a fresh start.
     '''
     subprocess.Popen(
-        [RESTART_BITCOIND_BASH]
+        [cfg.RESTART_BITCOIND_BASH]
     )
 
 def get_bitcoin_miner():
@@ -847,7 +834,7 @@ def get_bitcoin_miner():
     Return the bitcoinminer if its running.
     None otherwise.
     '''
-    result = subprocess.run(['pgrep', '-f', f"{BITCOIN_MINER_PY}"], capture_output=True)
+    result = subprocess.run(['pgrep', '-f', f"{cfg.MINER_SCRIPT}"], capture_output=True)
     if result.returncode == 0:
         return result.stdout.decode().strip()
     else:
