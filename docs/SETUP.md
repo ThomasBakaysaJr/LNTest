@@ -2,6 +2,8 @@
 
 This testbed has been verified on a fresh Ubuntu 24.04 LTS install. The instructions below assume a fresh Ubuntu system.
 
+**Requirements:** Docker, Python 3.10+, Bitcoin Core v28+. Core Lightning v25.09 is pulled automatically via Docker during setup.
+
 ## 1. Install system dependencies
 
 Update your system and install required packages:

@@ -1,6 +1,6 @@
 # LNTest
 
-LNTest is a testbed for deploying and evaluating Lightning Network-based botnets. It implements the C&C overlay topology and autonomous formation protocol from [D-LNBot](https://ieeexplore.ieee.org/document/10198749/) (Kurt et al., IEEE TDSC, vol. 21, no. 4, 2024), the only LN-based botnet design in the literature. LNTest also supports custom user-defined C&C topologies, allowing researchers to evaluate how arbitrary overlay graphs behave as botnets. Each C&C node runs as a real Bitcoin Core and Core Lightning instance inside a Docker container on a local Bitcoin regtest network. After initial setup, all test execution is fully offline — no external network access is required.
+LNTest is a testbed for deploying and evaluating Lightning Network-based botnets. It implements the C&C overlay topology and autonomous formation protocol from [D-LNBot](https://ieeexplore.ieee.org/document/10198749/) (Kurt et al., IEEE TDSC, vol. 21, no. 4, 2024), the only LN-based botnet design in the literature. LNTest also supports custom user-defined C&C topologies, allowing researchers to evaluate how arbitrary overlay graphs behave as botnets. Each C&C node runs as a Core Lightning (CLN) instance inside its own Docker container, all connected to a single Bitcoin Core instance running on the host in regtest mode. After initial setup, all test execution is fully offline — no external network access is required.
 
 # Table of Contents
 - [Architecture](#architecture)
@@ -17,7 +17,7 @@ LNTest consists of five components:
 
 1. **Bitcoin Core** — runs on the host machine in regtest mode, providing the on-chain base layer for all Lightning nodes.
 2. **Innocent Node** — a CLN instance in a Docker container that acts as a rendezvous point for C&C server peer discovery during network formation.
-3. **Botmaster Node** — a CLN instance in a Docker container that issues commands by opening a temporary Lightning channel to a C&C server and injecting keysend payments.
+3. **Botmaster Node** — a CLN instance in a Docker container that issues commands by opening a Lightning channel to a C&C server and injecting keysend payments.
 4. **C&C Server Nodes** — CLN instances, each in its own Docker container, forming a Lightning-based overlay by opening payment channels to one another. Commands propagate through this overlay via concurrent keysend flooding.
 5. **Test Orchestrator (`lntest.py`)** — a Python script on the host that automates experiment setup, monitors propagation via POSIX shared memory, and records results.
 

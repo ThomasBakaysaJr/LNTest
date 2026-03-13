@@ -12,7 +12,7 @@ For takedown tests, filenames include a strategy marker: `T` for random takedown
   * Contains the time it took for each message to propagate through the network.
   * Includes metadata about the test configuration (number of C&C nodes, active nodes, etc.).
   * Records total setup time and total message sending time.
-  * For takedown tests, also records coverage percentage, number of nodes that received the message, total surviving nodes, and whether the network partitioned.
+  * For takedown tests, also includes coverage data: coverage percentage, number of nodes that received the message, total surviving nodes, and whether the network partitioned.
 
 * **Topology Snapshots** (`*_topology_data.json`)
   * Captures the state of the Lightning Network at the end of each test iteration.

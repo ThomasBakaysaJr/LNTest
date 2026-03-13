@@ -25,7 +25,7 @@ Large tests (100+ nodes) require many file descriptors. LNTest raises the soft l
 ulimit -n -H
 
 # Raise permanently in /etc/security/limits.conf:
-# *  hard  nofile  65536
+# * hard nofile 65536
 ```
 
 ### Docker permission denied

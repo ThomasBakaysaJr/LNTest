@@ -49,7 +49,7 @@ LNTest validates the topology file and warns about self-loops, duplicate edges, 
 
 ### Example Topologies
 
-Several example topology files are included in the `topologies/` directory: `ring_20.json` (simple ring), `star_20.json` (single hub), and `chain_20_m4.json` (equivalent to `--topology dlnbot` with 20 nodes and m=4).
+Several example topology files are included in the `topologies/` directory: `ring_20.json` (simple ring), `star_20.json` (single hub), `chain_20_m4.json` (equivalent to `--topology dlnbot` with 20 nodes and m=4), and `ba_50_m4.json` (Barabási–Albert scale-free graph with 50 nodes).
 
 ## Comparison
 
