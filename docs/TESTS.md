@@ -17,7 +17,7 @@
 
 **active_nodes (Scale active nodes):** Varies the number of active C&C servers (m) from 2 to 6 with a fixed 50-node network to study how overlay width affects propagation. Starts at m=2 because m=1 topologies fragment under `--dev-fast-gossip`.
 
-**bm_seeds (Botmaster connectivity):** Varies how many C&C servers the botmaster opens channels to simultaneously.
+**bm_seeds (Botmaster connectivity):** Varies how many C&C servers the botmaster connects to for command injection.
 
 **bm_pos (Botmaster injection point):** Tests five injection positions:
   * `-50` — Random position

@@ -1,27 +1,51 @@
 # Troubleshooting
 
-### Bitcoin error
+### Bitcoin Core errors
 
-If you encounter Bitcoin errors when a test starts (typically related to wallet loading), this usually means Bitcoin Core was already running and the script could not shut it down properly, or the machine was shut down while Bitcoin Core was still running.
-
-Kill the process (may require `sudo`):
+If you encounter Bitcoin-related errors when a test starts (wallet loading, lock file, RPC failures), this usually means bitcoind was not shut down cleanly by a previous run. Kill it and try again:
 
 ```bash
-pkill -9 bitcoind
+sudo pkill -9 bitcoind
 ```
 
-### Bitcoin lock error
+### Stale containers from a crashed run
 
-If the tester reports it cannot acquire a lock on the regtest folder, Bitcoin Core was not shut down by the previous run. Press Ctrl+C to exit the tester and try again — it usually resolves immediately.
-
-### Shared memory errors
-
-If you see "Shared memory block not found" errors during propagation monitoring, this is typically caused by Python's resource tracker prematurely unlinking shared memory blocks. The current codebase includes fixes for this (unregistering SHM blocks from the resource tracker in both host and container processes). If it still occurs, clean up manually:
+If a previous run was interrupted (Ctrl+C, crash, reboot), leftover Docker containers can cause port conflicts or name collisions on the next run. Clean up everything before retrying:
 
 ```bash
-sudo rm -rf /dev/shm/CC*
+sudo ./scripts/cleanup.sh all
 ```
 
-### Channel creation timeout
+### Too many open files
 
-If the test reports "Channels were not ready in time" and retries, this is usually a transient issue with container scheduling or gossip propagation timing. The test will automatically retry up to 5 times per iteration. If it consistently fails, try reducing the number of nodes or increasing the `NM_MAX_WAIT` environment variable.
+Large tests (100+ nodes) require many file descriptors. LNTest raises the soft limit to 65536 at startup, but this fails silently if the OS hard limit is lower. If you see "Too many open files" errors, increase the hard limit:
+
+```bash
+# Check current limits
+ulimit -n -H
+
+# Raise permanently in /etc/security/limits.conf:
+# *  hard  nofile  65536
+```
+
+### Docker permission denied
+
+LNTest requires `sudo` because it manages Docker containers and shared memory. If you see permission errors, make sure you are running with `sudo`:
+
+```bash
+sudo venv/bin/python3 lntest.py run cc_count --num-msg 3
+```
+
+Also verify the Docker daemon is running:
+
+```bash
+sudo systemctl status docker
+```
+
+### Coverage stalled warnings
+
+During takedown tests, you may see warnings like `"Coverage stalled at 30/45 nodes for 60s. Network likely partitioned."` This is expected behavior, not an error — it means the takedown successfully partitioned the network. The test records the partial coverage as a valid data point and advances to the next iteration.
+
+### Large tests appear stuck
+
+Tests with many nodes are slow by design. A 100-node test can take 30+ minutes per iteration due to channel funding, gossip propagation, and block confirmations. Tests using `--dlnbot-formation` are even slower because containers are launched with staggered delays (10–90 seconds each) to simulate realistic deployment timing.

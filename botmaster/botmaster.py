@@ -252,7 +252,7 @@ def pick_nodes(num_nodes, entry_point, valid_nodes):
     entry_point:
         <0 : random
         0-100 : position in the network
-        >0 : bottom, middle and top of the network
+        >100 : bottom, middle and top of the network
     '''
     if entry_point < 0:
         return pick_random_nodes(num_nodes, valid_nodes)

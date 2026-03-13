@@ -4,11 +4,10 @@ A testbed for designing, deploying, and evaluating Lightning Network-based botne
 
 # Table of Contents
 - [Architecture](#architecture)
-- [Setup](#setup)
 - [Usage](#usage)
-  - [Test Scenarios](#test-scenarios)
   - [Examples](#examples)
-- [Utility Scripts](#utility-scripts)
+  - [Test Scenarios](#test-scenarios)
+  - [Topology Modes](#topology-modes)
 - [Further Documentation](#further-documentation)
 
 # Architecture
@@ -24,120 +23,47 @@ LNTest consists of five components:
 Between test iterations, containers, shared memory, and node data are cleaned up automatically. Logs are preserved for debugging and cleared only during a full cleanup (`cleanup.sh all`). Bitcoin Core's regtest environment resets at the start of each test run; within a run, the same bitcoind instance is reused across iterations for efficiency.
 
 
-# Setup
-
-This testbed has been verified on Ubuntu 24.04 LTS and Ubuntu 25.04. The instructions below assume a fresh Ubuntu install.
-
-## 1. Install system dependencies
-
-Update your system and install required packages:
-
-```bash
-sudo apt update && sudo apt upgrade
-sudo apt install python3-venv git -y
-```
-
-Install Docker following the official guide for Ubuntu: [https://docs.docker.com/engine/install/ubuntu/](https://docs.docker.com/engine/install/ubuntu/)
-
-```bash
-# Add Docker's official GPG key:
-sudo apt install ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-
-# Add the repository to apt sources:
-sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-
-sudo apt update
-sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-```
-
-Verify Docker is running:
-
-```bash
-sudo systemctl status docker
-```
-
-## 2. Install Bitcoin Core
-
-Create a workspace directory, download Bitcoin Core from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/), and extract it:
-
-```bash
-mkdir -p ~/lntest
-cd ~/lntest
-# Move the downloaded tar file here, then:
-tar -xvzf bitcoin-*
-mv bitcoin-*/ bitcoin
-rm bitcoin-*.tar.gz
-```
-
-Do not run Bitcoin Core yet.
-
-## 3. Clone and configure LNTest
-
-```bash
-cd ~/lntest
-git clone https://github.com/LN-Testbed/DSN2026.git LNTest
-cd LNTest
-chmod +x setup.sh scripts/*.sh
-./setup.sh
-```
-
-The setup script will:
-* Check dependencies (Docker, Python, jq)
-* Create the Python virtual environment and install packages
-* Create config files in `~/.lightning` and `~/.bitcoin`
-* Prompt for RPC username and password
-
-You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
-
-Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
-
-
 # Usage
 
-```bash
-sudo venv/bin/python3 lntest.py <command> [options]
-```
-
-Run the sanity check to verify everything works (4 nodes, 1 message, takes a few minutes):
+Follow the [setup instructions](docs/SETUP.md), then verify everything works with the sanity check (4 nodes, 1 message, takes a few minutes):
 
 ```bash
 sudo venv/bin/python3 lntest.py small
 ```
 
-Run a specific test scenario:
+Run experiments with:
 
 ```bash
-sudo venv/bin/python3 lntest.py run <TEST_ID> [options]
-```
-
-Run `lntest.py run --help` for all available flags (topology, takedown, sweep control, etc.).
-
-**Tip:** To save terminal output to a file while still seeing it live:
-
-```bash
-sudo venv/bin/python3 lntest.py run 1 --num-msg 3 2>&1 | tee /tmp/test_output.log
+sudo venv/bin/python3 lntest.py run <test> [options]
 ```
 
 ---
 
-## Topology Modes
+## Examples
 
-The C&C overlay topology is controlled via flags. See [docs/TOPOLOGIES.md](docs/TOPOLOGIES.md) for detailed descriptions, JSON format, and examples.
+Measure how command propagation delay grows as the botnet scales from 10 to 100 C&C nodes:
 
-| Mode | Flag | Description |
-| --- | --- | --- |
-| D-LNBot (default) | `--topology dlnbot` | Orchestrator-built uniform chain |
-| D-LNBot Formation | `--dlnbot-formation` | Autonomous staggered deployment |
-| Custom | `--topology custom --topology-file <path>` | User-supplied JSON graph |
+```bash
+sudo venv/bin/python3 lntest.py run cc_count --num-msg 3
+```
+
+Simulate law enforcement taking down the most-connected nodes and measure how the botnet degrades:
+
+```bash
+sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3
+```
+
+Test the same takedown scenario with autonomous botnet formation instead of an orchestrator-built topology:
+
+```bash
+sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --dlnbot-formation
+```
+
+Run a random takedown on a custom ring topology:
+
+```bash
+sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --cc-count 20 --topology custom --topology-file topologies/ring_20.json
+```
 
 ---
 
@@ -156,62 +82,26 @@ Each test sweeps a different experimental variable. See [docs/TESTS.md](docs/TES
 
 ---
 
-## Examples
+## Topology Modes
 
-```bash
-# Scale test up to 200 nodes in steps of 20
-sudo venv/bin/python3 lntest.py run cc_count --sweep-end 200 --sweep-step 20
+The C&C overlay topology is controlled via flags. See [docs/TOPOLOGIES.md](docs/TOPOLOGIES.md) for detailed descriptions, JSON format, and examples.
 
-# Random takedown with 3 messages per iteration
-sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3
+| Mode | Flag | Description |
+| --- | --- | --- |
+| D-LNBot (default) | `--topology dlnbot` | Orchestrator-built uniform chain |
+| D-LNBot Formation | `--dlnbot-formation` | Autonomous staggered deployment |
+| Custom | `--topology custom --topology-file <path>` | User-supplied JSON graph |
 
-# Targeted takedown with autonomous D-LNBot formation
-sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --dlnbot-formation
-
-# Custom ring topology
-sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --cc-count 20 --topology custom --topology-file topologies/ring_20.json
-
-# Ad-hoc 30% targeted takedown on a scaling test
-sudo venv/bin/python3 lntest.py run cc_count --takedown --takedown-pct 0.3 --takedown-strategy targeted
-```
+---
 
 ## Output
 
 Test results are saved to the `data/` directory. See [docs/OUTPUT.md](docs/OUTPUT.md) for file formats and naming conventions.
 
 
-# Utility Scripts
-
-All operational scripts are in the `scripts/` directory.
-
-### cleanup.sh
-
-Unified cleanup script with three modes:
-
-```bash
-# Stop containers, clear shared memory and node data (between iterations)
-sudo ./scripts/cleanup.sh nodes
-
-# Full cleanup including logs, status files, and address lists
-sudo ./scripts/cleanup.sh all
-
-# Stop bitcoind and delete regtest data
-sudo ./scripts/cleanup.sh bitcoin
-```
-
-### restart_bitcoin.sh
-
-```bash
-sudo ./scripts/restart_bitcoin.sh
-```
-
-Stops Bitcoin Core, deletes regtest data for a fresh start, creates a new wallet, and starts a background block miner.
-
-Note: Does not kill any existing background miner process — that is handled by `lntest.py`.
-
-
 # Further Documentation
 
+- [docs/SETUP.md](docs/SETUP.md) — Installation and configuration
 - [docs/TOPOLOGIES.md](docs/TOPOLOGIES.md) — Topology modes, JSON format, and comparison
 - [docs/TESTS.md](docs/TESTS.md) — Test scenario details, coverage, and partition detection
 - [docs/OUTPUT.md](docs/OUTPUT.md) — Generated data structure and file formats
