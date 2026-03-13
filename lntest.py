@@ -82,11 +82,12 @@ MAX_TRY = 5
 SLEEP_INTERVAL = cfg.NM_SLEEP
 
 # configurations for the tests
+# 'range' is (sweep_end, sweep_step); sweep_start comes from parameters[var_key]
 TEST_CONFIGS = {
     'cc_count' : {
         'description': 'increasing number of C&C nodes',
         'var_key' : CC_COUNT,
-        'range' : (100, 10),
+        'range' : (100, 10),  # 10 -> 100, step 10
         'max_messages' : 10,
         'parameters': {
             CC_COUNT: 10,
@@ -165,16 +166,16 @@ TEST_CONFIGS = {
 
 def add_common_arguments(parser):
     """Add common simulation arguments to the given parser."""
-    group = parser.add_argument_group('Simulation Parameters')
-    group.add_argument('--cc-count', dest='cc_count', type=int, help='Number of C&C server nodes.')
-    group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Number of active C&C servers (m).')
-    group.add_argument('--bm-seeds', dest='bm_seeds', type=int, help='Number of seed nodes the botmaster connects to.')
-    group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Botmaster connection position (e.g., 50 for middle).')
+    group = parser.add_argument_group('Simulation Parameters (fixed values for non-sweep variables)')
+    group.add_argument('--cc-count', dest='cc_count', type=int, help='Fixed number of C&C nodes (ignored when cc_count is the sweep variable; use --sweep-start instead).')
+    group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Fixed number of active C&C servers, m (ignored when active_nodes is the sweep variable).')
+    group.add_argument('--bm-seeds', dest='bm_seeds', type=int, help='Fixed number of botmaster seed connections (ignored when bm_seeds is the sweep variable).')
+    group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Fixed botmaster injection position (ignored when bm_pos is the sweep variable).')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
 
     takedown = parser.add_argument_group('Takedown Settings')
     takedown.add_argument('--takedown', action='store_true', help='Enable node takedown during test.')
-    takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Percentage of nodes to take down (default: 0.1).')
+    takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Fraction of nodes to take down, 0.0-1.0 (default: 0.1). Ignored for takedown sweep tests.')
     takedown.add_argument('--takedown-strategy', dest='takedown_strategy', choices=['random', 'targeted'], default=None, help='Takedown strategy: random or targeted (highest-degree nodes).')
 
     topology = parser.add_argument_group('Topology Settings')
@@ -234,19 +235,21 @@ def main():
         config = TEST_CONFIGS[args.test_id].copy()
         parameters = config['parameters']
         testing = config['var_key']
-        # Only override fixed parameters; sweep variable is set via --sweep-start
-        if testing != CC_COUNT and args.cc_count is not None:
-            log.info(f'cc_count is set to {args.cc_count}')
-            parameters[CC_COUNT] = args.cc_count
-        if testing != ACTIVE_NODES and args.active_nodes is not None:
-            log.info(f'active_nodes is set to {args.active_nodes}')
-            parameters[ACTIVE_NODES] = args.active_nodes
-        if testing != BM_SEEDS and args.bm_seeds is not None:
-            log.info(f'bm_seeds is set to {args.bm_seeds}')
-            parameters[BM_SEEDS] = args.bm_seeds
-        if testing != BM_POS and args.bm_pos is not None:
-            log.info(f'bm_pos is set to {args.bm_pos}')
-            parameters[BM_POS] = args.bm_pos
+        # Override fixed parameters; sweep variable is controlled via --sweep-start/end/step
+        param_flags = [
+            (CC_COUNT, args.cc_count, '--cc-count'),
+            (ACTIVE_NODES, args.active_nodes, '--active-nodes'),
+            (BM_SEEDS, args.bm_seeds, '--bm-seeds'),
+            (BM_POS, args.bm_pos, '--bm-pos'),
+        ]
+        for param_key, arg_value, flag_name in param_flags:
+            if arg_value is not None:
+                if testing == param_key:
+                    log.warning(f'{flag_name} is ignored because {param_key} is the sweep variable. '
+                                f'Use --sweep-start to set the starting value.')
+                else:
+                    log.info(f'{param_key} is set to {arg_value}')
+                    parameters[param_key] = arg_value
         if args.num_msg is not None:
             log.info(f'num_msg is set to {args.num_msg}')
             config['max_messages'] = args.num_msg
@@ -267,8 +270,23 @@ def main():
             log.info('Takedown test is True')
             config['takedown'] = True
         if args.takedown_strategy is not None:
-            log.info(f'Takedown strategy is set to {args.takedown_strategy}')
+            existing = config.get('takedown_strategy')
+            if existing is not None and existing != args.takedown_strategy:
+                log.warning(f'Overriding preset takedown strategy "{existing}" with "{args.takedown_strategy}" '
+                            f'for test "{args.test_id}".')
             config['takedown_strategy'] = args.takedown_strategy
+
+        # Validate sweep range
+        sweep_start = parameters[config['var_key']]
+        sweep_end, sweep_step = config['range']  # (end_value, step_size)
+        if sweep_step <= 0:
+            log.error(f'Sweep step must be positive (got {sweep_step}).')
+            return
+        if sweep_start > sweep_end:
+            log.error(f'Sweep start ({sweep_start}) is greater than sweep end ({sweep_end}). '
+                      f'No iterations would run. Check --sweep-start and --sweep-end.')
+            return
+
         # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
         if args.dlnbot_formation and args.topology is not None:
             log.error('--dlnbot-formation and --topology are mutually exclusive.')
@@ -281,8 +299,11 @@ def main():
             config['mode'] = 'dlnbot'
         log.info(f'Mode is set to {config["mode"]}')
         if args.topology_file is not None:
-            config['topology_file'] = args.topology_file
-        if config['mode'] == 'custom' and args.topology_file is None:
+            if config['mode'] != 'custom':
+                log.warning('--topology-file is ignored without --topology custom.')
+            else:
+                config['topology_file'] = args.topology_file
+        if config['mode'] == 'custom' and 'topology_file' not in config:
             log.error('--topology custom requires --topology-file.')
             return
 
@@ -299,15 +320,25 @@ def main():
                 log.error('Custom topology file must specify a "nodes" field.')
                 return
             file_n = topo_data['nodes']
+            if not isinstance(file_n, int) or file_n <= 0:
+                log.error(f'Topology file "nodes" must be a positive integer (got {file_n}).')
+                return
             if args.cc_count is not None and args.cc_count != file_n:
                 log.warning(f'--cc-count {args.cc_count} conflicts with topology file ({file_n} nodes). Using {file_n}.')
             parameters[CC_COUNT] = file_n
             log.info(f'Custom topology: using {file_n} nodes from {config["topology_file"]}')
 
+            # cc_count and active_nodes sweeps don't work with custom topologies:
+            # cc_count would need a different topology file per iteration,
+            # active_nodes (m) is a D-LNBot-specific parameter with no effect here.
             if testing in (CC_COUNT, ACTIVE_NODES):
                 log.error(f'Test "{args.test_id}" is not compatible with custom topology mode. '
                           f'Custom mode supports: bm_seeds, bm_pos, takedown_random, takedown_targeted.')
                 return
+            if args.active_nodes is not None:
+                log.warning('--active-nodes is ignored in custom topology mode (m is D-LNBot-specific).')
+                # Revert to test config default (already overwritten at line 242)
+                parameters[ACTIVE_NODES] = TEST_CONFIGS[args.test_id]['parameters'][ACTIVE_NODES]
 
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct

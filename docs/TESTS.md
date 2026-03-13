@@ -30,7 +30,7 @@
 
 **takedown_targeted (Targeted takedown):** Same as takedown_random, but removes the highest-degree (most-connected) nodes first. This simulates a law enforcement strategy that targets the most critical C&C servers.
 
-All tests can be run with any topology mode via `--topology dlnbot` (default), `--dlnbot-formation`, or `--topology custom --topology-file <path>`. Running the same test on different modes produces directly comparable results that show how overlay structure affects botnet resilience.
+The botmaster and takedown tests (`bm_seeds`, `bm_pos`, `takedown_random`, `takedown_targeted`) work with all topology modes. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific and cannot be used with custom topologies.
 
 ## Coverage and Partition Detection
 

@@ -1,6 +1,6 @@
 # LNTest
 
-A testbed for the [D-LNBot](https://ieeexplore.ieee.org/document/10198749/) Lightning Network-based botnet (Kurt et al., IEEE TDSC, vol. 21, no. 4, 2024). LNTest deploys D-LNBot's chain-like C&C overlay using production-grade Bitcoin Core and Core Lightning nodes orchestrated via Docker on a Bitcoin regtest network. Beyond the built-in D-LNBot topology and its autonomous formation protocol, LNTest also supports custom user-defined C&C topologies, allowing researchers to evaluate how arbitrary overlay graphs behave as botnets. Everything runs on a single host machine with no external network dependencies.
+LNTest is a testbed for deploying and evaluating Lightning Network-based botnets. It implements the C&C overlay topology and autonomous formation protocol from [D-LNBot](https://ieeexplore.ieee.org/document/10198749/) (Kurt et al., IEEE TDSC, vol. 21, no. 4, 2024), the only LN-based botnet design in the literature. LNTest also supports custom user-defined C&C topologies, allowing researchers to evaluate how arbitrary overlay graphs behave as botnets. Each C&C node runs as a real Bitcoin Core and Core Lightning instance inside a Docker container on a local Bitcoin regtest network. After initial setup, all test execution is fully offline — no external network access is required.
 
 # Table of Contents
 - [Architecture](#architecture)
@@ -44,19 +44,19 @@ sudo venv/bin/python3 lntest.py run <test> [options]
 
 LNTest provides six test scenarios grouped into three categories:
 
-**Scalability** (D-LNBot topology only) — How does command propagation change as the botnet grows?
-- `cc_count` — Scale the number of C&C nodes from 10 to 100
-- `active_nodes` — Vary the number of active C&C servers (*m*), a D-LNBot-specific parameter that controls how many neighbors each node maintains in the chain
+**Scalability** (D-LNBot topologies only) — How does command propagation change as the botnet grows?
+- `cc_count` — Scale the number of C&C nodes (default 10 to 100)
+- `active_nodes` — Vary the number of active C&C servers (*m*), which controls how many neighbors each node maintains in the chain
 
-**Botmaster injection** (all topologies) — Does it matter how and where the botmaster connects?
+**Botmaster injection** — Does it matter how and where the botmaster connects?
 - `bm_seeds` — Change the number of C&C nodes the botmaster connects to
 - `bm_pos` — Change *where* in the network the botmaster injects commands
 
-**Resilience to takedowns** (all topologies) — How does the botnet degrade when nodes are removed?
+**Resilience to takedowns** — How does the botnet degrade when nodes are removed?
 - `takedown_random` — Remove a random percentage of C&C nodes
 - `takedown_targeted` — Remove the highest-degree nodes first (simulating informed law enforcement)
 
-> Custom topologies support the botmaster and takedown tests. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific and cannot be used with custom topologies.
+Custom topologies support the botmaster and takedown tests. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific. All default ranges can be adjusted with `--sweep-start`, `--sweep-end`, and `--sweep-step`.
 
 ---
 
@@ -86,6 +86,12 @@ Run a random takedown on a custom ring topology:
 sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --topology custom --topology-file topologies/ring_20.json
 ```
 
+Scale from 200 to 500 C&C nodes in steps of 100:
+
+```bash
+sudo venv/bin/python3 lntest.py run cc_count --num-msg 3 --sweep-start 200 --sweep-end 500 --sweep-step 100
+```
+
 ---
 
 ## Topology Modes
@@ -102,7 +108,7 @@ The C&C overlay topology is controlled via flags. See [docs/TOPOLOGIES.md](docs/
 
 ## Test Scenarios
 
-Each test sweeps a different experimental variable. See [docs/TESTS.md](docs/TESTS.md) for detailed descriptions.
+Each test sweeps a different experimental variable. All ranges are adjustable with `--sweep-start`, `--sweep-end`, and `--sweep-step`. See [docs/TESTS.md](docs/TESTS.md) for detailed descriptions.
 
 | Test Name | Description | Default Range |
 | --- | --- | --- |
