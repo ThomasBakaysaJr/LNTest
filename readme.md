@@ -9,7 +9,6 @@ A testbed for designing, deploying, and evaluating Lightning Network-based botne
   - [Generated Data \& Output](#generated-data--output)
 - [Setup](#setup)
 - [Usage](#usage)
-  - [Modes of Operation](#modes-of-operation)
   - [Topology Modes](#topology-modes)
   - [Test Scenarios (Test IDs)](#test-scenarios-test-ids)
   - [CLI Flags](#cli-flags)
@@ -109,11 +108,11 @@ sudo systemctl status docker
 
 ## 2. Install Bitcoin Core
 
-Create a working directory, download Bitcoin Core from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/), and extract it:
+Create a workspace directory, download Bitcoin Core from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/), and extract it:
 
 ```bash
-mkdir -p ~/Documents/LNBot_research_project
-cd ~/Documents/LNBot_research_project
+mkdir -p ~/lntest
+cd ~/lntest
 # Move the downloaded tar file here, then:
 tar -xvzf bitcoin-*
 mv bitcoin-*/ bitcoin
@@ -125,7 +124,7 @@ Do not run Bitcoin Core yet.
 ## 3. Clone and configure LNTest
 
 ```bash
-cd ~/Documents/LNBot_research_project
+cd ~/lntest
 git clone https://github.com/LN-Testbed/DSN2026.git LNTest
 cd LNTest
 chmod +x setup.sh scripts/*.sh
@@ -142,20 +141,6 @@ You can verify the RPC credentials by checking `config.env` and the config files
 
 Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
 
-## 4. Verify the installation
-
-```bash
-sudo venv/bin/python3 lntest.py small
-```
-
-This runs a quick sanity check (4 nodes, 1 message, 1 iteration) to verify everything is set up correctly. Data is saved to the `data/` directory.
-
-**Tip:** To save terminal output to a file while still seeing it live:
-
-```bash
-sudo venv/bin/python3 lntest.py run 1 --num-msg 3 2>&1 | tee /tmp/test_output.log
-```
-
 
 # Usage
 
@@ -163,22 +148,22 @@ sudo venv/bin/python3 lntest.py run 1 --num-msg 3 2>&1 | tee /tmp/test_output.lo
 sudo venv/bin/python3 lntest.py <command> [options]
 ```
 
-## Modes of Operation
-
-### Sanity Check (`small`)
-
-Quick end-to-end verification: creates 4 nodes, builds a minimal topology, and sends 1 message. Takes a few minutes.
+Run the sanity check to verify everything works (4 nodes, 1 message, takes a few minutes):
 
 ```bash
 sudo venv/bin/python3 lntest.py small
 ```
 
-### Run a Test (`run`)
-
-Runs a specific test scenario with full control over variable ranges and steps.
+Run a specific test scenario:
 
 ```bash
 sudo venv/bin/python3 lntest.py run <TEST_ID> [options]
+```
+
+**Tip:** To save terminal output to a file while still seeing it live:
+
+```bash
+sudo venv/bin/python3 lntest.py run 1 --num-msg 3 2>&1 | tee /tmp/test_output.log
 ```
 
 ---
@@ -312,7 +297,7 @@ Override default parameters for the `run` mode:
 * `--takedown-pct <FLOAT>` — Fraction of nodes to remove (e.g., `0.2` for 20%). Default: `0.1`.
 * `--takedown-strategy <random|targeted>` — `random` selects nodes uniformly at random. `targeted` removes the highest-degree nodes first. Default: `random`.
 
-### Sweep Control (`run` mode only)
+### Sweep Control
 
 * `--sweep-start <INT>` — Override the starting value of the sweep variable.
 * `--sweep-end <INT>` — Override the upper limit of the sweep variable.
