@@ -286,6 +286,29 @@ def main():
             log.error('--topology custom requires --topology-file.')
             return
 
+        # Custom topology: read node count from file and block incompatible tests
+        if config['mode'] == 'custom':
+            import json as _json
+            try:
+                with open(config['topology_file'], 'r') as f:
+                    topo_data = _json.load(f)
+            except Exception as e:
+                log.error(f'Could not read topology file: {e}')
+                return
+            if 'nodes' not in topo_data:
+                log.error('Custom topology file must specify a "nodes" field.')
+                return
+            file_n = topo_data['nodes']
+            if args.cc_count is not None and args.cc_count != file_n:
+                log.warning(f'--cc-count {args.cc_count} conflicts with topology file ({file_n} nodes). Using {file_n}.')
+            parameters[CC_COUNT] = file_n
+            log.info(f'Custom topology: using {file_n} nodes from {config["topology_file"]}')
+
+            if testing in (CC_COUNT, ACTIVE_NODES):
+                log.error(f'Test "{args.test_id}" is not compatible with custom topology mode. '
+                          f'Custom mode supports: bm_seeds, bm_pos, takedown_random, takedown_targeted.')
+                return
+
         config['parameters'] = parameters
         config['takedown_percentage'] = args.takedown_pct
         print_execution_plan(config)

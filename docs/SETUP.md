@@ -58,7 +58,7 @@ Do not run Bitcoin Core yet.
 
 ```bash
 cd ~/lntest
-git clone https://github.com/LN-Testbed/DSN2026.git LNTest
+git clone https://github.com/ThomasBakaysaJr/LNTest.git LNTest
 cd LNTest
 chmod +x setup.sh scripts/*.sh
 ./setup.sh

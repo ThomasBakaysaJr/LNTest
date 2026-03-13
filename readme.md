@@ -1,13 +1,14 @@
 # LNTest
 
-A testbed for designing, deploying, and evaluating Lightning Network-based botnets. Built with production-grade Bitcoin Core and Core Lightning nodes orchestrated via Docker on a Bitcoin regtest environment, LNTest runs entirely on a single host machine with no external network dependencies.
+A testbed for the [D-LNBot](https://ieeexplore.ieee.org/document/10198749/) Lightning Network-based botnet (Kurt et al., IEEE TDSC, vol. 21, no. 4, 2024). LNTest deploys D-LNBot's chain-like C&C overlay using production-grade Bitcoin Core and Core Lightning nodes orchestrated via Docker on a Bitcoin regtest network. Beyond the built-in D-LNBot topology and its autonomous formation protocol, LNTest also supports custom user-defined C&C topologies, allowing researchers to evaluate how arbitrary overlay graphs behave as botnets. Everything runs on a single host machine with no external network dependencies.
 
 # Table of Contents
 - [Architecture](#architecture)
 - [Usage](#usage)
+  - [What Can You Test?](#what-can-you-test)
   - [Examples](#examples)
-  - [Test Scenarios](#test-scenarios)
   - [Topology Modes](#topology-modes)
+  - [Test Scenarios](#test-scenarios)
 - [Further Documentation](#further-documentation)
 
 # Architecture
@@ -39,21 +40,41 @@ sudo venv/bin/python3 lntest.py run <test> [options]
 
 ---
 
+## What Can You Test?
+
+LNTest provides six test scenarios grouped into three categories:
+
+**Scalability** (D-LNBot topology only) — How does command propagation change as the botnet grows?
+- `cc_count` — Scale the number of C&C nodes from 10 to 100
+- `active_nodes` — Vary the number of active C&C servers (*m*), a D-LNBot-specific parameter that controls how many neighbors each node maintains in the chain
+
+**Botmaster injection** (all topologies) — Does it matter how and where the botmaster connects?
+- `bm_seeds` — Change the number of C&C nodes the botmaster connects to
+- `bm_pos` — Change *where* in the network the botmaster injects commands
+
+**Resilience to takedowns** (all topologies) — How does the botnet degrade when nodes are removed?
+- `takedown_random` — Remove a random percentage of C&C nodes
+- `takedown_targeted` — Remove the highest-degree nodes first (simulating informed law enforcement)
+
+> Custom topologies support the botmaster and takedown tests. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific and cannot be used with custom topologies.
+
+---
+
 ## Examples
 
-Measure how command propagation delay grows as the botnet scales from 10 to 100 C&C nodes:
+Scale the botnet from 10 to 100 C&C nodes and measure how propagation delay grows:
 
 ```bash
 sudo venv/bin/python3 lntest.py run cc_count --num-msg 3
 ```
 
-Simulate law enforcement taking down the most-connected nodes and measure how the botnet degrades:
+Test how botmaster injection point affects command delivery:
 
 ```bash
-sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3
+sudo venv/bin/python3 lntest.py run bm_pos --num-msg 3
 ```
 
-Test the same takedown scenario with autonomous botnet formation instead of an orchestrator-built topology:
+Simulate law enforcement targeting the most-connected nodes, using the autonomous formation protocol:
 
 ```bash
 sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --dlnbot-formation
@@ -62,8 +83,20 @@ sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --dlnbot-forma
 Run a random takedown on a custom ring topology:
 
 ```bash
-sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --cc-count 20 --topology custom --topology-file topologies/ring_20.json
+sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --topology custom --topology-file topologies/ring_20.json
 ```
+
+---
+
+## Topology Modes
+
+The C&C overlay topology is controlled via flags. See [docs/TOPOLOGIES.md](docs/TOPOLOGIES.md) for detailed descriptions, JSON format, and examples.
+
+| Mode | Flag | Description |
+| --- | --- | --- |
+| D-LNBot (default) | `--topology dlnbot` | Chain-like C&C overlay |
+| D-LNBot Formation | `--dlnbot-formation` | Autonomous staggered deployment |
+| Custom | `--topology custom --topology-file <path>` | User-supplied JSON graph |
 
 ---
 
@@ -79,18 +112,6 @@ Each test sweeps a different experimental variable. See [docs/TESTS.md](docs/TES
 | `bm_pos` | Botmaster injection point | -50 to 150, step 50 |
 | `takedown_random` | Random takedown sweep | 10% to 50%, step 10% |
 | `takedown_targeted` | Targeted takedown sweep | 10% to 50%, step 10% |
-
----
-
-## Topology Modes
-
-The C&C overlay topology is controlled via flags. See [docs/TOPOLOGIES.md](docs/TOPOLOGIES.md) for detailed descriptions, JSON format, and examples.
-
-| Mode | Flag | Description |
-| --- | --- | --- |
-| D-LNBot (default) | `--topology dlnbot` | Orchestrator-built uniform chain |
-| D-LNBot Formation | `--dlnbot-formation` | Autonomous staggered deployment |
-| Custom | `--topology custom --topology-file <path>` | User-supplied JSON graph |
 
 ---
 
