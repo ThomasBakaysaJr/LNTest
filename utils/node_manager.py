@@ -11,7 +11,7 @@ from utils.docker_helpers import get_all_nodes, get_cc_nodes, sort_containers
 from utils.shm_status import ShmStatus
 from utils import topology
 
-NUM_CC = 'num_cc'
+CC_COUNT = 'cc_count'
 ACTIVE_NODES = 'active_nodes'
 
 class Node:
@@ -196,7 +196,7 @@ class NodeManager:
         import json as _json
         cc_nodes = []
         parameters = config['parameters']
-        num_nodes_kill = int(parameters[NUM_CC] * percentage)
+        num_nodes_kill = int(parameters[CC_COUNT] * percentage)
 
         # get the list of running CC nodes
         while not cc_nodes:

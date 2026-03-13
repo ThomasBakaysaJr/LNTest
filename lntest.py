@@ -70,8 +70,7 @@ TIMES_JSON = 'time_data.json'
 TOPO_JSON = 'topology_data.json'
 
 # constant names for the variables we use
-TEST_VAR = 'test_var' # in the test_values dict, this is the key for the variable that changes
-NUM_CC = 'num_cc'
+CC_COUNT = 'cc_count'
 ACTIVE_NODES = 'active_nodes'
 BM_SEEDS = 'bm_seeds'
 BM_POS = 'bm_pos'
@@ -84,84 +83,78 @@ SLEEP_INTERVAL = cfg.NM_SLEEP
 
 # configurations for the tests
 TEST_CONFIGS = {
-    '1' : {
+    'cc_count' : {
         'description': 'increasing number of C&C nodes',
-        'var_key' : NUM_CC,
+        'var_key' : CC_COUNT,
         'range' : (100, 10),
-        'multiplier': 1,
         'max_messages' : 10,
         'parameters': {
-            NUM_CC: 10,
+            CC_COUNT: 10,
             ACTIVE_NODES: 4,
             BM_SEEDS: 1,
             BM_POS: 50
         }
     },
-    '2' : {
-        'description': 'increasing number of active nodes',
+    'active_nodes' : {
+        'description': 'increasing number of active C&C servers (m)',
         'var_key' : ACTIVE_NODES,
         'range' : (6, 1),
-        'multiplier': 1,
         'max_messages' : 10,
         'parameters': {
-            NUM_CC: 50,
+            CC_COUNT: 50,
             ACTIVE_NODES: 2,
             BM_SEEDS: 1,
             BM_POS: 50
         }
     },
-    '3' : {
+    'bm_seeds' : {
         'description': 'increasing number of botmaster seed connections',
         'var_key' : BM_SEEDS,
         'range' : (6, 1),
-        'multiplier': 1,
         'max_messages' : 10,
         'parameters': {
-            NUM_CC: 50,
+            CC_COUNT: 50,
             ACTIVE_NODES: 4,
             BM_SEEDS: 1,
             BM_POS: 50
         }
     },
-    '4' : {
+    'bm_pos' : {
         'description': 'different botmaster channel connection locations',
         'var_key' : BM_POS,
         'range' : (150, 50),
-        'multiplier': 1,
         'max_messages' : 10,
         'parameters': {
-            NUM_CC: 50,
+            CC_COUNT: 50,
             ACTIVE_NODES: 4,
             BM_SEEDS: 1,
             BM_POS: -50
         }
     },
-    '5' : {
+    'takedown_random' : {
         'description': 'random takedown with increasing percentage of C&C nodes removed',
         'var_key' : TAKEDOWN_PCT,
         'takedown' : True,
         'takedown_strategy': 'random',
         'range' : (50, 10),
-        'multiplier': 1,
         'max_messages' : 10,
         'parameters': {
-            NUM_CC: 50,
+            CC_COUNT: 50,
             ACTIVE_NODES: 4,
             BM_SEEDS: 1,
             BM_POS: 50,
             TAKEDOWN_PCT: 10
         }
     },
-    '6' : {
+    'takedown_targeted' : {
         'description': 'targeted takedown removing highest-degree C&C nodes',
         'var_key' : TAKEDOWN_PCT,
         'takedown' : True,
         'takedown_strategy': 'targeted',
         'range' : (50, 10),
-        'multiplier': 1,
         'max_messages' : 10,
         'parameters': {
-            NUM_CC: 50,
+            CC_COUNT: 50,
             ACTIVE_NODES: 4,
             BM_SEEDS: 1,
             BM_POS: 50,
@@ -173,8 +166,8 @@ TEST_CONFIGS = {
 def add_common_arguments(parser):
     """Add common simulation arguments to the given parser."""
     group = parser.add_argument_group('Simulation Parameters')
-    group.add_argument('--num-cc', dest='num_cc', type=int, help='Starting number of CC servers.')
-    group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Starting number of active nodes.')
+    group.add_argument('--cc-count', dest='cc_count', type=int, help='Number of C&C server nodes.')
+    group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Number of active C&C servers (m).')
     group.add_argument('--bm-seeds', dest='bm_seeds', type=int, help='Number of seed nodes the botmaster connects to.')
     group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Botmaster connection position (e.g., 50 for middle).')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
@@ -203,7 +196,7 @@ def main():
 
     # Subcommand: run
     parser_run = subparsers.add_parser('run', help='Run a specific test configuration.')
-    parser_run.add_argument('test_id', choices=TEST_CONFIGS.keys(), help='ID of the test to run.')
+    parser_run.add_argument('test_id', choices=TEST_CONFIGS.keys(), help='Test to run (e.g., cc_count, active_nodes, takedown_random).')
     parser_run.add_argument('--sweep-start', dest='sweep_start', type=int, help='Override the starting value of the sweep variable.')
     parser_run.add_argument('--sweep-end', dest='sweep_end', type=int, help='Override the ending value of the sweep variable.')
     parser_run.add_argument('--sweep-step', dest='sweep_step', type=int, help='Override the step size for the sweep variable.')
@@ -222,12 +215,12 @@ def main():
         log.info('Running sanity check: 4 nodes, active_nodes=2, 1 message.')
         config = {
             'description': 'sanity check',
-            'var_key': NUM_CC,
+            'var_key': CC_COUNT,
             'range': (4, 1),
             'max_messages': 1,
             'mode': 'dlnbot',
             'parameters': {
-                NUM_CC: 4,
+                CC_COUNT: 4,
                 ACTIVE_NODES: 2,
                 BM_SEEDS: 1,
                 BM_POS: 50
@@ -242,9 +235,9 @@ def main():
         parameters = config['parameters']
         testing = config['var_key']
         # Only override fixed parameters; sweep variable is set via --sweep-start
-        if testing != NUM_CC and args.num_cc is not None:
-            log.info(f'num_cc is set to {args.num_cc}')
-            parameters[NUM_CC] = args.num_cc
+        if testing != CC_COUNT and args.cc_count is not None:
+            log.info(f'cc_count is set to {args.cc_count}')
+            parameters[CC_COUNT] = args.cc_count
         if testing != ACTIVE_NODES and args.active_nodes is not None:
             log.info(f'active_nodes is set to {args.active_nodes}')
             parameters[ACTIVE_NODES] = args.active_nodes
@@ -364,8 +357,8 @@ def run_test(in_config, manager : NodeManager):
 
             cc_start_time = time.time()
 
-            log.info(f'\n\n\nRunning init for a total of {parameters[NUM_CC]} nodes with values \n{parameters}.')
-            channels_created = manager.setup_test(parameters[NUM_CC], parameters[ACTIVE_NODES], mode=config.get('mode', 'dlnbot'))
+            log.info(f'\n\n\nRunning init for a total of {parameters[CC_COUNT]} nodes with values \n{parameters}.')
+            channels_created = manager.setup_test(parameters[CC_COUNT], parameters[ACTIVE_NODES], mode=config.get('mode', 'dlnbot'))
 
             log.info(f'Setup finished at {get_time()}')
 
@@ -383,8 +376,8 @@ def run_test(in_config, manager : NodeManager):
             # Build topology based on mode
             mode = config.get('mode', 'dlnbot')
             if mode == 'dlnbot':
-                edges = NodeManager.build_chain_edges(parameters[NUM_CC], parameters[ACTIVE_NODES])
-                log.info(f'Building D-LNBot chain topology (n={parameters[NUM_CC]}, m={parameters[ACTIVE_NODES]}, {len(edges)} edges)...')
+                edges = NodeManager.build_chain_edges(parameters[CC_COUNT], parameters[ACTIVE_NODES])
+                log.info(f'Building D-LNBot chain topology (n={parameters[CC_COUNT]}, m={parameters[ACTIVE_NODES]}, {len(edges)} edges)...')
                 if not manager.build_topology(edges):
                     log.warning('Topology build failed. Retrying...')
                     success = False
@@ -393,7 +386,7 @@ def run_test(in_config, manager : NodeManager):
                 log.info('Waiting 10s for node status updates...')
                 time.sleep(10)
             elif mode == 'custom':
-                edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[NUM_CC])
+                edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[CC_COUNT])
                 if edges is None:
                     log.error('Custom topology loading failed. Aborting.')
                     monitor.stop()
