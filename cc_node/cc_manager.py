@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 import random
 import os
+import signal
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
 
@@ -99,8 +100,26 @@ def main():
     balance_counter = 0
     connect_to_innocent()
 
+    def _alarm_handler(signum, frame):
+        raise TimeoutError("CC_Manager loop iteration timed out")
+
+    signal.signal(signal.SIGALRM, _alarm_handler)
+
+    # Formation timeout: once CHANNELS_CREATED, exit after NODE_FORMATION_TIMEOUT
+    # seconds even if the innocent channel isn't closed yet. Prevents late-joining
+    # nodes from looping forever waiting for MAX_ACTIVE_NODES inbound connections.
+    NODE_FORMATION_TIMEOUT = int(os.getenv('NODE_FORMATION_TIMEOUT', 60))
+    formation_start = None
+
     while ln_checker.has_channel_with(INNOCENT_NODE_ID) or not CHANNELS_CREATED or balance_counter == 0:
+        if CHANNELS_CREATED:
+            if formation_start is None:
+                formation_start = time.time()
+            elif time.time() - formation_start > NODE_FORMATION_TIMEOUT:
+                logging.info(f'CC_Manager: Formation timeout ({NODE_FORMATION_TIMEOUT}s). Exiting topology formation.')
+                break
         try:
+            signal.alarm(90)  # 90s watchdog for blocking RPC calls
             create_channels()
             if balance_counter >= CHANNEL_BALANCE_COUNTER:
                 balance_counter = 0
@@ -108,15 +127,18 @@ def main():
                 # once that's true, then we fund a channel with the innocent node
                 if check_outbound_channels():
                     fund_innocent_channel()
-                ln_checker.balance_all_channels()
             time.sleep(1)
             balance_counter += 1
+        except TimeoutError:
+            logging.warning("main: Loop iteration timed out (SIGALRM). Continuing.")
         except KeyboardInterrupt:
             logging.info("main: Script terminated by user.")
             break
         except Exception as e:
             logging.error(f"main: An error occurred in the main loop: {e}")
             time.sleep(5)
+        finally:
+            signal.alarm(0)  # Cancel any pending alarm
     logging.info(f'Node has finished creating connections. Exiting out of CC_manager.')
 
 

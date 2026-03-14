@@ -59,7 +59,7 @@ extract_address_and_id() {
     NODE_NAME="InnocentNode"
 
     # Extract the information using the Docker exec command
-    NODE_INFO=$(sudo docker exec -it $NODE_NAME lightning-cli --regtest getinfo)
+    NODE_INFO=$(sudo docker exec $NODE_NAME lightning-cli --regtest getinfo)
 
     # Parse the address and ID from the JSON output
     NODE_ID=$(echo $NODE_INFO | jq -r '.id')

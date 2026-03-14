@@ -339,7 +339,7 @@ def load_funded_nodes() -> set:
 
     return funded_nodes
 
-def interactive_command_sender():
+def interactive_command_sender(funded_nodes):
     """
     Allow the user to send commands interactively to the node BM funded a channel with,
     appending a persistent counter to the user input.
@@ -353,7 +353,8 @@ def interactive_command_sender():
         if user_input.lower() == 'quit':
             print("Exiting.")
             break
-        send_msg(user_input, counter)
+        send_msg(user_input, counter, funded_nodes)
+        counter = load_counter()  # Reload after send_msg increments it
 
 
     save_counter(counter)  # Save the counter when exiting
