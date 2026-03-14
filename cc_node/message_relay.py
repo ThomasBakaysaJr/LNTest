@@ -101,12 +101,9 @@ def main():
                 CONNECTING = False
             elif ln_checker.get_state() != 'connected':
                 CONNECTING = True
-                
+
             update_counter = 0
             SENDING = False
-        elif update_counter > max_counter:
-            if is_node_ready(status):
-                CONNECTING = True
         else:
             update_counter += 1
 
@@ -217,8 +214,9 @@ def get_connected_nodes():
         logging.info(f"Total channels retrieved: {len(channels)}")
         
         for channel in channels:
-            # Extract capacity in satoshis
-            capacity = int(channel.get("amount_msat", 0)) // 10000000  # Convert msat to satoshis
+            # Derive a key that matches DISCOVERY_RULE_DIVISOR / BOTMASTER_RULE_DIVISOR
+            # e.g. innocent channel: 190000 sat = 190000000 msat // 10^7 = 19
+            capacity = int(channel.get("amount_msat", 0)) // 10000000
             logging.info(f"Channel capacity: {capacity}, Peer: {channel['peer_id']}")
 
             # Add this channel if its not the innocent channel (i.e. doesn't match discovery rule)
