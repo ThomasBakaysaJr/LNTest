@@ -6,7 +6,6 @@ LNTest is a testbed for deploying and evaluating Lightning Network-based botnets
 - [Architecture](#architecture)
 - [Usage](#usage)
   - [What Can You Test?](#what-can-you-test)
-  - [Examples](#examples)
   - [Topology Modes](#topology-modes)
   - [Test Scenarios](#test-scenarios)
 - [Further Documentation](#further-documentation)
@@ -55,43 +54,9 @@ LNTest provides five test scenarios grouped into three categories:
 - `takedown_random` — Remove a random percentage of C&C nodes
 - `takedown_targeted` — Remove the highest-degree nodes first (simulating informed law enforcement)
 
-The `--inject` flag controls where the botmaster connects. It accepts explicit node IDs (`--inject CC5,CC12`) or percentage positions (`--inject %50`) that resolve dynamically per iteration. When multiple injection points are specified, the botmaster sends to all of them in parallel. Default is CC1 (deterministic); the `injection` sweep test uses random selection. See [docs/TESTS.md](docs/TESTS.md) for details.
+The `--inject` flag controls where the botmaster connects. It accepts explicit node IDs (e.g., `--inject CC5,CC12`). When multiple injection points are specified, the botmaster sends to all of them in parallel. Default is CC1 (deterministic); the `injection` sweep test uses random selection when `--inject` is omitted. See [docs/TESTS.md](docs/TESTS.md) for details.
 
 Custom topologies support the injection and takedown tests. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific. All default ranges can be adjusted with `--sweep-start`, `--sweep-end`, and `--sweep-step`.
-
----
-
-## Examples
-
-Scale the botnet from 10 to 100 C&C nodes and measure how propagation delay grows:
-
-```bash
-sudo venv/bin/python3 lntest.py run cc_count --num-msg 3
-```
-
-Sweep the number of botmaster injection points from 1 to 6:
-
-```bash
-sudo venv/bin/python3 lntest.py run injection --num-msg 3
-```
-
-Simulate law enforcement targeting the most-connected nodes, using the autonomous formation protocol:
-
-```bash
-sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --dlnbot-formation
-```
-
-Run a random takedown on a custom ring topology:
-
-```bash
-sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --topology custom --topology-file topologies/ring_20.json
-```
-
-Scale from 200 to 500 C&C nodes in steps of 100:
-
-```bash
-sudo venv/bin/python3 lntest.py run cc_count --num-msg 3 --sweep-start 200 --sweep-end 500 --sweep-step 100
-```
 
 ---
 

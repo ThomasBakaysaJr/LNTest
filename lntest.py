@@ -28,6 +28,22 @@ from utils import sys_monitor
 
 log = logging.getLogger(__name__)
 
+# ANSI escape codes for terminal colors
+RED = '\033[91m'
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def warn_red(msg):
+    """Print a prominent red warning to both logger and terminal."""
+    log.warning(msg)
+    print(f'\n{RED}{BOLD}WARNING: {msg}{RESET}\n')
+
+def error_red(msg):
+    """Print a prominent red error to the terminal and log file (not duplicated on console)."""
+    # Log at DEBUG so it reaches the file handler but not the console (console level = INFO)
+    log.debug(f'[BLOCKED] {msg}')
+    print(f'{RED}{BOLD}ERROR: {msg}{RESET}')
+
 # Raise file descriptor limit to avoid "Too many open files" with large node counts
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (min(65536, hard), hard))
@@ -150,18 +166,14 @@ TEST_CONFIGS = {
 def add_common_arguments(parser):
     """Add common simulation arguments to the given parser."""
     group = parser.add_argument_group('Simulation Parameters (fixed values for non-sweep variables)')
-    group.add_argument('--cc-count', dest='cc_count', type=int, help='Fixed number of C&C nodes (ignored when cc_count is the sweep variable; use --sweep-start instead).')
-    group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Fixed number of active C&C servers, m (ignored when active_nodes is the sweep variable).')
+    group.add_argument('--nodes', dest='cc_count', type=int,
+        help='Fixed network size (number of C&C nodes). Ignored when cc_count is the sweep variable; use --sweep-start instead.')
+    group.add_argument('--m', dest='active_nodes', type=int,
+        help='Fixed overlay width (active C&C servers per node). Ignored when active_nodes is the sweep variable; use --sweep-start instead.')
     group.add_argument('--inject', dest='inject', type=str, default=None,
-        help='Botmaster injection points. Explicit nodes: "CC5,CC12,CC30". '
-             'Percentage positions: "%%50" or "%%0,%%50,%%100" (resolved dynamically per iteration). '
-             'Default: 1 random CC node.')
+        help='Botmaster injection points (e.g., "CC5,CC12,CC30"). '
+             'Default: CC1 (deterministic). Injection sweep uses random nodes when omitted.')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
-
-    takedown = parser.add_argument_group('Takedown Settings')
-    takedown.add_argument('--takedown', action='store_true', help='Enable node takedown during test.')
-    takedown.add_argument('--takedown-pct', dest='takedown_pct', type=float, default=0.1, help='Fraction of nodes to take down, 0.0-1.0 (default: 0.1). Ignored for takedown sweep tests.')
-    takedown.add_argument('--takedown-strategy', dest='takedown_strategy', choices=['random', 'targeted'], default=None, help='Takedown strategy: random or targeted (highest-degree nodes).')
 
     topology = parser.add_argument_group('Topology Settings')
     topology.add_argument('--topology', dest='topology', choices=['dlnbot', 'custom'], default=None, help='Topology mode: dlnbot (D-LNBot sequential chain, built by orchestrator) or custom (user-supplied JSON topology file, built by orchestrator). Default is dlnbot unless --dlnbot-formation is used.')
@@ -211,18 +223,17 @@ def main():
                 INJECTION_COUNT: 1,
             }
         }
-        config['takedown_percentage'] = 0.1
         all_configs.append(config)
         run_test(config, manager)
 
     elif args.command == 'run':
-        config = TEST_CONFIGS[args.test_id].copy()
+        config = copy.deepcopy(TEST_CONFIGS[args.test_id])
         parameters = config['parameters']
         testing = config['var_key']
         # Override fixed parameters; sweep variable is controlled via --sweep-start/end/step
         param_flags = [
-            (CC_COUNT, args.cc_count, '--cc-count'),
-            (ACTIVE_NODES, args.active_nodes, '--active-nodes'),
+            (CC_COUNT, args.cc_count, '--nodes'),
+            (ACTIVE_NODES, args.active_nodes, '--m'),
         ]
         for param_key, arg_value, flag_name in param_flags:
             if arg_value is not None:
@@ -233,34 +244,21 @@ def main():
                     log.info(f'{param_key} is set to {arg_value}')
                     parameters[param_key] = arg_value
 
-        # Parse --inject: explicit node IDs or percentage positions
+        # Parse --inject: explicit node IDs (e.g., CC5,CC12,CC30)
         if args.inject is not None:
             tokens = [t.strip() for t in args.inject.split(',')]
-            if tokens[0].startswith('%'):
-                # Percentage mode: %0, %50, %100
-                try:
-                    config['inject_pcts'] = [int(t.lstrip('%')) for t in tokens]
-                except ValueError:
-                    log.error('Invalid percentage in --inject. Use %0, %50, %100, etc.')
+            for name in tokens:
+                if not re.match(r'^CC\d+$', name):
+                    error_red(f'Invalid node ID "{name}". Use CC1, CC5, etc.')
                     return
-                for pct in config['inject_pcts']:
-                    if not (0 <= pct <= 100):
-                        log.error(f'Percentage {pct} out of range [0, 100].')
-                        return
-                parameters[INJECTION_COUNT] = len(config['inject_pcts'])
-                log.info(f'Injection: {len(config["inject_pcts"])} percentage position(s): {config["inject_pcts"]}')
-            else:
-                # Explicit node IDs: CC5, CC12, CC30
-                for name in tokens:
-                    if not re.match(r'^CC\d+$', name):
-                        log.error(f'Invalid node ID "{name}". Use CC1, CC5, etc. or %50 for percentage.')
-                        return
-                config['inject_nodes'] = tokens
-                parameters[INJECTION_COUNT] = len(tokens)
-                log.info(f'Injection: explicit nodes {tokens}')
+            config['inject_nodes'] = tokens
+            parameters[INJECTION_COUNT] = len(tokens)
+            log.info(f'Injection: explicit nodes {tokens}')
             if testing == INJECTION_COUNT:
-                log.warning('--inject overrides the injection sweep variable. '
-                            'The test will use these specific nodes instead of sweeping injection count.')
+                error_red('--inject cannot be used with the injection sweep. '
+                          'The sweep needs to vary the NUMBER of injection points; '
+                          '--inject fixes specific nodes. Omit --inject to use random selection.')
+                return
         if args.num_msg is not None:
             log.info(f'num_msg is set to {args.num_msg}')
             config['max_messages'] = args.num_msg
@@ -277,30 +275,34 @@ def main():
             temp_range = list(config['range'])
             temp_range[1] = args.sweep_step
             config['range'] = temp_range
-        if args.takedown:
-            log.info('Takedown test is True')
-            config['takedown'] = True
-        if args.takedown_strategy is not None:
-            existing = config.get('takedown_strategy')
-            if existing is not None and existing != args.takedown_strategy:
-                log.warning(f'Overriding preset takedown strategy "{existing}" with "{args.takedown_strategy}" '
-                            f'for test "{args.test_id}".')
-            config['takedown_strategy'] = args.takedown_strategy
-
         # Validate sweep range
         sweep_start = parameters[config['var_key']]
         sweep_end, sweep_step = config['range']  # (end_value, step_size)
         if sweep_step <= 0:
-            log.error(f'Sweep step must be positive (got {sweep_step}).')
+            error_red(f'Sweep step must be positive (got {sweep_step}).')
             return
         if sweep_start > sweep_end:
-            log.error(f'Sweep start ({sweep_start}) is greater than sweep end ({sweep_end}). '
+            error_red(f'Sweep start ({sweep_start}) is greater than sweep end ({sweep_end}). '
                       f'No iterations would run. Check --sweep-start and --sweep-end.')
             return
 
+        # E2: Validate m >= 2 for active_nodes sweep
+        if testing == ACTIVE_NODES and parameters[ACTIVE_NODES] < 2:
+            error_red('active_nodes sweep must start at m >= 2. '
+                      'm=1 topologies fragment under --dev-fast-gossip.')
+            return
+
+        # E3: Cap takedown percentage at 90%
+        if testing == TAKEDOWN_PCT:
+            effective_end = args.sweep_end if args.sweep_end is not None else config['range'][0]
+            if effective_end > 90:
+                error_red(f'Takedown percentage cannot exceed 90% (got {effective_end}%). '
+                          f'At least 10% of nodes must survive.')
+                return
+
         # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
         if args.dlnbot_formation and args.topology is not None:
-            log.error('--dlnbot-formation and --topology are mutually exclusive.')
+            error_red('--dlnbot-formation and --topology are mutually exclusive.')
             return
         if args.dlnbot_formation:
             config['mode'] = 'dlnbot-formation'
@@ -309,13 +311,40 @@ def main():
         else:
             config['mode'] = 'dlnbot'
         log.info(f'Mode is set to {config["mode"]}')
+
+        # Formation mode warnings
+        config['warnings'] = []
+        if config['mode'] == 'dlnbot-formation':
+            if testing == ACTIVE_NODES:
+                config['warnings'].append(
+                    'active_nodes sweep with dlnbot-formation is NOT a single-variable experiment. '
+                    'm changes BOTH autonomous formation topology AND propagation behavior. '
+                    'Results show how different m values affect the GENERATED topology.')
+            if args.active_nodes is not None and testing != ACTIVE_NODES:
+                config['warnings'].append(
+                    f'--m {args.active_nodes} in formation mode changes the autonomous '
+                    f'topology structure (MAX_ACTIVE_NODES, MAX_PEERS in cc_manager).')
+            if testing == CC_COUNT:
+                config['warnings'].append(
+                    'cc_count sweep with dlnbot-formation: formation topology is nondeterministic. '
+                    'Results will have higher variance than dlnbot mode. '
+                    'Run multiple repetitions for statistical significance.')
+            if testing == INJECTION_COUNT:
+                config['warnings'].append(
+                    'injection sweep with dlnbot-formation: topology is rebuilt each iteration '
+                    'with nondeterministic formation. Results are confounded by topology variance. '
+                    'Consider using --topology dlnbot or custom for cleaner results.')
+
+        # E1: --topology-file without --topology custom is a hard error
         if args.topology_file is not None:
             if config['mode'] != 'custom':
-                log.warning('--topology-file is ignored without --topology custom.')
+                error_red('--topology-file requires --topology custom. '
+                          'Did you mean: --topology custom --topology-file <path>?')
+                return
             else:
                 config['topology_file'] = args.topology_file
         if config['mode'] == 'custom' and 'topology_file' not in config:
-            log.error('--topology custom requires --topology-file.')
+            error_red('--topology custom requires --topology-file.')
             return
 
         # Custom topology: read node count from file and block incompatible tests
@@ -325,17 +354,17 @@ def main():
                 with open(config['topology_file'], 'r') as f:
                     topo_data = _json.load(f)
             except Exception as e:
-                log.error(f'Could not read topology file: {e}')
+                error_red(f'Could not read topology file: {e}')
                 return
             if 'nodes' not in topo_data:
-                log.error('Custom topology file must specify a "nodes" field.')
+                error_red('Custom topology file must specify a "nodes" field.')
                 return
             file_n = topo_data['nodes']
             if not isinstance(file_n, int) or file_n <= 0:
-                log.error(f'Topology file "nodes" must be a positive integer (got {file_n}).')
+                error_red(f'Topology file "nodes" must be a positive integer (got {file_n}).')
                 return
             if args.cc_count is not None and args.cc_count != file_n:
-                log.warning(f'--cc-count {args.cc_count} conflicts with topology file ({file_n} nodes). Using {file_n}.')
+                log.warning(f'--nodes {args.cc_count} conflicts with topology file ({file_n} nodes). Using {file_n}.')
             parameters[CC_COUNT] = file_n
             log.info(f'Custom topology: using {file_n} nodes from {config["topology_file"]}')
 
@@ -343,16 +372,15 @@ def main():
             # cc_count would need a different topology file per iteration,
             # active_nodes (m) is a D-LNBot-specific parameter with no effect here.
             if testing in (CC_COUNT, ACTIVE_NODES):
-                log.error(f'Test "{args.test_id}" is not compatible with custom topology mode. '
+                error_red(f'Test "{args.test_id}" is not compatible with custom topology mode. '
                           f'Custom mode supports: injection, takedown_random, takedown_targeted.')
                 return
             if args.active_nodes is not None:
-                log.warning('--active-nodes is ignored in custom topology mode (m is D-LNBot-specific).')
-                # Revert to test config default (already overwritten at line 242)
+                log.warning('--m is ignored in custom topology mode (m is D-LNBot-specific).')
+                # Revert to test config default
                 parameters[ACTIVE_NODES] = TEST_CONFIGS[args.test_id]['parameters'][ACTIVE_NODES]
 
         config['parameters'] = parameters
-        config['takedown_percentage'] = args.takedown_pct
         print_execution_plan(config)
         if not confirm_test():
             log.info('Exiting tester.')
@@ -469,23 +497,13 @@ def run_test(in_config, manager : NodeManager):
             # dlnbot-formation: cc_manager handles formation, nothing to build here
 
             # Resolve injection points for this iteration
-            if 'inject_pcts' in config:
-                # Percentage mode: resolve %N to CC node names based on current CC_COUNT
-                n = parameters[CC_COUNT]
-                inject_nodes = []
-                for pct in config['inject_pcts']:
-                    idx = round((n - 1) * pct / 100) + 1  # 1-indexed CC number
-                    inject_nodes.append(f'CC{idx}')
-                config['inject_nodes'] = inject_nodes
-                log.info(f'Resolved injection percentages to: {inject_nodes}')
-            elif 'inject_nodes' in config:
+            if 'inject_nodes' in config:
                 # Explicit mode: validate that all specified nodes exist in this iteration
                 n = parameters[CC_COUNT]
                 for name in config['inject_nodes']:
                     cc_num = int(re.search(r'CC(\d+)', name).group(1))
                     if cc_num < 1 or cc_num > n:
-                        log.error(f'{name} does not exist in this iteration (only CC1-CC{n} available). '
-                                  f'Use percentage syntax (e.g., --inject %50) for cc_count sweeps.')
+                        error_red(f'{name} does not exist in this iteration (only CC1-CC{n} available).')
                         monitor.stop()
                         _active_monitor = None
                         stop_bitcoinminer()
@@ -498,11 +516,8 @@ def run_test(in_config, manager : NodeManager):
             # else: injection sweep with no --inject → random selection (deferred to botmaster.py)
 
             if config.get('takedown', False):
-                # Derive takedown percentage from parameter (integer %) or fallback
-                if TAKEDOWN_PCT in parameters:
-                    takedown_pct = parameters[TAKEDOWN_PCT] / 100.0
-                else:
-                    takedown_pct = config.get('takedown_percentage', 0.1)
+                # Takedown percentage always comes from the sweep variable
+                takedown_pct = parameters[TAKEDOWN_PCT] / 100.0
                 takedown_strategy = config.get('takedown_strategy', 'random')
                 log.info(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.')
                 if not manager.takedown(config, takedown_pct, takedown_strategy):
@@ -673,12 +688,14 @@ def print_execution_plan(config):
         strategy = config.get('takedown_strategy', 'random')
         if var_key == TAKEDOWN_PCT:
             log.info(f'  Takedown       : {strategy}, sweep {start}%-{end}%')
-        else:
-            pct = config.get('takedown_percentage', 0.1)
-            log.info(f'  Takedown       : {strategy}, {pct*100:.0f}%')
 
     if config.get('topology_file'):
         log.info(f'  Topology file  : {config["topology_file"]}')
+
+    # Display red warnings for confounding/nondeterministic combinations
+    for w in config.get('warnings', []):
+        print(f'{RED}{BOLD}WARNING: {w}{RESET}')
+
     log.info(f'{"="*60}')
 
 def confirm_test():
@@ -776,7 +793,7 @@ def create_meta_data(config):
 
     # add the takendown nodes - if they exist
     if is_takedown:
-        meta_data['takendown_nodes'] = config['takendown_nodes']
+        meta_data['takendown_nodes'] = config.get('takendown_nodes', [])
         meta_data['takedown_strategy'] = config.get('takedown_strategy', 'random')
 
     meta_data['mode'] = config.get('mode', 'dlnbot')
