@@ -1,9 +1,7 @@
 # Runtime data
 node_data/
-data/*
-!data/.gitkeep
-testState/*
-!testState/.gitkeep
+data/
+testState/
 
 # Python
 __pycache__/
@@ -21,10 +19,3 @@ botmaster/*
 cc_node/*
 !cc_node/cc_manager.py
 !cc_node/message_relay.py
-innocent/*
-
-# Legacy entries (can be removed after full cleanup)
-time_data*
-runtime_data.csv
-setuptime_data.csv
-Backup_data/
