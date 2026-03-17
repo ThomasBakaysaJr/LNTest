@@ -19,6 +19,7 @@ import json
 import datetime
 import copy
 import resource
+import re
 from utils.config import cfg
 from utils.log import setup_logging, add_file_handler
 from utils.docker_helpers import ensure_custom_image
@@ -72,8 +73,7 @@ TOPO_JSON = 'topology_data.json'
 # constant names for the variables we use
 CC_COUNT = 'cc_count'
 ACTIVE_NODES = 'active_nodes'
-BM_SEEDS = 'bm_seeds'
-BM_POS = 'bm_pos'
+INJECTION_COUNT = 'injection_count'
 TAKEDOWN_PCT = 'takedown_pct'
 
 # Unless the script isn't working properly, best to leave these values alone
@@ -92,8 +92,7 @@ TEST_CONFIGS = {
         'parameters': {
             CC_COUNT: 10,
             ACTIVE_NODES: 4,
-            BM_SEEDS: 1,
-            BM_POS: 50
+            INJECTION_COUNT: 1,
         }
     },
     'active_nodes' : {
@@ -104,32 +103,18 @@ TEST_CONFIGS = {
         'parameters': {
             CC_COUNT: 50,
             ACTIVE_NODES: 2,
-            BM_SEEDS: 1,
-            BM_POS: 50
+            INJECTION_COUNT: 1,
         }
     },
-    'bm_seeds' : {
-        'description': 'increasing number of botmaster seed connections',
-        'var_key' : BM_SEEDS,
+    'injection' : {
+        'description': 'increasing number of botmaster injection points',
+        'var_key' : INJECTION_COUNT,
         'range' : (6, 1),
         'max_messages' : 10,
         'parameters': {
             CC_COUNT: 50,
             ACTIVE_NODES: 4,
-            BM_SEEDS: 1,
-            BM_POS: 50
-        }
-    },
-    'bm_pos' : {
-        'description': 'different botmaster channel connection locations',
-        'var_key' : BM_POS,
-        'range' : (150, 50),
-        'max_messages' : 10,
-        'parameters': {
-            CC_COUNT: 50,
-            ACTIVE_NODES: 4,
-            BM_SEEDS: 1,
-            BM_POS: -50
+            INJECTION_COUNT: 1,
         }
     },
     'takedown_random' : {
@@ -142,8 +127,7 @@ TEST_CONFIGS = {
         'parameters': {
             CC_COUNT: 50,
             ACTIVE_NODES: 4,
-            BM_SEEDS: 1,
-            BM_POS: 50,
+            INJECTION_COUNT: 1,
             TAKEDOWN_PCT: 10
         }
     },
@@ -157,8 +141,7 @@ TEST_CONFIGS = {
         'parameters': {
             CC_COUNT: 50,
             ACTIVE_NODES: 4,
-            BM_SEEDS: 1,
-            BM_POS: 50,
+            INJECTION_COUNT: 1,
             TAKEDOWN_PCT: 10
         }
     }
@@ -169,8 +152,10 @@ def add_common_arguments(parser):
     group = parser.add_argument_group('Simulation Parameters (fixed values for non-sweep variables)')
     group.add_argument('--cc-count', dest='cc_count', type=int, help='Fixed number of C&C nodes (ignored when cc_count is the sweep variable; use --sweep-start instead).')
     group.add_argument('--active-nodes', dest='active_nodes', type=int, help='Fixed number of active C&C servers, m (ignored when active_nodes is the sweep variable).')
-    group.add_argument('--bm-seeds', dest='bm_seeds', type=int, help='Fixed number of botmaster seed connections (ignored when bm_seeds is the sweep variable).')
-    group.add_argument('--bm-pos', dest='bm_pos', type=int, help='Fixed botmaster injection position (ignored when bm_pos is the sweep variable).')
+    group.add_argument('--inject', dest='inject', type=str, default=None,
+        help='Botmaster injection points. Explicit nodes: "CC5,CC12,CC30". '
+             'Percentage positions: "%%50" or "%%0,%%50,%%100" (resolved dynamically per iteration). '
+             'Default: 1 random CC node.')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
 
     takedown = parser.add_argument_group('Takedown Settings')
@@ -223,8 +208,7 @@ def main():
             'parameters': {
                 CC_COUNT: 4,
                 ACTIVE_NODES: 2,
-                BM_SEEDS: 1,
-                BM_POS: 50
+                INJECTION_COUNT: 1,
             }
         }
         config['takedown_percentage'] = 0.1
@@ -239,8 +223,6 @@ def main():
         param_flags = [
             (CC_COUNT, args.cc_count, '--cc-count'),
             (ACTIVE_NODES, args.active_nodes, '--active-nodes'),
-            (BM_SEEDS, args.bm_seeds, '--bm-seeds'),
-            (BM_POS, args.bm_pos, '--bm-pos'),
         ]
         for param_key, arg_value, flag_name in param_flags:
             if arg_value is not None:
@@ -250,6 +232,35 @@ def main():
                 else:
                     log.info(f'{param_key} is set to {arg_value}')
                     parameters[param_key] = arg_value
+
+        # Parse --inject: explicit node IDs or percentage positions
+        if args.inject is not None:
+            tokens = [t.strip() for t in args.inject.split(',')]
+            if tokens[0].startswith('%'):
+                # Percentage mode: %0, %50, %100
+                try:
+                    config['inject_pcts'] = [int(t.lstrip('%')) for t in tokens]
+                except ValueError:
+                    log.error('Invalid percentage in --inject. Use %0, %50, %100, etc.')
+                    return
+                for pct in config['inject_pcts']:
+                    if not (0 <= pct <= 100):
+                        log.error(f'Percentage {pct} out of range [0, 100].')
+                        return
+                parameters[INJECTION_COUNT] = len(config['inject_pcts'])
+                log.info(f'Injection: {len(config["inject_pcts"])} percentage position(s): {config["inject_pcts"]}')
+            else:
+                # Explicit node IDs: CC5, CC12, CC30
+                for name in tokens:
+                    if not re.match(r'^CC\d+$', name):
+                        log.error(f'Invalid node ID "{name}". Use CC1, CC5, etc. or %50 for percentage.')
+                        return
+                config['inject_nodes'] = tokens
+                parameters[INJECTION_COUNT] = len(tokens)
+                log.info(f'Injection: explicit nodes {tokens}')
+            if testing == INJECTION_COUNT:
+                log.warning('--inject overrides the injection sweep variable. '
+                            'The test will use these specific nodes instead of sweeping injection count.')
         if args.num_msg is not None:
             log.info(f'num_msg is set to {args.num_msg}')
             config['max_messages'] = args.num_msg
@@ -333,7 +344,7 @@ def main():
             # active_nodes (m) is a D-LNBot-specific parameter with no effect here.
             if testing in (CC_COUNT, ACTIVE_NODES):
                 log.error(f'Test "{args.test_id}" is not compatible with custom topology mode. '
-                          f'Custom mode supports: bm_seeds, bm_pos, takedown_random, takedown_targeted.')
+                          f'Custom mode supports: injection, takedown_random, takedown_targeted.')
                 return
             if args.active_nodes is not None:
                 log.warning('--active-nodes is ignored in custom topology mode (m is D-LNBot-specific).')
@@ -457,6 +468,35 @@ def run_test(in_config, manager : NodeManager):
                 time.sleep(10)
             # dlnbot-formation: cc_manager handles formation, nothing to build here
 
+            # Resolve injection points for this iteration
+            if 'inject_pcts' in config:
+                # Percentage mode: resolve %N to CC node names based on current CC_COUNT
+                n = parameters[CC_COUNT]
+                inject_nodes = []
+                for pct in config['inject_pcts']:
+                    idx = round((n - 1) * pct / 100) + 1  # 1-indexed CC number
+                    inject_nodes.append(f'CC{idx}')
+                config['inject_nodes'] = inject_nodes
+                log.info(f'Resolved injection percentages to: {inject_nodes}')
+            elif 'inject_nodes' in config:
+                # Explicit mode: validate that all specified nodes exist in this iteration
+                n = parameters[CC_COUNT]
+                for name in config['inject_nodes']:
+                    cc_num = int(re.search(r'CC(\d+)', name).group(1))
+                    if cc_num < 1 or cc_num > n:
+                        log.error(f'{name} does not exist in this iteration (only CC1-CC{n} available). '
+                                  f'Use percentage syntax (e.g., --inject %50) for cc_count sweeps.')
+                        monitor.stop()
+                        _active_monitor = None
+                        stop_bitcoinminer()
+                        return
+            elif testing != INJECTION_COUNT:
+                # No --inject specified and not an injection sweep:
+                # Default to CC1 for deterministic results across sweep iterations
+                config['inject_nodes'] = ['CC1']
+                log.info('No --inject specified: defaulting to CC1 for deterministic sweep.')
+            # else: injection sweep with no --inject → random selection (deferred to botmaster.py)
+
             if config.get('takedown', False):
                 # Derive takedown percentage from parameter (integer %) or fallback
                 if TAKEDOWN_PCT in parameters:
@@ -471,6 +511,20 @@ def run_test(in_config, manager : NodeManager):
                     attempt += 1
                     continue
 
+            # Validate injection nodes survived takedown
+            if config.get('takedown', False) and 'inject_nodes' in config:
+                surviving_cc = {node.name for node in manager.get_cc_nodes()}
+                dead_inject = [n for n in config['inject_nodes'] if n not in surviving_cc]
+                if dead_inject:
+                    log.warning(f'Injection nodes killed during takedown: {dead_inject}')
+                    config['inject_nodes'] = [n for n in config['inject_nodes'] if n in surviving_cc]
+                    if not config['inject_nodes']:
+                        # All injection nodes dead — pick first surviving node
+                        fallback = sorted(surviving_cc, key=lambda x: int(re.search(r'\d+', x).group()))[0]
+                        config['inject_nodes'] = [fallback]
+                        log.warning(f'All injection nodes were killed. Falling back to {fallback}.')
+                    log.info(f'Post-takedown injection nodes: {config["inject_nodes"]}')
+
             log.info('Waiting done, proceeding to testing.')
             message_start_time = time.time()
 
@@ -483,7 +537,8 @@ def run_test(in_config, manager : NodeManager):
                 if config.get('mode', 'dlnbot') == 'dlnbot-formation':
                     manager.are_channels_ready()
 
-                manager.send_botmaster_command(y, parameters[BM_SEEDS], parameters[BM_POS])
+                inject_nodes = config.get('inject_nodes', None)
+                manager.send_botmaster_command(y, inject_nodes=inject_nodes, inject_count=parameters[INJECTION_COUNT])
                 cmd_start_time = time.time()
                 send_time, success = wait_for_propagation(y, manager)
 

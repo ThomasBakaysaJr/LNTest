@@ -402,16 +402,24 @@ class NodeManager:
             return False
 
 
-    def send_botmaster_command(self, message, seeds, position):
+    def send_botmaster_command(self, message, inject_nodes=None, inject_count=1):
         '''
         Sends a command to the BotMaster container.
+        Args:
+            message: The message/command to send.
+            inject_nodes: List of CC node names (e.g., ['CC5', 'CC12']). If provided,
+                          botmaster connects to these specific nodes.
+            inject_count: Number of random CC nodes to connect to (used when inject_nodes is None).
         '''
 
         bm_node = self.nodes.get(self.bm_name)
         if not bm_node:
             log.error('BotMaster node not found.')
             return None
-        command_str = (f"--msg {message} --cc {seeds} --init {position}")
+        if inject_nodes:
+            command_str = f"--msg {message} --node-ids {','.join(inject_nodes)}"
+        else:
+            command_str = f"--msg {message} --count {inject_count}"
         command = f'python3 -u {self.bm_script} {command_str}'
 
         return bm_node.send_botmaster_command(command)

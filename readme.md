@@ -42,21 +42,22 @@ sudo venv/bin/python3 lntest.py run <test> [options]
 
 ## What Can You Test?
 
-LNTest provides six test scenarios grouped into three categories:
+LNTest provides five test scenarios grouped into three categories:
 
 **Scalability** (D-LNBot topologies only) — How does command propagation change as the botnet grows?
 - `cc_count` — Scale the number of C&C nodes (default 10 to 100)
 - `active_nodes` — Vary the number of active C&C servers (*m*), which controls how many neighbors each node maintains in the chain
 
-**Botmaster injection** — Does it matter how and where the botmaster connects?
-- `bm_seeds` — Change the number of C&C nodes the botmaster connects to
-- `bm_pos` — Change *where* in the network the botmaster injects commands
+**Botmaster injection** — Does the number of injection points matter?
+- `injection` — Sweep the number of random C&C nodes the botmaster connects to (default 1 to 6)
 
 **Resilience to takedowns** — How does the botnet degrade when nodes are removed?
 - `takedown_random` — Remove a random percentage of C&C nodes
 - `takedown_targeted` — Remove the highest-degree nodes first (simulating informed law enforcement)
 
-Custom topologies support the botmaster and takedown tests. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific. All default ranges can be adjusted with `--sweep-start`, `--sweep-end`, and `--sweep-step`.
+The `--inject` flag controls where the botmaster connects. It accepts explicit node IDs (`--inject CC5,CC12`) or percentage positions (`--inject %50`) that resolve dynamically per iteration. When multiple injection points are specified, the botmaster sends to all of them in parallel. Default is CC1 (deterministic); the `injection` sweep test uses random selection. See [docs/TESTS.md](docs/TESTS.md) for details.
+
+Custom topologies support the injection and takedown tests. The scalability tests (`cc_count`, `active_nodes`) are D-LNBot-specific. All default ranges can be adjusted with `--sweep-start`, `--sweep-end`, and `--sweep-step`.
 
 ---
 
@@ -68,10 +69,10 @@ Scale the botnet from 10 to 100 C&C nodes and measure how propagation delay grow
 sudo venv/bin/python3 lntest.py run cc_count --num-msg 3
 ```
 
-Test how botmaster injection point affects command delivery:
+Sweep the number of botmaster injection points from 1 to 6:
 
 ```bash
-sudo venv/bin/python3 lntest.py run bm_pos --num-msg 3
+sudo venv/bin/python3 lntest.py run injection --num-msg 3
 ```
 
 Simulate law enforcement targeting the most-connected nodes, using the autonomous formation protocol:
@@ -114,8 +115,7 @@ Each test sweeps a different experimental variable. All ranges are adjustable wi
 | --- | --- | --- |
 | `cc_count` | Scale C&C nodes | 10 to 100, step 10 |
 | `active_nodes` | Scale active C&C servers (m) | 2 to 6, step 1 |
-| `bm_seeds` | Botmaster connectivity | 1 to 6, step 1 |
-| `bm_pos` | Botmaster injection point | -50 to 150, step 50 |
+| `injection` | Botmaster injection points | 1 to 6, step 1 |
 | `takedown_random` | Random takedown sweep | 10% to 50%, step 10% |
 | `takedown_targeted` | Targeted takedown sweep | 10% to 50%, step 10% |
 
