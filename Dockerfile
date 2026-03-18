@@ -1,6 +1,4 @@
-# Version of lightningd that we're using
-ARG CLN_VERSION=v25.09
-FROM elementsproject/lightningd:${CLN_VERSION}
+FROM elementsproject/lightningd:latest
 
 # Install Python3
 RUN apt-get update && apt-get install -y \

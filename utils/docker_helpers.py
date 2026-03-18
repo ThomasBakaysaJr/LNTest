@@ -47,14 +47,13 @@ def sort_containers(containers):
     return return_set
 
 
-def ensure_custom_image(image_name, cln_version):
+def ensure_custom_image(image_name):
     """
     Checks if the custom Docker image exists. If not, builds it from the Dockerfile.
     """
     client = docker.from_env()
 
     try:
-
         log.info(f"Checking for image {image_name}...")
         client.images.get(image_name)
         log.info(f"Image {image_name} found.")
@@ -65,8 +64,7 @@ def ensure_custom_image(image_name, cln_version):
             # 'path' is the directory containing the Dockerfile
             image, build_logs = client.images.build(
                 path=".",
-                tag=image_name,
-                buildargs={"CLN_VERSION" : cln_version})
+                tag=image_name)
             for chunk in build_logs:
                 if 'stream' in chunk:
                     log.info(chunk['stream'].strip())

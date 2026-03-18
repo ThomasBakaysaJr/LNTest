@@ -36,7 +36,6 @@ class _Config:
         self.RPC_PASSWORD = os.getenv('RPC_PASSWORD')
 
         # --- Lightning / Docker ---
-        self.LIGHTNINGD_VERSION = os.getenv('LIGHTNINGD_VERSION')
         self.LNTEST_VERSION = os.getenv('LNTEST_VERSION')
 
         # --- Script paths ---

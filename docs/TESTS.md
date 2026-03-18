@@ -130,7 +130,7 @@ Builds the network, then randomly removes an increasing percentage of nodes. Mea
 
 | Parameter | Default |
 | --- | --- |
-| Sweep variable | `takedown_pct`: 10% → 50%, step 10% |
+| Sweep variable | `takedown_percentage`: 10% → 50%, step 10% |
 | Fixed: cc_count | 50 |
 | Fixed: m | 4 |
 | Fixed: injection | CC1 (with fallback if killed) |
@@ -152,7 +152,7 @@ Same as `takedown_random`, but removes the highest-degree (most-connected) nodes
 
 | Parameter | Default |
 | --- | --- |
-| Sweep variable | `takedown_pct`: 10% → 50%, step 10% |
+| Sweep variable | `takedown_percentage`: 10% → 50%, step 10% |
 | Fixed: cc_count | 50 |
 | Fixed: m | 4 |
 | Fixed: injection | CC1 (with fallback if killed) |

@@ -202,7 +202,7 @@ def main():
 
     args = parser.parse_args()
 
-    ensure_custom_image(cfg.LNTEST_VERSION, cfg.LIGHTNINGD_VERSION)
+    ensure_custom_image(cfg.LNTEST_VERSION)
     manager = NodeManager()
     # start recording time for total testing
     start_time = time.time()
@@ -673,7 +673,13 @@ def print_execution_plan(config):
     log.info(f'\n{"="*60}')
     log.info(f'  EXECUTION PLAN: {config["description"]}')
     log.info(f'{"="*60}')
-    log.info(f'  Sweep variable : {var_key}')
+    display_names = {
+        'cc_count': 'CC node count',
+        'active_nodes': 'active neighbors (m)',
+        'injection_count': 'injection point count',
+        'takedown_pct': 'takedown percentage',
+    }
+    log.info(f'  Sweep variable : {display_names.get(var_key, var_key)}')
     log.info(f'  Sweep range    : {start} -> {end} (step {step})')
     log.info(f'  Iterations     : {len(iterations)} values: {iterations}')
     log.info(f'  Messages/iter  : {config["max_messages"]}')
@@ -688,6 +694,14 @@ def print_execution_plan(config):
         strategy = config.get('takedown_strategy', 'random')
         if var_key == TAKEDOWN_PCT:
             log.info(f'  Takedown       : {strategy}, sweep {start}%-{end}%')
+
+    # Show injection point info
+    if 'inject_nodes' in config:
+        log.info(f'  Injection from : {", ".join(config["inject_nodes"])}')
+    elif var_key == INJECTION_COUNT:
+        log.info(f'  Injection from : random nodes (count swept {start}->{end})')
+    else:
+        log.info(f'  Injection from : CC1 (default)')
 
     if config.get('topology_file'):
         log.info(f'  Topology file  : {config["topology_file"]}')

@@ -53,7 +53,7 @@ fund_node() {
     local node=$1
 
     # Get a new Bitcoin address from the node
-    address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
+    address=$(docker exec $node lightning-cli --regtest newaddr bech32 | jq -r '.bech32')
 
     # Send 10 BTC to the node's address
     response=$(curl -s --user $RPC_USER:$RPC_PASSWORD \

@@ -33,7 +33,7 @@ fund_node() {
     local node=$1
 
     # Get a new Bitcoin address from the node
-    address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
+    address=$(docker exec $node lightning-cli --regtest newaddr bech32 | jq -r '.bech32')
 
     # Send 10 BTC to the node's address
     txid=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
@@ -62,7 +62,7 @@ fi
 # Fund InnocentNode separately
 if docker ps --filter "name=$INNOCENT_NODE" --format "{{.Names}}" | grep -q "$INNOCENT_NODE"; then
     echo "Funding InnocentNode..."
-    address=$(docker exec $INNOCENT_NODE lightning-cli --regtest newaddr | jq -r '.bech32')
+    address=$(docker exec $INNOCENT_NODE lightning-cli --regtest newaddr bech32 | jq -r '.bech32')
     txid=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
         --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$INNOCENT_NODE\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", $FUNDING_AMOUNT_BTC]}" \
         -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
