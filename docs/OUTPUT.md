@@ -34,4 +34,4 @@ For takedown tests, filenames include a strategy marker: `T` for random takedown
 
 Detailed logs for debugging specific node behaviors are stored in:
 * `cc_node/logs/` — individual logs for every C&C node.
-* `botmaster/` — logs for the Botmaster node.
+* `botmaster/logs/` — logs for the Botmaster node.

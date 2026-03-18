@@ -34,7 +34,7 @@ cleanup_containers() {
 
 cleanup_logs() {
     echo "Removing logs and status files..."
-    rm -rf $BOT_MASTER_DIR/bm_log*
+    rm -rf $BOT_MASTER_DIR/logs/bm_log*
     rm -f $BOT_MASTER_DIR/counter.txt
     rm -f $BOT_MASTER_DIR/funded_node.txt
     rm -f $BOT_MASTER_ADDRESS_LIST

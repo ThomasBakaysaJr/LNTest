@@ -55,12 +55,20 @@ fund_node() {
     # Get a new Bitcoin address from the node
     address=$(docker exec $node lightning-cli --regtest newaddr | jq -r '.bech32')
 
-    # Send 10 BTC to the node's address 
-    txid=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
+    # Send 10 BTC to the node's address
+    response=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
         --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"$node\", \"method\": \"sendtoaddress\", \"params\": [\"$address\", $FUNDING_AMOUNT_BTC]}" \
-        -H 'content-type: text/plain;' $BITCOIND_RPC | jq -r '.result')
+        -H 'content-type: text/plain;' $BITCOIND_RPC)
+    txid=$(echo "$response" | jq -r '.result')
+    error=$(echo "$response" | jq -r '.error')
 
-    echo "Sent 10 BTC to $node at address $address (txid: $txid)"
+    if [ "$txid" = "null" ] || [ -z "$txid" ]; then
+        echo "ERROR: Failed to fund $node. Bitcoin Core error: $error"
+        echo "       Wallet may be out of funds. Restart bitcoind or mine more blocks."
+        exit 1
+    fi
+
+    echo "Sent $FUNDING_AMOUNT_BTC BTC to $node at address $address (txid: $txid)"
 }
 
 confirm_funds() {

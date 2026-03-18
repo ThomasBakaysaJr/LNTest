@@ -318,11 +318,17 @@ def fund_channel(node):
     logging.info(f'fund_channel: Connected to {node}. Funding.')
     # random funding amount
     funding_amount = random.randint(ln_checker.MIN_CHANNEL_CAPACITY, ln_checker.MAX_CHANNEL_CAPACITY)
-    logging.info(f"fund_channel: Opening channel with node {node}. Funding amount: {funding_amount}")
+    # Push half the capacity to the remote side so both ends can send keysends.
+    # Without this, only the opener has funds and the remote cannot relay messages.
+    push_amount = funding_amount // 2 * 1000  # half capacity, in msat
+    logging.info(f"fund_channel: Opening channel with node {node}. Funding amount: {funding_amount}, push_msat: {push_amount}")
     if ln_checker.check_funds():
-        result = ln_checker.lightning_rpc.fundchannel(node, funding_amount)
-        if result:
-            logging.info(f"fund_channel: Channel successfully created with node {node}.")
+        try:
+            result = ln_checker.lightning_rpc.fundchannel(node, funding_amount, push_msat=push_amount)
+            if result:
+                logging.info(f"fund_channel: Channel successfully created with node {node}.")
+        except Exception as e:
+            logging.error(f"fund_channel: fundchannel failed for {node}: {e}")
     else:
         logging.error(f"create_channels: Failed to create channel with node {node}.")
 
@@ -382,6 +388,7 @@ def discover_nodes():
         # a check, but this shouldn't be called if we're connected to the innnocent node anyway
         if (source == own_node_id or destination == own_node_id):
             logging.error(f'discover_nodes: Is connected to innocent node. Not supposed to creating channels after connection to Innocent node.')
+            continue
         if (len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES):
             logging.info(f'Node outbound channels is saturated.')
             return []

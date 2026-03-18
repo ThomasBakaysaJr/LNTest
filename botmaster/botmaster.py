@@ -7,12 +7,15 @@ import os
 import time
 import re
 import random
+from pathlib import Path
 
 # import the ln_checker file
 import ln_checker
 
 HOST_NAME = os.getenv("CONTAINER_NAME")
-logging.basicConfig(filename=f'bm_log.log', level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s")
+LOG_DIR = Path('logs')
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(filename=str(LOG_DIR / 'bm_log.log'), level=logging.INFO, format=f"{HOST_NAME} %(asctime)s - %(levelname)s - %(message)s", force=True)
 
 # Filenames from environment variables or defaults
 INNOCENT_ADDRESS_FILE = os.getenv('NODE_ADDRESS_FILE', 'innocentAddress.txt')

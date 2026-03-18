@@ -875,9 +875,12 @@ def init_bitcoin_server():
         else:
             balance = float(balance)
 
-def is_bitcoind_ready():
+def is_bitcoind_ready(min_balance=100.0):
     '''
-    Check if bitcoind is running and has a positive balance.
+    Check if bitcoind is running and has sufficient balance.
+    Args:
+        min_balance: Minimum BTC balance required (default 100 BTC).
+                     A full restart + re-mine is triggered if balance is below this.
     Returns True if bitcoind is ready to use, False otherwise.
     '''
     try:
@@ -886,8 +889,10 @@ def is_bitcoind_ready():
             capture_output=True, timeout=5
         )
         balance_str = result.stdout.strip().decode()
-        if balance_str and float(balance_str) > 0:
+        if balance_str and float(balance_str) >= min_balance:
             return True
+        elif balance_str:
+            log.info(f'bitcoind balance too low ({balance_str} BTC < {min_balance} BTC), triggering restart.')
     except Exception:
         pass
     return False
