@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # We start fresh
-"$SCRIPT_DIR/cleanup.sh" all
+"$SCRIPT_DIR/cleanup.sh" iter
 
 # Base directories for lightning and Bitcoin
 source "$LNTEST_ROOT/config.env"

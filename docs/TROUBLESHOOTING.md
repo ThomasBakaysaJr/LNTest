@@ -10,10 +10,16 @@ sudo pkill -9 bitcoind
 
 ### Stale containers from a crashed run
 
-If a previous run was interrupted (Ctrl+C, crash, reboot), leftover Docker containers can cause port conflicts or name collisions on the next run. Clean up everything before retrying:
+If a previous run was interrupted (Ctrl+C, crash, reboot), leftover Docker containers can cause port conflicts or name collisions on the next run. For a quick reset of the Lightning side only, use:
 
 ```bash
-sudo ./scripts/cleanup.sh all
+sudo ./scripts/cleanup.sh iter
+```
+
+If bitcoind was also left in a bad state, do a full reset instead:
+
+```bash
+sudo ./scripts/cleanup.sh fresh
 ```
 
 ### Too many open files

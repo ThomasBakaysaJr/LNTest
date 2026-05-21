@@ -1,14 +1,38 @@
 #!/bin/bash
-# cleanup.sh - Unified cleanup script for LNTest
+# cleanup.sh - LNTest cleanup script
 #
 # Usage:
-#   cleanup.sh nodes    - Stop/remove containers, clean SHM and node data (between iterations)
-#   cleanup.sh all      - Full cleanup including logs, status files, address lists
-#   cleanup.sh bitcoin  - Stop bitcoind and delete regtest data
+#   cleanup.sh iter
+#       Between-iteration cleanup. Stops every LNTest container, clears
+#       /dev/shm/CC* shared memory, wipes node_data/, and removes per-node
+#       runtime files (logs, status, address lists, counters) from
+#       botmaster/ and cc_node/. bitcoind keeps running so the regtest
+#       blockchain state is preserved across iterations. Called by
+#       init_botnet.sh at the start of each iteration.
+#
+#   cleanup.sh bitcoin
+#       Stops bitcoind and deletes ~/.bitcoin/regtest/. bitcoin.conf and
+#       RPC credentials are preserved. Called by restart_bitcoin.sh,
+#       which lntest.py invokes when bitcoind needs a full restart
+#       (first run, low balance, or post-crash recovery).
+#
+#   cleanup.sh fresh
+#       Full reset to a freshly-cloned + setup.sh state. Stops every
+#       LNTest process (containers + bitcoind), removes all in-repo
+#       runtime artifacts, and deletes ~/.bitcoin/regtest/.
+#
+#       PRESERVED (setup.sh outputs and the Docker image):
+#         - venv/                          (setup.sh)
+#         - config.env                     (setup.sh)
+#         - ~/.bitcoin/bitcoin.conf        (setup.sh)
+#         - ~/.lightning/lightning.conf    (setup.sh)
+#         - Docker image lntest:latest     (rebuilt by lntest.py if absent)
+#
+#       Refuses to run if an lntest.py process is in progress.
 
 set -e
 
-# Resolve config.env relative to the LNTest root (one level up from scripts/)
+# --- Resolve paths and load config ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
 
@@ -20,78 +44,204 @@ else
     HAS_CONFIG=0
 fi
 
-MODE="${1:-nodes}"
+MODE="${1:-}"
 
-cleanup_containers() {
-    echo "Stopping and removing containers..."
-    docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker stop
-    docker ps -a --filter "name=CC" --filter "name=BM" --filter "name=InnocentNode" -q | xargs -r docker rm
-    echo "Cleaning out shared memory and docker directories..."
-    rm -f /dev/shm/CC*
-    rm -rf $NODE_DATA_DIR/*
-    echo "Nodes killed."
+# --- Helpers (between-iteration) ---
+
+stop_containers() {
+    echo "Stopping and removing LNTest Docker containers..."
+    local names
+    names=$(docker ps -a \
+        --filter "name=CC" \
+        --filter "name=BM" \
+        --filter "name=InnocentNode" \
+        --format "{{.Names}}" 2>/dev/null || true)
+    if [ -n "$names" ]; then
+        echo "$names" | xargs -r docker stop >/dev/null 2>&1 || true
+        echo "$names" | xargs -r docker rm   >/dev/null 2>&1 || true
+    fi
 }
 
-cleanup_logs() {
-    echo "Removing logs and status files..."
-    rm -rf $BOT_MASTER_DIR/logs/bm_log*
-    rm -f $BOT_MASTER_DIR/counter.txt
-    rm -f $BOT_MASTER_DIR/funded_node.txt
-    rm -f $BOT_MASTER_ADDRESS_LIST
-    rm -rf $NODE_MANAGER_DIR/logs/cc_log*
-    rm -rf $NODE_MANAGER_DIR/logs/noise_log*
-    rm -rf $NODE_MANAGER_DIR/status/*
-    rm -f $NODE_MANAGER_ADDRESS_LIST
-    echo "Cleanup complete."
+clear_shm() {
+    echo "Clearing /dev/shm/CC*..."
+    rm -f /dev/shm/CC* 2>/dev/null || true
 }
 
-cleanup_bitcoin() {
+clear_node_data() {
+    if [ -n "${NODE_DATA_DIR:-}" ] && [ -d "$NODE_DATA_DIR" ]; then
+        echo "Wiping $NODE_DATA_DIR/*..."
+        rm -rf "$NODE_DATA_DIR"/*
+    fi
+}
+
+clear_node_logs_and_state() {
+    # Per-iteration outputs that init_botnet.sh, cc_manager.py, and
+    # botmaster.py produce and that would mislead the next iteration.
+    if [ -n "${BOT_MASTER_DIR:-}" ]; then
+        rm -rf "$BOT_MASTER_DIR"/logs/bm_log* 2>/dev/null || true
+        rm -f  "$BOT_MASTER_DIR"/counter.txt
+        rm -f  "$BOT_MASTER_DIR"/funded_node.txt
+        rm -f  "${BOT_MASTER_ADDRESS_LIST:-}"
+    fi
+    if [ -n "${NODE_MANAGER_DIR:-}" ]; then
+        rm -rf "$NODE_MANAGER_DIR"/logs/cc_log*    2>/dev/null || true
+        rm -rf "$NODE_MANAGER_DIR"/logs/noise_log* 2>/dev/null || true
+        rm -rf "$NODE_MANAGER_DIR"/status/*        2>/dev/null || true
+        rm -f  "${NODE_MANAGER_ADDRESS_LIST:-}"
+    fi
+}
+
+# --- Helpers (bitcoin) ---
+
+stop_bitcoind() {
     if [ $HAS_CONFIG -eq 0 ]; then
         USER_NAME=$(whoami)
     fi
 
     if pgrep -x "bitcoind" > /dev/null; then
-        if [ $HAS_CONFIG -eq 1 ]; then
+        if [ $HAS_CONFIG -eq 1 ] && [ -x "${BITCOIN_CLI:-}" ]; then
             echo "Stopping bitcoind via RPC..."
-            sudo -u $USER_NAME "$BITCOIN_CLI" -datadir="$BITCOIN_DIR" stop
+            sudo -u "$USER_NAME" "$BITCOIN_CLI" -datadir="$BITCOIN_DIR" stop 2>/dev/null || true
             sleep 2
         fi
     else
         echo "bitcoind is not running."
+        return 0
     fi
 
-    # Force kill if still running
     if pgrep -x "bitcoind" > /dev/null; then
         echo "bitcoind still running, forcing kill..."
-        sudo pkill -9 bitcoind
-    fi
-
-    # Delete regtest data
-    if [ $HAS_CONFIG -eq 1 ]; then
-        echo "Deleting regtest data"
-        if [ -n "$BITCOIN_DIR" ]; then
-            rm -rf "$BITCOIN_DIR/regtest"
-        else
-            echo "Error: BITCOIN_DIR is empty. Skipping deletion."
-        fi
-    else
-        echo "Skipping regtest data deletion (config.env missing)."
+        pkill -9 bitcoind || true
+        sleep 1
     fi
 }
 
+clear_regtest_data() {
+    if [ -n "${BITCOIN_DIR:-}" ] && [ -d "$BITCOIN_DIR/regtest" ]; then
+        echo "Deleting $BITCOIN_DIR/regtest..."
+        rm -rf "$BITCOIN_DIR/regtest"
+    fi
+}
+
+# --- Helpers (fresh-only: full repo reset) ---
+
+clear_botmaster_runtime() {
+    # Wipe everything in botmaster/ except the tracked source file.
+    if [ -n "${BOT_MASTER_DIR:-}" ] && [ -d "$BOT_MASTER_DIR" ]; then
+        echo "Wiping $BOT_MASTER_DIR/ (keeping botmaster.py)..."
+        find "$BOT_MASTER_DIR" -mindepth 1 -maxdepth 1 \
+            ! -name 'botmaster.py' \
+            -exec rm -rf {} +
+    fi
+}
+
+clear_cc_node_runtime() {
+    # Wipe everything in cc_node/ except the tracked source files.
+    if [ -n "${NODE_MANAGER_DIR:-}" ] && [ -d "$NODE_MANAGER_DIR" ]; then
+        echo "Wiping $NODE_MANAGER_DIR/ (keeping cc_manager.py, message_relay.py)..."
+        find "$NODE_MANAGER_DIR" -mindepth 1 -maxdepth 1 \
+            ! -name 'cc_manager.py' \
+            ! -name 'message_relay.py' \
+            -exec rm -rf {} +
+    fi
+}
+
+clear_innocent_runtime() {
+    # innocent/ has no tracked files; wipe contents (incl. dotfiles).
+    if [ -n "${INNO_MANAGER_DIR:-}" ] && [ -d "$INNO_MANAGER_DIR" ]; then
+        echo "Wiping $INNO_MANAGER_DIR/..."
+        find "$INNO_MANAGER_DIR" -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+    fi
+}
+
+clear_data_dir() {
+    if [ -n "${TEST_DATA_DIR:-}" ] && [ -d "$TEST_DATA_DIR" ]; then
+        echo "Wiping $TEST_DATA_DIR/*..."
+        rm -rf "$TEST_DATA_DIR"/*
+    fi
+}
+
+clear_test_state() {
+    if [ -n "${TEST_STATE_DIR:-}" ] && [ -d "$TEST_STATE_DIR" ]; then
+        echo "Wiping $TEST_STATE_DIR/*..."
+        rm -rf "$TEST_STATE_DIR"/*
+    fi
+}
+
+clear_pycache() {
+    echo "Removing __pycache__/ and *.pyc (skipping venv/)..."
+    find "$LNTEST_ROOT" -path "$LNTEST_ROOT/venv" -prune -o \
+        -type d -name '__pycache__' -print 2>/dev/null \
+        | xargs -r rm -rf
+    find "$LNTEST_ROOT" -path "$LNTEST_ROOT/venv" -prune -o \
+        -type f -name '*.pyc' -print 2>/dev/null \
+        | xargs -r rm -f
+}
+
+refuse_if_test_running() {
+    if pgrep -f "[l]ntest.py" > /dev/null; then
+        echo "Error: an lntest.py process is running. Refusing 'fresh' reset." >&2
+        echo "Stop the test first (Ctrl-C or kill), then retry." >&2
+        exit 1
+    fi
+}
+
+# --- Modes ---
+
 case "$MODE" in
-    nodes)
-        cleanup_containers
+    iter)
+        # Between-iteration cleanup. bitcoind keeps running.
+        stop_containers
+        clear_shm
+        clear_node_data
+        clear_node_logs_and_state
         ;;
-    all)
-        cleanup_containers
-        cleanup_logs
-        ;;
+
     bitcoin)
-        cleanup_bitcoin
+        # Reset Bitcoin Core regtest state.
+        stop_bitcoind
+        clear_regtest_data
         ;;
+
+    fresh)
+        # Full reset to fresh-clone + setup.sh state.
+        refuse_if_test_running
+        stop_containers
+        stop_bitcoind
+        clear_shm
+        clear_node_data
+        clear_botmaster_runtime
+        clear_cc_node_runtime
+        clear_innocent_runtime
+        clear_data_dir
+        clear_test_state
+        clear_pycache
+        clear_regtest_data
+        echo "Done. LNTest is reset to fresh-clone + setup.sh state."
+        ;;
+
     *)
-        echo "Usage: cleanup.sh {nodes|all|bitcoin}"
+        cat <<EOF >&2
+Usage: $(basename "$0") {iter|bitcoin|fresh}
+
+  iter      Between-iteration cleanup. Stops containers, clears shared
+            memory, wipes node_data/, and removes per-node logs/status/
+            address-list files. Bitcoin Core keeps running so the regtest
+            blockchain is reused across iterations. Called automatically
+            by init_botnet.sh between iterations.
+
+  bitcoin   Stops bitcoind and deletes ~/.bitcoin/regtest/. bitcoin.conf
+            and RPC credentials are preserved. Called by
+            restart_bitcoin.sh, which lntest.py invokes when bitcoind
+            needs a full restart.
+
+  fresh     Full reset to a freshly-cloned + setup.sh state. Stops
+            every LNTest process (containers + bitcoind), removes all
+            in-repo runtime artifacts, and deletes ~/.bitcoin/regtest/.
+            Preserves: venv/, config.env, ~/.bitcoin/bitcoin.conf,
+            ~/.lightning/lightning.conf, and the lntest:latest Docker
+            image. Refuses to run if an lntest.py process is detected.
+EOF
         exit 1
         ;;
 esac

@@ -20,7 +20,7 @@ LNTest consists of five components:
 4. **C&C Server Nodes** — CLN instances, each in its own Docker container, forming a Lightning-based overlay by opening payment channels to one another. Commands propagate through this overlay via concurrent keysend flooding.
 5. **Test Orchestrator (`lntest.py`)** — a Python script on the host that automates experiment setup, monitors propagation via POSIX shared memory, and records results.
 
-Between test iterations, containers, shared memory, and node data are cleaned up automatically. Logs are preserved for debugging and cleared only during a full cleanup (`cleanup.sh all`). Bitcoin Core's regtest environment resets at the start of each test run; within a run, the same bitcoind instance is reused across iterations for efficiency.
+Between test iterations, containers, shared memory, node data, and per-iteration runtime files (logs, status, address lists) are cleaned up automatically by `scripts/cleanup.sh iter`. Bitcoin Core's regtest environment resets at the start of each test run; within a run, the same bitcoind instance is reused across iterations for efficiency. To reset the entire testbed to a freshly-cloned + `setup.sh` state (stops bitcoind, wipes regtest data, removes all runtime artifacts), use `scripts/cleanup.sh fresh`.
 
 
 # Usage

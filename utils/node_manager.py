@@ -384,7 +384,7 @@ class NodeManager:
         '''
         self.kill_all_nodes()
 
-        subprocess.run([cfg.KILL_NODES_BASH, 'nodes'])
+        subprocess.run([cfg.KILL_NODES_BASH, 'iter'])
 
     # will enventually goto into a utils file
     def is_kill_time(self, start_time, wait_time):
