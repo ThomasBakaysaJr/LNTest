@@ -184,7 +184,7 @@ def send_message_to_connected_nodes(status, message, counter):
         """Each thread gets its own RPC connection for thread safety."""
         try:
             rpc = LightningRpc(rpc_path)
-            result = rpc.keysend(target_node, 1, extratlvs=tlv_json)
+            result = rpc.xkeysend(destination=target_node, amount_msat=1, extratlvs=tlv_json)
             return (target_node, result, None)
         except Exception as e:
             return (target_node, None, e)

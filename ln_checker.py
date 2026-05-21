@@ -349,7 +349,7 @@ def balance_channel(target_node):
         if to_balance == 0: # if the channel is balanced, channel_not_balanced returns a 0, the amount to balance otherwise
             return
         if check_funds():
-            lightning_rpc.keysend(destination=target_node, amount_msat=to_balance)
+            lightning_rpc.xkeysend(destination=target_node, amount_msat=to_balance)
     else:
         logging.info(f'balance_channel: Channel with {target_node} is not normal. Moving on.')
 

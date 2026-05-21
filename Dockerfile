@@ -1,4 +1,9 @@
-FROM elementsproject/lightningd:latest
+ARG CLN_TAG=latest
+FROM elementsproject/lightningd:${CLN_TAG}
+
+# cln_tag label lets ensure_custom_image() detect when a newer CLN tag exists.
+ARG CLN_TAG=latest
+LABEL cln_tag="${CLN_TAG}"
 
 # Install Python3
 RUN apt-get update && apt-get install -y \

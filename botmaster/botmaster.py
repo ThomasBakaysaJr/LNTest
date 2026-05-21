@@ -362,7 +362,7 @@ def send_msg(message, counter, funded_nodes):
             logging.error(f'Cannot activate channel with {node} after {RETRY_MAX} tries.')
             return False
 
-        command = ["lightning-cli", "--regtest", "keysend",
+        command = ["lightning-cli", "--regtest", "xkeysend",
                    f"destination={node}", f"amount_msat=1",
                    f"extratlvs={tlv_json}"]
         try:
