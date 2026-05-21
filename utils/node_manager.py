@@ -423,3 +423,21 @@ class NodeManager:
         command = f'python3 -u {self.bm_script} {command_str}'
 
         return bm_node.send_botmaster_command(command)
+
+    def warmup_botmaster_channels(self, inject_nodes=None, inject_count=1):
+        '''
+        Open the botmaster's channel(s) to the injection target(s) without sending
+        a message. Called once during setup so the channel-open cost is not counted
+        in the per-command propagation delay measured by the timed loop.
+        '''
+        bm_node = self.nodes.get(self.bm_name)
+        if not bm_node:
+            log.error('BotMaster node not found.')
+            return None
+        if inject_nodes:
+            command_str = f"--warmup --node-ids {','.join(inject_nodes)}"
+        else:
+            command_str = f"--warmup --count {inject_count}"
+        command = f'python3 -u {self.bm_script} {command_str}'
+
+        return bm_node.send_botmaster_command(command)

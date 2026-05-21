@@ -430,10 +430,15 @@ def disconnect_node(node):
         logging.error(f'disconnect_node: ERROR: {e}')  
 
 
-def main(goal, message, node_ids=None, count=1, start_fresh=False):
+def main(goal, message, node_ids=None, count=1, start_fresh=False, warmup=False):
 
     """
     Main Botmaster logic.
+
+    When warmup=True, the botmaster only opens channels to the injection
+    targets and skips the send. The orchestrator uses this before its timed
+    loop so that channel-open cost is excluded from per-command propagation
+    delay.
     """
     logging.info("Starting Botmaster Node Script")
     connect_to_innocent() # we need to connect to innocent to see channel gossip
@@ -453,6 +458,10 @@ def main(goal, message, node_ids=None, count=1, start_fresh=False):
     elif not funded_nodes:
         funded_nodes = fund_channels(node_ids=node_ids, count=count)
 
+    if warmup:
+        logging.info(f'Warmup complete: channels open to {funded_nodes}; skipping send.')
+        return
+
     # Allow interactive command sending
     if goal == 1:
         interactive_command_sender(funded_nodes)
@@ -471,6 +480,8 @@ if __name__ == "__main__":
                         help='Number of random CC nodes to connect to (used when --node-ids not provided).')
     parser.add_argument('--fresh', action='store_true',
                         help='Close and disconnect all previously funded nodes.')
+    parser.add_argument('--warmup', action='store_true',
+                        help='Open channel(s) to the target node(s) but skip the send. Used by the orchestrator to pre-open channels before the timed loop.')
 
     args = parser.parse_args()
 
@@ -478,7 +489,9 @@ if __name__ == "__main__":
     if args.node_ids:
         node_ids = [n.strip() for n in args.node_ids.split(',')]
 
-    if args.msg:
+    if args.warmup:
+        main(2, None, node_ids=node_ids, count=args.count, warmup=True)
+    elif args.msg:
         main(2, args.msg, node_ids=node_ids, count=args.count, start_fresh=args.fresh)
     else:
         desc = f'nodes {node_ids}' if node_ids else f'{args.count} random node(s)'

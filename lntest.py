@@ -541,6 +541,14 @@ def run_test(in_config, manager : NodeManager):
                     log.info(f'Post-takedown injection nodes: {config["inject_nodes"]}')
 
             log.info('Waiting done, proceeding to testing.')
+
+            # Pre-open the botmaster's channel(s) to the injection target(s)
+            # so the channel-open cost is excluded from per-command propagation delay.
+            warmup_inject_nodes = config.get('inject_nodes', None)
+            manager.warmup_botmaster_channels(
+                inject_nodes=warmup_inject_nodes,
+                inject_count=parameters[INJECTION_COUNT])
+
             message_start_time = time.time()
 
             '''
@@ -553,9 +561,9 @@ def run_test(in_config, manager : NodeManager):
                     manager.are_channels_ready()
 
                 inject_nodes = config.get('inject_nodes', None)
+                send_anchor = time.time()
                 manager.send_botmaster_command(y, inject_nodes=inject_nodes, inject_count=parameters[INJECTION_COUNT])
-                cmd_start_time = time.time()
-                send_time, success = wait_for_propagation(y, manager)
+                send_time, success = wait_for_propagation(y, manager, send_anchor)
 
                 # Calculate coverage (what fraction of surviving nodes received the command)
                 coverage_pct, received, total = get_coverage(y, manager)
@@ -563,7 +571,7 @@ def run_test(in_config, manager : NodeManager):
                 if not success:
                     if config.get('takedown', False):
                         # Network partition is a valid result for takedown tests — record it
-                        actual_elapsed = time.time() - cmd_start_time
+                        actual_elapsed = time.time() - send_anchor
                         record = parameters.copy()
                         record['message'] = y
                         record['time_elapsed'] = actual_elapsed
@@ -611,7 +619,7 @@ def run_test(in_config, manager : NodeManager):
     log.info(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.")
     log.info(f"Testing with: \n{config}")
 
-def wait_for_propagation(command, manager : NodeManager):
+def wait_for_propagation(command, manager : NodeManager, send_anchor):
     log.info(f'Now waiting for command {command} to propagate.')
     sending = True
     start_time = time.time()
@@ -623,7 +631,7 @@ def wait_for_propagation(command, manager : NodeManager):
     while sending:
         data = manager.retrieve_all_status()
         if data:
-            time_interval, done = get_time_interval(data, command)
+            time_interval, done = get_time_interval(data, command, send_anchor)
             # Track coverage progress for early partition detection
             received = sum(1 for s in data if int(s.get('counter', 0)) >= int(command))
             if received > last_received:
@@ -955,16 +963,21 @@ def stop_bitcoinminer():
             log.info(f"Found and killing the bitcoin miner with pid {id}.")
 
 
-def get_time_interval(data, top_count):
+def get_time_interval(data, top_count, send_anchor):
     '''
-    Retrive the time interval of all statuses in data that match top_count.
+    Compute propagation delay: the time from when the botmaster fired the
+    command (send_anchor) until the latest surviving node received it.
+
     Parameters:
         data: List of statuses
         top_count: counter we are waiting for
+        send_anchor: time.time() captured by the orchestrator right before
+                     invoking the botmaster, used as t0 for the delay.
     Returns:
         interval, is_done
-        interval: time between youngest and oldest status
-        id_done: All status have the same counter as top_count
+        interval: max(receive_times) - send_anchor, in seconds;
+                  None if no node has received this command yet.
+        is_done: True when every node has reached top_count.
     '''
     # Retrieve the status of all nodes with their counter at top count
     top_data = [status for status in data if int(status.get('counter')) == int(top_count)]
@@ -974,7 +987,7 @@ def get_time_interval(data, top_count):
 
     times = [status.get('last_msg_time') for status in top_data]
     if times:
-        interval = max(times) - min(times)
+        interval = max(times) - send_anchor
     else:
         interval = None
 
