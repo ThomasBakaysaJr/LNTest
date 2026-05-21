@@ -12,6 +12,6 @@ source "$LNTEST_ROOT/config.env"
 sleep 0.5
 sudo -u $USER_NAME "$BITCOIND" -datadir="$BITCOIN_DIR"
 sleep 1
-sudo -u $USER_NAME "$BITCOIN_CLI" -datadir="$BITCOIN_DIR" --regtest createwallet ''
+sudo -u $USER_NAME "$BITCOIN_CLI" -datadir="$BITCOIN_DIR" --regtest createwallet "default"
 
 $LNBOT_DIR/venv/bin/python "$MINER_SCRIPT" "$RPC_USER" "$RPC_PASSWORD" "$BITCOIN_CLI"

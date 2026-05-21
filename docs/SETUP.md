@@ -1,8 +1,6 @@
 # Setup
 
-This testbed has been verified on a fresh Ubuntu 24.04 LTS install. The instructions below assume a fresh Ubuntu system.
-
-**Requirements:** Docker, Python 3.10+, Bitcoin Core v28+. The latest Core Lightning release is pulled automatically via Docker during setup.
+This testbed has been verified on fresh Ubuntu 24.04 LTS and 26.04 LTS installs. The instructions below assume a fresh Ubuntu system.
 
 ## 1. Install system dependencies
 
@@ -10,24 +8,26 @@ Update your system and install required packages:
 
 ```bash
 sudo apt update && sudo apt upgrade
-sudo apt install python3-venv git -y
+sudo apt install python3-venv git jq -y
 ```
 
 Install Docker following the official guide for Ubuntu: [https://docs.docker.com/engine/install/ubuntu/](https://docs.docker.com/engine/install/ubuntu/)
 
 ```bash
 # Add Docker's official GPG key:
+sudo apt update
 sudo apt install ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-# Add the repository to apt sources:
+# Add the repository to Apt sources:
 sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
 Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
 Components: stable
+Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 
@@ -43,18 +43,22 @@ sudo systemctl status docker
 
 ## 2. Install Bitcoin Core
 
-Create a workspace directory, download Bitcoin Core from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/), and extract it:
+Pick a workspace directory — `LNTest/` (cloned in step 3) and `bitcoin/` (extracted below) just need to live as siblings under it. Example using `~/lntest`:
 
 ```bash
 mkdir -p ~/lntest
 cd ~/lntest
-# Move the downloaded tar file here, then:
-tar -xvzf bitcoin-*
+```
+
+Download the latest Bitcoin Core release (currently 31.0) from [https://bitcoincore.org/en/download/](https://bitcoincore.org/en/download/), move the tarball into your workspace, then extract:
+
+```bash
+tar -xvzf bitcoin-*.tar.gz
 mv bitcoin-*/ bitcoin
 rm bitcoin-*.tar.gz
 ```
 
-Do not run Bitcoin Core yet.
+Do not start Bitcoin Core yet — `setup.sh` writes the regtest config in the next step and refuses to run if `bitcoind` is already up.
 
 ## 3. Clone and configure LNTest
 
@@ -62,12 +66,11 @@ Do not run Bitcoin Core yet.
 cd ~/lntest
 git clone https://github.com/ThomasBakaysaJr/LNTest.git LNTest
 cd LNTest
-chmod +x setup.sh scripts/*.sh
 ./setup.sh
 ```
 
 The setup script will:
-* Check dependencies (Docker, Python, jq)
+* Check dependencies (Docker, jq, Python)
 * Create the Python virtual environment and install packages
 * Create config files in `~/.lightning` and `~/.bitcoin`
 * Prompt for RPC username and password
@@ -75,3 +78,5 @@ The setup script will:
 You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
 
 Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
+
+Once setup completes, run the sanity check from the [readme](../readme.md#usage) to confirm everything works end-to-end.
