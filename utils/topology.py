@@ -217,49 +217,64 @@ def build_topology(edges, cc_nodes):
     for src, dst in edges:
         outbound[src].append(dst)
 
-    log.info('  Phase 2: Opening channels via multifundchannel...')
+    log.info('  Phase 2: Opening channels via multifundchannel (parallel)...')
+
+    def open_source(src_num):
+        '''Connect to all of src's targets and open every channel in a single
+        multifundchannel tx. Uses `docker exec` via subprocess (process-isolated,
+        so it is safe to run many of these concurrently). Returns
+        (src_num, targets, ok, err). Does NOT mine — all funding txs are
+        confirmed together in one mining round after every source is submitted.'''
+        targets = outbound[src_num]
+        name = node_info[src_num]['name']
+        for dst_num in targets:
+            subprocess.run(
+                ['docker', 'exec', name, 'lightning-cli', '--regtest',
+                 'connect', node_info[dst_num]['address']],
+                capture_output=True
+            )
+        destinations = [
+            {"id": node_info[d]['pubkey'], "amount": "50000", "push_msat": 25000000}
+            for d in targets
+        ]
+        res = subprocess.run(
+            ['docker', 'exec', name, 'lightning-cli', '--regtest',
+             'multifundchannel', json.dumps(destinations)],
+            capture_output=True, text=True
+        )
+        if res.returncode == 0:
+            return src_num, targets, True, None
+        return src_num, targets, False, (res.stderr or res.stdout or '').strip()[:120]
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     total_opened = 0
     total_failed = 0
+    failed_sources = []
+    sources = sorted(outbound.keys())
+    max_workers = min(12, len(sources)) or 1
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(open_source, s) for s in sources]
+        for fut in as_completed(futures):
+            src_num, targets, ok, err = fut.result()
+            tn = ','.join(f'CC{j}' for j in targets)
+            if ok:
+                total_opened += len(targets)
+                log.info(f'    CC{src_num} -> [{tn}]: {len(targets)} channels opened')
+            else:
+                failed_sources.append(src_num)
+                log.warning(f'    CC{src_num} -> [{tn}]: FAILED - {err} (will retry)')
 
-    for src_num in sorted(outbound.keys()):
-        targets = outbound[src_num]
-        from_info = node_info[src_num]
-        container = from_info['container']
-
-        # Connect to all targets first
-        for dst_num in targets:
-            to_info = node_info[dst_num]
-            container.exec_run(
-                f'lightning-cli --regtest connect {to_info["address"]}', demux=True
-            )
-
-        # Build multifundchannel destinations
-        destinations = []
-        for dst_num in targets:
-            to_info = node_info[dst_num]
-            destinations.append({
-                "id": to_info['pubkey'],
-                "amount": "50000",
-                "push_msat": 25000000
-            })
-
-        dest_json = json.dumps(destinations)
-        cmd = f"lightning-cli --regtest multifundchannel '{dest_json}'"
-
-        exit_code, output = container.exec_run(cmd, demux=True)
-
-        target_names = ','.join([f'CC{j}' for j in targets])
-        if exit_code == 0:
+    # Sequential retry pass for transient concurrency failures (e.g. a peer
+    # busy with another open at the same instant).
+    for src_num in sorted(failed_sources):
+        src_num, targets, ok, err = open_source(src_num)
+        tn = ','.join(f'CC{j}' for j in targets)
+        if ok:
             total_opened += len(targets)
-            log.info(f'    CC{src_num} -> [{target_names}]: {len(targets)} channels opened')
+            log.info(f'    [retry] CC{src_num} -> [{tn}]: {len(targets)} channels opened')
         else:
-            err = get_cli_error(output)
-            log.error(f'    CC{src_num} -> [{target_names}]: FAILED - {err}')
             total_failed += len(targets)
-
-        # Mine after each source node to confirm the funding tx
-        mine_blocks(6)
-        time.sleep(1)
+            log.error(f'    [retry] CC{src_num} -> [{tn}]: FAILED - {err}')
 
     log.info(f'  Opened {total_opened} channels ({total_failed} failed).')
 

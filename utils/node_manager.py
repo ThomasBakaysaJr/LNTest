@@ -139,35 +139,74 @@ class NodeManager:
         # Determine cc_manager behavior
         skip_flag = '1' if mode in ('dlnbot', 'custom') else '0'
 
-        counter = 1
-        while counter <= total_nodes:
-            try:
+        if mode in ('dlnbot', 'custom'):
+            # Orchestrator-built modes: containers are independent and are NOT
+            # funded per-node (fund_wallets.sh batches funding after launch), so
+            # there is no reason to serialize. Create all SHM buffers first
+            # (fast, must exist before each container starts writing status),
+            # then launch every container in parallel.
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            for counter in range(1, total_nodes + 1):
                 self.shm.setup_shm("CC" + str(counter), True)
-                subprocess.run(
-                    [cfg.CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag]
+
+            def _launch(counter):
+                return counter, subprocess.run(
+                    [cfg.CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag],
+                    capture_output=True, text=True
                 )
-                new_node = Node(f'CC{counter}')
-                self.nodes[new_node.name] = new_node
-            except subprocess.CalledProcessError as e:
-                log.error(f"setup_test failed with exit code {e.returncode}")
-                log.error(f"  setup_test STDOUT: {e.stdout.strip()}")
-                log.error(f"  setup_test STDERR: {e.stderr.strip()}")
-                raise
-            except Exception as e:
-                log.error(f"setup_test: Exception occurred: {e}")
+
+            max_workers = min(16, total_nodes)
+            log.info(f'Launching {total_nodes} containers in parallel (max_workers={max_workers})...')
+            failed = []
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = [pool.submit(_launch, c) for c in range(1, total_nodes + 1)]
+                for fut in as_completed(futures):
+                    try:
+                        c, res = fut.result()
+                        if res.returncode != 0:
+                            failed.append(c)
+                            log.error(f"CC{c} create failed (exit {res.returncode}): "
+                                      f"{(res.stderr or '').strip()[:200]}")
+                    except Exception as e:
+                        log.error(f"Container launch raised: {e}")
+                        failed.append(-1)
+            if failed:
+                log.error(f"setup_test: {len(failed)} container(s) failed to launch.")
                 return None
+            # Register Node objects on the main thread (after all are up).
+            for counter in range(1, total_nodes + 1):
+                self.nodes[f'CC{counter}'] = Node(f'CC{counter}')
+        else:
+            # dlnbot-formation: serial launch with staggered delays, simulating
+            # the real D-LNBot malware pipeline (download client → sync → fund →
+            # open channels). Per-node funding stays in create_cc_node.sh because
+            # cc_manager forms channels live during this loop.
+            counter = 1
+            while counter <= total_nodes:
+                try:
+                    self.shm.setup_shm("CC" + str(counter), True)
+                    subprocess.run(
+                        [cfg.CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag]
+                    )
+                    new_node = Node(f'CC{counter}')
+                    self.nodes[new_node.name] = new_node
+                except subprocess.CalledProcessError as e:
+                    log.error(f"setup_test failed with exit code {e.returncode}")
+                    log.error(f"  setup_test STDOUT: {e.stdout.strip()}")
+                    log.error(f"  setup_test STDERR: {e.stderr.strip()}")
+                    raise
+                except Exception as e:
+                    log.error(f"setup_test: Exception occurred: {e}")
+                    return None
 
-            # Stagger launches for dlnbot-formation mode
-            # Simulates variable LN setup time from D-LNBot's malware pipeline:
-            # download LN client → sync blockchain → fetch funding → open channels
-            # Log-normal distribution: median ~30s, range ~10-90s on regtest
-            if mode == 'dlnbot-formation' and counter < total_nodes:
-                delay = random.lognormvariate(math.log(30), 0.5)
-                delay = max(10, min(delay, 90))  # clamp to [10, 90]s
-                log.info(f'  Staggered launch: waiting {delay:.0f}s before next container (simulating LN setup delay)...')
-                time.sleep(delay)
+                # Log-normal inter-arrival: median ~30s, clamped to [10, 90]s
+                if counter < total_nodes:
+                    delay = random.lognormvariate(math.log(30), 0.5)
+                    delay = max(10, min(delay, 90))
+                    log.info(f'  Staggered launch: waiting {delay:.0f}s before next container (simulating LN setup delay)...')
+                    time.sleep(delay)
 
-            counter += 1
+                counter += 1
 
         # For orchestrator-controlled modes, skip channel readiness
         if mode in ('dlnbot', 'custom'):
