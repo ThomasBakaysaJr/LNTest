@@ -7,6 +7,7 @@ import json
 import time
 import os
 import logging
+import threading
 from pathlib import Path
 
 
@@ -26,11 +27,15 @@ import ln_checker
 
 DISCOVERY_RULE_DIVISOR = [ln_checker.DISCOVERY_RULE_DIVISOR, ln_checker.BOTMASTER_RULE_DIVISOR // 100]
 
-SLEEP_INT = 0.5 # INT is interval, should probably change that to something better
 CONNECT_SLEEP = 3 # timer specifically for initialization of channels
 
-# how long in s between status updates
+# How long in s between background state-updater ticks (channels-ready check,
+# is_node_ready bookkeeping). The receive path is event-driven via
+# waitanyinvoice, so this timer no longer gates message propagation.
 STATUS_TIMER = ln_checker.STATUS_UPDATE_INTERVAL
+
+# Fallback sleep when waitanyinvoice errors out, before retrying.
+WAIT_RETRY_SLEEP = 0.5
 
 THIS_NODE = None
 # for global (is it sending right now?) type ask
@@ -43,12 +48,61 @@ MESSAGE_TLV_TYPE = "34349334"
 LAST_INVOICE_INDEX = -1
 
 
+def _state_updater_loop(status, stop_event):
+    """
+    Background thread: periodically refresh node-readiness state. Replaces the
+    state-update bookkeeping that used to piggyback on the polling loop. Runs
+    every STATUS_TIMER seconds until stop_event is set.
+    """
+    global CONNECTING
+    while not stop_event.is_set():
+        try:
+            if is_node_ready(status):
+                CONNECTING = False
+            elif ln_checker.get_state() != 'connected':
+                CONNECTING = True
+        except Exception as e:
+            logging.warning(f'state-updater: exception {e}')
+        stop_event.wait(STATUS_TIMER)
+
+
+def _handle_invoice(status, invoice):
+    """
+    Process one paid invoice: extract the embedded command, dedup against
+    already-seen counters, forward to peers. Mirrors the per-message logic
+    that used to live inside the polling loop.
+    """
+    label = invoice.get('label', '')
+    if not label.startswith('keysend'):
+        return
+    description = invoice.get('description', '')
+    if '|' not in description:
+        return
+    # Strip the "keysend: " prefix the CLN receiver-side plugin attaches.
+    message = description[len('keysend: '):]
+
+    command, command_counter = process_message(message)
+    if not command_counter:
+        return
+    processed_counters = get_processed_counters(status) | set(status.get('sent_messages'))
+    if command_counter in processed_counters:
+        return
+
+    update_status(status, command, command_counter)
+    logging.info(f'Sending message {message} to connected nodes.')
+    send_message_to_connected_nodes(status, message, command_counter)
+    logging.info(f'Sent {message} to all connected nodes.')
+
+
 def main():
     """
-    Main function to process and send commands to the REST server.
+    Event-driven receive loop. CLN's waitanyinvoice RPC blocks until a paid
+    invoice with pay_index > LAST_INVOICE_INDEX arrives, eliminating the
+    fixed 0..500 ms polling wait that previously dominated per-hop latency.
     """
     global SENDING
     global CONNECTING
+    global LAST_INVOICE_INDEX
     load_this_node()
 
     # this will either load a saved status to recover from a crash
@@ -59,92 +113,57 @@ def main():
     # Wait until we've finished creating channels with other nodes
     # Sleep time here is different since it takes a little to find nodes and then
     # try to connect to them.
-    
-    set_state(status,'initializing')
+    set_state(status, 'initializing')
     if os.environ.get('SKIP_CC_MANAGER') != '1':
-        while not ln_checker.get_channels(): # need to make sure we're returning stuff
+        while not ln_checker.get_channels():  # need to make sure we're returning stuff
             time.sleep(CONNECT_SLEEP)
         while len(ln_checker.get_channels()) < 1:
-            set_state(status,'initializing')
+            set_state(status, 'initializing')
             time.sleep(CONNECT_SLEEP)
         logging.info('Channels have started being created.')
     else:
         logging.info('Orchestrator-controlled topology: skipping channel wait loop.')
-        set_state(status,'connected')
+        set_state(status, 'connected')
 
-    update_counter = 0
-    max_counter = (STATUS_TIMER // SLEEP_INT) # this is so that we don't update the node too often
-    
+    # Periodic state bookkeeping moves to a daemon thread so the receive path
+    # can block on waitanyinvoice without missing readiness checks.
+    stop_event = threading.Event()
+    updater = threading.Thread(
+        target=_state_updater_loop, args=(status, stop_event), daemon=True)
+    updater.start()
+
+    # LAST_INVOICE_INDEX starts at -1; waitanyinvoice with lastpay_index=0
+    # returns the first paid invoice with pay_index > 0 (CLN starts pay_index
+    # at 1). Already-paid invoices replay through _handle_invoice once, which
+    # is a no-op because process_message dedups by counter.
+    if LAST_INVOICE_INDEX < 0:
+        LAST_INVOICE_INDEX = 0
+
     while True:
-        # Retrieve all messages using lightning-cli
-        messages = get_new_messages()
-        written_commands = set()
+        try:
+            invoice = ln_checker.lightning_rpc.waitanyinvoice(
+                lastpay_index=LAST_INVOICE_INDEX)
+        except Exception as e:
+            logging.warning(f'waitanyinvoice error: {e}; retrying in {WAIT_RETRY_SLEEP}s')
+            time.sleep(WAIT_RETRY_SLEEP)
+            continue
 
-        if messages and len(messages) > 0:
-            for message in messages:
-                command, command_counter = process_message(message)  # seperate the command and counter
-                processed_counters = get_processed_counters(status) | set(status.get('sent_messages')) # combine it with already sent messages 
-                if command_counter and command_counter not in processed_counters:
-                    if command_counter not in written_commands: # this way we only write it once
-                        written_commands.add(command_counter)
-                        # update_status will handle already sent commands itself
-                        # status should persist, even if written_commands does not
-                        update_status(status, command, command_counter)
-                    processed_counters.add(command_counter)
-                    logging.info(f'Sending message {message} to connected nodes.')
-                    send_message_to_connected_nodes(status, message, command_counter)
-                    logging.info(f'Sent {message} to all connected nodes.')
+        if not invoice:
+            continue
+        pay_index = invoice.get('pay_index')
+        if pay_index is None or pay_index <= LAST_INVOICE_INDEX:
+            continue
+        LAST_INVOICE_INDEX = pay_index
 
-        time.sleep(SLEEP_INT)
-        if SENDING or CONNECTING or update_counter > max_counter: # detect state
-            if is_node_ready(status): # is_node_ready automatically sets the state
-                CONNECTING = False
-            elif ln_checker.get_state() != 'connected':
-                CONNECTING = True
+        if invoice.get('status') != 'paid':
+            continue
 
-            update_counter = 0
+        SENDING = True
+        try:
+            _handle_invoice(status, invoice)
+        finally:
             SENDING = False
-        else:
-            update_counter += 1
 
-def get_new_messages():
-    '''
-    Retrieve all new messages using the lightning-cli listinvoices command and sorting
-    through the returns.
-    '''
-    global LAST_INVOICE_INDEX
-    messages = []
-    try:
-        invoices = ln_checker.lightning_rpc.listinvoices().get('invoices', [])
-        if len(invoices) == 0:
-            return []
-        
-        new_invoices = []
-        max_payindex = LAST_INVOICE_INDEX
-        # each invoice contains the extra tlv that contains the message / command 
-        for invoice in invoices:
-            if not invoice: # make sure we actually have invoices to look at
-                logging.info(f'skipping.')
-                continue
-
-            if invoice.get('status') == 'paid' and 'pay_index' in invoice and invoice['pay_index'] > LAST_INVOICE_INDEX:
-                new_invoices.append(invoice)
-                max_payindex = max(invoice['pay_index'], max_payindex)
-               
-        LAST_INVOICE_INDEX = max_payindex
-
-        # get the actual messages out
-        for invoice in new_invoices:
-            label = invoice.get('label', '')
-            if label.startswith('keysend'):
-                msg = invoice.get('description', '')
-                if '|' in msg:
-                    msg = msg[len('keysend: '):]
-                    messages.append(msg)
-    except Exception as e:
-        logging.error(f"Exception occurred while getting messages: {e}")
-        return None
-    return messages
 
 
 def send_message_to_connected_nodes(status, message, counter):
