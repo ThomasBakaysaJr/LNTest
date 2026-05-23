@@ -128,12 +128,9 @@ create_node() {
 
     write_address_to_file "$NODE_NAME"
 
-    # Funding: in autonomous formation mode (skip_cc_manager != 1) each node
-    # self-opens channels during cc_manager formation, so it needs funds (and
-    # confirmations) immediately. In orchestrator-built modes (dlnbot/custom,
-    # skip_cc_manager == 1) all nodes are funded in a single batch by
-    # fund_wallets.sh after launch, so per-node funding + per-node mining here
-    # is redundant (50x sendtoaddress + 50x 6-block mining) and is skipped.
+    # Only autonomous formation mode funds per-node here (each node self-opens
+    # channels during formation). Orchestrator modes (skip_cc_manager=1) fund
+    # all nodes in one batch in fund_wallets.sh, so this would be redundant.
     if [ "$skip_cc_manager" != "1" ]; then
         echo "Funding node $NODE_NAME"
         fund_node $NODE_NAME
@@ -159,9 +156,8 @@ write_address_to_file() {
     CURRENT_PORT=$(($CC_PORT_BASE + suffix))
     NODE_ADDRESS="${NODE_NAME} ${NODE_ID}@${BITCOIN_HOST}:${CURRENT_PORT}"
 
-    # Append the address to both address list files. Nodes may be created in
-    # parallel (dlnbot/custom), so serialize the appends with an flock to avoid
-    # interleaved/corrupted lines.
+    # flock: nodes are created in parallel (dlnbot/custom) and would otherwise
+    # interleave/corrupt these shared address-list files.
     (
         flock 200
         echo $NODE_ADDRESS >> $NODE_MANAGER_ADDRESS_LIST

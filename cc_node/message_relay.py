@@ -29,9 +29,8 @@ DISCOVERY_RULE_DIVISOR = [ln_checker.DISCOVERY_RULE_DIVISOR, ln_checker.BOTMASTE
 
 CONNECT_SLEEP = 3 # timer specifically for initialization of channels
 
-# How long in s between background state-updater ticks (channels-ready check,
-# is_node_ready bookkeeping). The receive path is event-driven via
-# waitanyinvoice, so this timer no longer gates message propagation.
+# Interval for the background state-updater thread. The receive path is
+# event-driven (waitanyinvoice), so this no longer gates message propagation.
 STATUS_TIMER = ln_checker.STATUS_UPDATE_INTERVAL
 
 # Fallback sleep when waitanyinvoice errors out, before retrying.
@@ -50,9 +49,8 @@ LAST_INVOICE_INDEX = -1
 
 def _state_updater_loop(status, stop_event):
     """
-    Background thread: periodically refresh node-readiness state. Replaces the
-    state-update bookkeeping that used to piggyback on the polling loop. Runs
-    every STATUS_TIMER seconds until stop_event is set.
+    Background thread: refresh node-readiness state every STATUS_TIMER seconds
+    until stop_event is set.
     """
     global CONNECTING
     while not stop_event.is_set():
@@ -69,8 +67,7 @@ def _state_updater_loop(status, stop_event):
 def _handle_invoice(status, invoice):
     """
     Process one paid invoice: extract the embedded command, dedup against
-    already-seen counters, forward to peers. Mirrors the per-message logic
-    that used to live inside the polling loop.
+    already-seen counters, forward to peers.
     """
     label = invoice.get('label', '')
     if not label.startswith('keysend'):
@@ -96,9 +93,8 @@ def _handle_invoice(status, invoice):
 
 def main():
     """
-    Event-driven receive loop. CLN's waitanyinvoice RPC blocks until a paid
-    invoice with pay_index > LAST_INVOICE_INDEX arrives, eliminating the
-    fixed 0..500 ms polling wait that previously dominated per-hop latency.
+    Event-driven receive loop: waitanyinvoice blocks until a paid invoice with
+    pay_index > LAST_INVOICE_INDEX arrives, then forwards the embedded command.
     """
     global SENDING
     global CONNECTING
@@ -125,8 +121,8 @@ def main():
         logging.info('Orchestrator-controlled topology: skipping channel wait loop.')
         set_state(status, 'connected')
 
-    # Periodic state bookkeeping moves to a daemon thread so the receive path
-    # can block on waitanyinvoice without missing readiness checks.
+    # State bookkeeping runs in a daemon thread so the receive path can block
+    # on waitanyinvoice without missing readiness checks.
     stop_event = threading.Event()
     updater = threading.Thread(
         target=_state_updater_loop, args=(status, stop_event), daemon=True)
@@ -228,11 +224,9 @@ def get_connected_nodes():
     Retrieve all nodes that have a channel with this node and satisfy the discovery rule.
     """
     try:
-        # Peers we currently have a LIVE connection to. Skip peers that are
-        # offline (e.g. taken down during a takedown test): their channels are
-        # auto-disabled, so forwarding to them just fails with a 205 "no usable
-        # path" error and wastes time. Filtering them is coverage-neutral (live
-        # peers still receive the command) and avoids the dead-peer error spam.
+        # Currently-connected peers. Skipping offline ones (e.g. taken down in a
+        # takedown test) avoids 205 "no usable path" errors when forwarding to
+        # them; it's coverage-neutral since live peers still get the command.
         online_peers = set()
         try:
             peers = ln_checker.lightning_rpc.listpeers().get('peers', [])
@@ -254,9 +248,8 @@ def get_connected_nodes():
             # Skip the innocent channel (matches discovery rule)
             if capacity in DISCOVERY_RULE_DIVISOR:
                 continue
-            # Skip peers that are not currently connected (only filter when we
-            # successfully got the online set, so an RPC hiccup degrades to old
-            # behavior rather than dropping everyone).
+            # Only filter when listpeers succeeded, so an RPC hiccup degrades to
+            # forwarding to everyone rather than dropping all peers.
             if online_peers and peer not in online_peers:
                 logging.info(f"Skipping offline peer {peer}.")
                 continue

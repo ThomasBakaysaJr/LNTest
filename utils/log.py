@@ -23,9 +23,8 @@ def setup_logging(level=logging.INFO):
         return
     root.setLevel(logging.DEBUG)
 
-    # Quiet noisy third-party loggers: the Docker SDK emits a DEBUG line for
-    # every HTTP roundtrip and every config-file probe, which buried the file
-    # handler under ~120k lines per run. We only want WARNING+ from these.
+    # Quiet noisy third-party loggers: the Docker SDK logs a DEBUG line per HTTP
+    # roundtrip, which otherwise floods the file handler. Keep WARNING+ only.
     for noisy in ('urllib3', 'docker', 'asyncio'):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
