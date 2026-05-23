@@ -140,11 +140,9 @@ class NodeManager:
         skip_flag = '1' if mode in ('dlnbot', 'custom') else '0'
 
         if mode in ('dlnbot', 'custom'):
-            # Orchestrator-built modes: containers are independent and are NOT
-            # funded per-node (fund_wallets.sh batches funding after launch), so
-            # there is no reason to serialize. Create all SHM buffers first
-            # (fast, must exist before each container starts writing status),
-            # then launch every container in parallel.
+            # Orchestrator-built modes: containers are independent and funded in
+            # one batch later (fund_wallets.sh), so launch them in parallel. SHM
+            # buffers are created first since each container writes status on start.
             from concurrent.futures import ThreadPoolExecutor, as_completed
             for counter in range(1, total_nodes + 1):
                 self.shm.setup_shm("CC" + str(counter), True)
@@ -326,14 +324,12 @@ class NodeManager:
 
     def rank_nodes_for_takedown(self, strategy='random'):
         '''
-        Return ALL current CC nodes in the order they should be removed for a
-        NESTED (cumulative) takedown sweep, computed ONCE on the full topology:
-          - 'targeted': highest channel-degree first (static ranking on the
-            intact topology, so each percentage removes the next-highest on top
-            of the previous set).
+        Return all current CC nodes in removal order for a nested takedown sweep,
+        ranked ONCE on the intact topology:
+          - 'targeted': highest channel-degree first.
           - 'random'  : a single random permutation.
-        The sweep then removes order[:target] at each percentage, so larger
-        percentages strictly contain smaller ones (monotonic).
+        The sweep removes order[:target] at each percentage, so larger
+        percentages strictly contain smaller ones.
         '''
         cc_nodes = []
         while not cc_nodes:
@@ -463,10 +459,31 @@ class NodeManager:
 
     def kill_all_nodes(self):
         '''
-        Cleanup all nodes and unlink shared memory.
+        Cleanup all nodes and unlink shared memory. Containers are force-removed
+        in a single batched `docker rm -f` (much faster than one-at-a-time at large n).
         '''
-        for node in self.nodes.values():
-            self.kill_node(node)
+        nodes = list(self.nodes.values())
+        names = [n.name for n in nodes]
+        if names:
+            try:
+                subprocess.run(['docker', 'rm', '-f'] + names, capture_output=True, text=True)
+            except Exception as e:
+                log.warning(f'kill_all_nodes: batched docker rm failed ({e}); falling back to serial.')
+                for node in nodes:
+                    self.kill_node(node)
+                self.nodes.clear()
+                return
+        # Unlink shared memory + release each node's docker client.
+        for node in nodes:
+            try:
+                self.shm.remove_shm(node.name)
+            except Exception:
+                pass
+            try:
+                node.client.close()
+            except Exception:
+                pass
+            node._container = None
         self.nodes.clear()
 
     def shutdown_nodes(self, nodes):

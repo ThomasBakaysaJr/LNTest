@@ -1,34 +1,8 @@
 #!/bin/bash
-# cleanup.sh - LNTest cleanup script
-#
-# Usage:
-#   cleanup.sh iter
-#       Between-iteration cleanup. Stops every LNTest container, clears
-#       /dev/shm/CC* shared memory, wipes node_data/, and removes per-node
-#       runtime files (logs, status, address lists, counters) from
-#       botmaster/ and cc_node/. bitcoind keeps running so the regtest
-#       blockchain state is preserved across iterations. Called by
-#       init_botnet.sh at the start of each iteration.
-#
-#   cleanup.sh bitcoin
-#       Stops bitcoind and deletes ~/.bitcoin/regtest/. bitcoin.conf and
-#       RPC credentials are preserved. Called by restart_bitcoin.sh,
-#       which lntest.py invokes when bitcoind needs a full restart
-#       (first run, low balance, or post-crash recovery).
-#
-#   cleanup.sh fresh
-#       Full reset to a freshly-cloned + setup.sh state. Stops every
-#       LNTest process (containers + bitcoind), removes all in-repo
-#       runtime artifacts, and deletes ~/.bitcoin/regtest/.
-#
-#       PRESERVED (setup.sh outputs and the Docker image):
-#         - venv/                          (setup.sh)
-#         - config.env                     (setup.sh)
-#         - ~/.bitcoin/bitcoin.conf        (setup.sh)
-#         - ~/.lightning/lightning.conf    (setup.sh)
-#         - Docker image lntest:latest     (rebuilt by lntest.py if absent)
-#
-#       Refuses to run if an lntest.py process is in progress.
+# cleanup.sh - LNTest cleanup. Modes (run with no/invalid arg for full usage):
+#   iter     between-iteration reset; bitcoind keeps running (regtest chain reused)
+#   bitcoin  stop bitcoind + delete ~/.bitcoin/regtest/ (keeps bitcoin.conf/creds)
+#   fresh    full reset to freshly-cloned + setup.sh state
 
 set -e
 
@@ -57,8 +31,7 @@ stop_containers() {
         --filter "name=InnocentNode" \
         --format "{{.Names}}" 2>/dev/null || true)
     if [ -n "$names" ]; then
-        echo "$names" | xargs -r docker stop >/dev/null 2>&1 || true
-        echo "$names" | xargs -r docker rm   >/dev/null 2>&1 || true
+        echo "$names" | xargs -r docker rm -f >/dev/null 2>&1 || true
     fi
 }
 

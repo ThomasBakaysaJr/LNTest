@@ -481,8 +481,9 @@ def run_test(in_config, manager : NodeManager):
                     success = False
                     attempt += 1
                     continue
-                log.info('Waiting 10s for node status updates...')
-                time.sleep(10)
+                # Phase 3 polled until channels were CHANNELD_NORMAL; brief SHM settle.
+                log.info('Brief settle for SHM status writes...')
+                time.sleep(3)
             elif mode == 'custom':
                 edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[CC_COUNT])
                 if edges is None:
@@ -497,8 +498,9 @@ def run_test(in_config, manager : NodeManager):
                     success = False
                     attempt += 1
                     continue
-                log.info('Waiting 10s for node status updates...')
-                time.sleep(10)
+                # Phase 3 polled until channels were CHANNELD_NORMAL; brief SHM settle.
+                log.info('Brief settle for SHM status writes...')
+                time.sleep(3)
             # dlnbot-formation: cc_manager handles formation, nothing to build here
 
             # Resolve injection points for this iteration
@@ -628,13 +630,10 @@ def run_takedown_test(in_config, manager : NodeManager):
     '''
     Takedown sweep with topology REUSE + NESTED (cumulative) removal.
 
-    Builds the C&C overlay ONCE, then at each removal percentage takes down
-    additional nodes ON TOP of those already removed -- a single progressive-
-    attack trajectory -- instead of rebuilding and drawing a fresh removal set
-    per percentage. Faster (one build, not one per percentage) and a cleaner,
-    monotonic resilience curve. Removal order is fixed once on the intact
-    topology: highest-degree-first for 'targeted', a random permutation for
-    'random'.
+    Builds the C&C overlay ONCE, then at each percentage removes additional
+    nodes ON TOP of those already removed -- one progressive-attack trajectory
+    with a monotonic resilience curve. Removal order is fixed once on the intact
+    topology: highest-degree-first for 'targeted', a random permutation for 'random'.
     '''
     global _active_monitor
     config = copy.deepcopy(in_config)
@@ -676,7 +675,8 @@ def run_takedown_test(in_config, manager : NodeManager):
         log.error('[takedown-reuse] could not build topology after retries; aborting.')
         return
     if mode in ('dlnbot', 'custom'):
-        time.sleep(10)  # let channels reach CHANNELD_NORMAL / gossip settle
+        # Phase 3 polled until channels were CHANNELD_NORMAL; brief SHM settle.
+        time.sleep(3)
     total_setup_time = time.time() - cc_start_time
     log.info(f'[takedown-reuse] Topology built in {total_setup_time:.0f}s; reused across all percentages.')
 
@@ -689,9 +689,8 @@ def run_takedown_test(in_config, manager : NodeManager):
     takedown_order = manager.rank_nodes_for_takedown(strategy)
     removed = []
 
-    # The botmaster's command counter (counter.txt) persists across the whole
-    # run and is NOT reset between percentages here (we never rebuild). So the
-    # counter the C&C nodes track keeps climbing globally -- we must wait for /
+    # The botmaster's command counter (counter.txt) persists across the run and
+    # is never reset between percentages (we never rebuild). So we must track and
     # measure that global counter, not a per-percentage 1..k index, or the
     # propagation detector never sees "done" and falsely reports a partition.
     global_cmd = 0
@@ -864,20 +863,31 @@ def confirm_test():
     else:
         return False
 
-def fund_nodes():
+def run_logged(cmd, prefix=''):
+    '''
+    Run a subprocess, streaming its output line-by-line through the logger so it
+    shows live on the console AND is persisted to orchestrator.log. A plain
+    subprocess.run inherits stdout and leaves the output on the terminal only.
+    Returns the exit code.
+    '''
     try:
-        subprocess.run(
-            [cfg.FUND_WALLETS_BASH]
-        )
-    except subprocess.CalledProcessError as e:
-        # This is where the error from lightning-cli lives!
-        log.error(f"tester failed with exit code {e.returncode}")
-        log.error(f"  tester STDOUT: {e.stdout.strip()}")
-        log.error(f"  tester STDERR: {e.stderr.strip()}")
-        raise # Re-raise the exception so your calling code can catch it
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                log.info(f'{prefix}{line}')
+        proc.wait()
+        return proc.returncode
     except Exception as e:
-        log.error(f"tester: Exception occurred: {e}")
-        return None
+        log.error(f'run_logged: failed to run {cmd}: {e}')
+        return -1
+
+
+def fund_nodes():
+    rc = run_logged([cfg.FUND_WALLETS_BASH], prefix='[fund] ')
+    if rc != 0:
+        log.error(f'fund_wallets.sh exited with code {rc}')
 
 
 def record_total_time(total_time, config, output_suffix="total_times_log.json"):

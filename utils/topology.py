@@ -220,11 +220,10 @@ def build_topology(edges, cc_nodes):
     log.info('  Phase 2: Opening channels via multifundchannel (parallel)...')
 
     def open_source(src_num):
-        '''Connect to all of src's targets and open every channel in a single
-        multifundchannel tx. Uses `docker exec` via subprocess (process-isolated,
-        so it is safe to run many of these concurrently). Returns
-        (src_num, targets, ok, err). Does NOT mine — all funding txs are
-        confirmed together in one mining round after every source is submitted.'''
+        '''Connect to src's targets and open every channel in one multifundchannel
+        tx. Runs via `docker exec` subprocess so many can run concurrently. Does
+        NOT mine; all funding txs are confirmed together after every source is
+        submitted. Returns (src_num, targets, ok, err).'''
         targets = outbound[src_num]
         name = node_info[src_num]['name']
         for dst_num in targets:
@@ -278,57 +277,55 @@ def build_topology(edges, cc_nodes):
 
     log.info(f'  Opened {total_opened} channels ({total_failed} failed).')
 
-    # Final mining to ensure all channels reach CHANNELD_NORMAL
+    # Final mining to confirm the channel funding txs.
     log.info('    Mining 20 blocks to finalize...')
     mine_blocks(20)
-    wait_time = max(15, n // 3)
-    log.info(f'    Waiting {wait_time}s for channels to activate...')
-    time.sleep(wait_time)
 
-    # ── Phase 3: Verify final topology ──
-    log.info('  Phase 3: Verifying topology...')
+    # Expected degree per node from the edge set.
+    expected_degrees = {i: 0 for i in range(1, n + 1)}
+    for src, dst in edges:
+        expected_degrees[src] += 1
+        expected_degrees[dst] += 1
+    expected_avg = sum(expected_degrees.values()) / n
+
+    def compute_degrees():
+        dc = {}
+        for num, info in node_info.items():
+            try:
+                ec, out = info['container'].exec_run(
+                    'lightning-cli --regtest listpeerchannels', demux=True)
+                if ec == 0 and out[0]:
+                    res = json.loads(out[0].decode('utf-8'))
+                    dc[num] = sum(1 for c in res.get('channels', [])
+                                  if c.get('state') == 'CHANNELD_NORMAL')
+                else:
+                    dc[num] = 0
+            except Exception:
+                dc[num] = 0
+        return dc
+
+    # ── Phase 3: poll until every channel is CHANNELD_NORMAL, so we proceed the
+    # moment the topology is fully active. The timeout is just an upper bound. ──
+    timeout = max(15, n // 3)
+    log.info(f'  Phase 3: waiting for channels to activate (poll, max {timeout}s)...')
+    deadline = time.time() + timeout
     degree_counts = {}
-    for num, info in node_info.items():
-        try:
-            exit_code, output = info['container'].exec_run(
-                'lightning-cli --regtest listpeerchannels', demux=True
-            )
-            if exit_code == 0 and output[0]:
-                result = json.loads(output[0].decode('utf-8'))
-                normal = [c for c in result.get('channels', []) if c.get('state') == 'CHANNELD_NORMAL']
-                degree_counts[num] = len(normal)
-        except Exception:
-            degree_counts[num] = 0
+    while True:
+        degree_counts = compute_degrees()
+        matched = sum(1 for i in range(1, n + 1) if degree_counts.get(i, 0) == expected_degrees[i])
+        if matched == n:
+            log.info(f'  All {n} nodes active.')
+            break
+        if time.time() >= deadline:
+            log.warning(f'  Activation timeout ({timeout}s); proceeding with {matched}/{n} nodes matched.')
+            break
+        time.sleep(5)
 
     if degree_counts:
         avg = sum(degree_counts.values()) / len(degree_counts)
-        # Compute expected degrees from the edge set
-        expected_degrees = {i: 0 for i in range(1, n + 1)}
-        for src, dst in edges:
-            expected_degrees[src] += 1
-            expected_degrees[dst] += 1
-        expected_avg = sum(expected_degrees.values()) / n
-
         log.info(f'  Final topology: avg_degree={avg:.1f} (expected={expected_avg:.1f}), '
                  f'min={min(degree_counts.values())}, max={max(degree_counts.values())}')
-
-        mismatches = 0
-        for i in sorted(degree_counts.keys()):
-            expected = expected_degrees[i]
-            actual = degree_counts[i]
-            if actual != expected:
-                mismatches += 1
-                log.warning(f'    CC{i}: {actual} channels MISMATCH (expected {expected})')
-
-        # Show edge nodes for reference
-        edge_nodes = [i for i in sorted(degree_counts.keys())
-                     if degree_counts[i] != max(degree_counts.values())]
-        if edge_nodes and mismatches == 0:
-            # Show first/last few nodes
-            show = edge_nodes[:3] + edge_nodes[-3:] if len(edge_nodes) > 6 else edge_nodes
-            for i in show:
-                log.info(f'    CC{i}: {degree_counts[i]} channels OK')
-
+        mismatches = sum(1 for i in degree_counts if degree_counts[i] != expected_degrees[i])
         if mismatches == 0:
             log.info('  All nodes match expected topology!')
         else:

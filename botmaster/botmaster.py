@@ -375,6 +375,11 @@ def send_msg(message, counter, funded_nodes):
             return False
 
     # Send to ALL injection points in parallel
+    if not funded_nodes:
+        logging.error('send_msg: no funded injection channels; aborting send. '
+                      'The BM opened zero channels -- check its on-chain balance '
+                      'against UNIQUE_FUNDING_AMOUNT (one channel per injection point).')
+        return False
     with ThreadPoolExecutor(max_workers=len(funded_nodes)) as pool:
         results = list(pool.map(_send_to_node, funded_nodes))
 
