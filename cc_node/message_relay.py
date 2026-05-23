@@ -228,22 +228,40 @@ def get_connected_nodes():
     Retrieve all nodes that have a channel with this node and satisfy the discovery rule.
     """
     try:
+        # Peers we currently have a LIVE connection to. Skip peers that are
+        # offline (e.g. taken down during a takedown test): their channels are
+        # auto-disabled, so forwarding to them just fails with a 205 "no usable
+        # path" error and wastes time. Filtering them is coverage-neutral (live
+        # peers still receive the command) and avoids the dead-peer error spam.
+        online_peers = set()
+        try:
+            peers = ln_checker.lightning_rpc.listpeers().get('peers', [])
+            online_peers = {p['id'] for p in peers if p.get('connected')}
+        except Exception as e:
+            logging.warning(f"get_connected_nodes: listpeers failed ({e}); not filtering offline peers.")
+
         connected_nodes = set()
         channels = ln_checker.lightning_rpc.listfunds().get('channels', [])
         logging.info(f"Total channels retrieved: {len(channels)}")
-        
+
         for channel in channels:
             # Derive a key that matches DISCOVERY_RULE_DIVISOR / BOTMASTER_RULE_DIVISOR
             # e.g. innocent channel: 190000 sat = 190000000 msat // 10^7 = 19
             capacity = int(channel.get("amount_msat", 0)) // 10000000
-            logging.info(f"Channel capacity: {capacity}, Peer: {channel['peer_id']}")
+            peer = channel.get('peer_id')
+            logging.info(f"Channel capacity: {capacity}, Peer: {peer}")
 
-            # Add this channel if its not the innocent channel (i.e. doesn't match discovery rule)
+            # Skip the innocent channel (matches discovery rule)
             if capacity in DISCOVERY_RULE_DIVISOR:
                 continue
-            else:
-                connected_nodes.add(channel.get('peer_id'))
-        logging.info(f"Connected nodes satisfying discovery rule: {list(connected_nodes)}")
+            # Skip peers that are not currently connected (only filter when we
+            # successfully got the online set, so an RPC hiccup degrades to old
+            # behavior rather than dropping everyone).
+            if online_peers and peer not in online_peers:
+                logging.info(f"Skipping offline peer {peer}.")
+                continue
+            connected_nodes.add(peer)
+        logging.info(f"Connected (online) nodes satisfying discovery rule: {list(connected_nodes)}")
         return list(connected_nodes)
 
     except json.JSONDecodeError:

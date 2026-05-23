@@ -389,7 +389,12 @@ def main():
             log.info('Continuing')
 
         all_configs.append(config)
-        run_test(config, manager)
+        # Takedown sweeps reuse one built topology and remove nodes cumulatively
+        # (nested); other tests rebuild per iteration.
+        if config.get('takedown', False):
+            run_takedown_test(config, manager)
+        else:
+            run_test(config, manager)
 
     # record total time
     total_time = time.time() - start_time
@@ -618,6 +623,139 @@ def run_test(in_config, manager : NodeManager):
 
     log.info(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.")
     log.info(f"Testing with: \n{config}")
+
+def run_takedown_test(in_config, manager : NodeManager):
+    '''
+    Takedown sweep with topology REUSE + NESTED (cumulative) removal.
+
+    Builds the C&C overlay ONCE, then at each removal percentage takes down
+    additional nodes ON TOP of those already removed -- a single progressive-
+    attack trajectory -- instead of rebuilding and drawing a fresh removal set
+    per percentage. Faster (one build, not one per percentage) and a cleaner,
+    monotonic resilience curve. Removal order is fixed once on the intact
+    topology: highest-degree-first for 'targeted', a random permutation for
+    'random'.
+    '''
+    global _active_monitor
+    config = copy.deepcopy(in_config)
+    overall_test_time = time.time()
+    testing = config['var_key']            # TAKEDOWN_PCT
+    parameters = config['parameters']
+    start = parameters[testing]
+    end, step = config['range']
+    strategy = config.get('takedown_strategy', 'random')
+    mode = config.get('mode', 'dlnbot')
+    n = parameters[CC_COUNT]
+
+    add_file_handler(f'{cfg.TEST_DATA_DIR}/orchestrator.log')
+
+    # ── Build the overlay ONCE (with a few retries for transient build hiccups) ──
+    init_bitcoin_server()
+    cc_start_time = time.time()
+    log.info(f'\n\n\n[takedown-reuse] Building topology ONCE for nested {strategy} '
+             f'takedown (n={n}, m={parameters[ACTIVE_NODES]}, mode={mode}).')
+    built = False
+    for build_attempt in range(1, 4):
+        manager.cleanup_test()
+        if not manager.setup_test(n, parameters[ACTIVE_NODES], mode=mode):
+            log.warning(f'[takedown-reuse] setup_test failed (attempt {build_attempt}); retrying.')
+            continue
+        fund_nodes()
+        ok_build = True
+        if mode == 'dlnbot':
+            edges = NodeManager.build_chain_edges(n, parameters[ACTIVE_NODES])
+            ok_build = manager.build_topology(edges)
+        elif mode == 'custom':
+            edges = NodeManager.load_and_validate_topology(config['topology_file'], n)
+            ok_build = edges is not None and manager.build_topology(edges)
+        if ok_build:
+            built = True
+            break
+        log.warning(f'[takedown-reuse] topology build failed (attempt {build_attempt}); retrying.')
+    if not built:
+        log.error('[takedown-reuse] could not build topology after retries; aborting.')
+        return
+    if mode in ('dlnbot', 'custom'):
+        time.sleep(10)  # let channels reach CHANNELD_NORMAL / gossip settle
+    total_setup_time = time.time() - cc_start_time
+    log.info(f'[takedown-reuse] Topology built in {total_setup_time:.0f}s; reused across all percentages.')
+
+    # Default injection point (re-resolved each percentage as survivors change)
+    if 'inject_nodes' not in config:
+        config['inject_nodes'] = ['CC1']
+        log.info('No --inject specified: defaulting to CC1.')
+
+    # Fix the removal ORDER once on the intact topology.
+    takedown_order = manager.rank_nodes_for_takedown(strategy)
+    removed = []
+
+    # The botmaster's command counter (counter.txt) persists across the whole
+    # run and is NOT reset between percentages here (we never rebuild). So the
+    # counter the C&C nodes track keeps climbing globally -- we must wait for /
+    # measure that global counter, not a per-percentage 1..k index, or the
+    # propagation detector never sees "done" and falsely reports a partition.
+    global_cmd = 0
+
+    # ── Nested removal sweep ──
+    for test_value in range(start, end + 1, step):
+        parameters[testing] = test_value
+        target = int(n * test_value / 100.0)
+        delta = takedown_order[len(removed):target]
+        manager.execute_takedown(config, delta)
+        removed.extend(delta)
+        log.info(f'[takedown-reuse] {strategy} takedown at {test_value}%: '
+                 f'{len(removed)}/{n} removed (+{len(delta)} this step).')
+
+        # Re-resolve injection among survivors
+        surviving = {node.name for node in manager.get_cc_nodes()}
+        inj = [x for x in config['inject_nodes'] if x in surviving]
+        if not inj:
+            inj = [sorted(surviving, key=lambda x: int(re.search(r'\d+', x).group()))[0]]
+            log.warning(f'Injection node(s) removed by takedown; falling back to {inj}.')
+        config['inject_nodes'] = inj
+
+        # Pre-open the botmaster channel to the injection target(s).
+        manager.warmup_botmaster_channels(inject_nodes=inj, inject_count=parameters[INJECTION_COUNT])
+
+        # Per-percentage hardware monitor.
+        if _active_monitor:
+            _active_monitor.stop()
+        monitor = sys_monitor.HardwareMonitor(f"{get_record_name(config)}_system_metrics.csv")
+        monitor.start()
+        _active_monitor = monitor
+
+        # Send commands; a partition is a valid endpoint for that percentage.
+        test_data = []
+        message_start_time = time.time()
+        for local_msg in range(1, config['max_messages'] + 1):
+            global_cmd += 1   # matches the botmaster's persistent counter.txt
+            send_anchor = time.time()
+            manager.send_botmaster_command(global_cmd, inject_nodes=inj, inject_count=parameters[INJECTION_COUNT])
+            send_time, ok = wait_for_propagation(global_cmd, manager, send_anchor)
+            coverage_pct, received, total = get_coverage(global_cmd, manager)
+            record = parameters.copy()
+            record['message'] = local_msg
+            record['time_elapsed'] = send_time if ok else (time.time() - send_anchor)
+            record['coverage'] = coverage_pct
+            record['nodes_received'] = received
+            record['nodes_total'] = total
+            record['partitioned'] = not ok
+            test_data.append(record)
+            if ok:
+                log.info(f'Command {local_msg} (global #{global_cmd}) finished at {get_time()}. {send_time:.1f}s, coverage {coverage_pct*100:.1f}%')
+            else:
+                log.info(f'Command {local_msg} (global #{global_cmd}) timed out at {get_time()}. coverage {coverage_pct*100:.1f}% '
+                         f'({received}/{total} surviving) — partition (expected for takedown).')
+                break
+        total_send_time = time.time() - message_start_time
+        record_test(config, test_data, total_setup_time, total_send_time)
+        record_topology(config, manager)
+        monitor.stop()
+        _active_monitor = None
+
+    stop_bitcoinminer()
+    log.info(f"[takedown-reuse] FINISHED nested {strategy} takedown in "
+             f"{time.time() - overall_test_time:.0f}s.")
 
 def wait_for_propagation(command, manager : NodeManager, send_anchor):
     log.info(f'Now waiting for command {command} to propagate.')
