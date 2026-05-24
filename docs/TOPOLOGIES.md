@@ -43,7 +43,7 @@ Lets researchers supply any arbitrary topology as a JSON file. cc_manager is dis
 }
 ```
 
-Each `[from, to]` means CC{from} opens a channel to CC{to}. Node numbers are 1-indexed (CC1, CC2, ..., CCn). The `nodes` field determines how many C&C containers are created (there is no need to pass `--cc-count` separately). Edges are directed (the opener holds initial balance), but `push_msat` ensures bidirectional forwarding capability.
+Each `[from, to]` means CC{from} opens a channel to CC{to}. Node numbers are 1-indexed (CC1, CC2, ..., CCn). The `nodes` field determines how many C&C containers are created (there is no need to pass `--nodes` separately). Edges are directed (the opener holds initial balance), but `push_msat` ensures bidirectional forwarding capability.
 
 LNTest validates the topology file and warns about self-loops, duplicate edges, out-of-range nodes, and disconnected subgraphs. Disconnected graphs are allowed (some nodes will simply not receive commands), enabling partition experiments.
 

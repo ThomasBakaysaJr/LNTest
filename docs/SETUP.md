@@ -79,4 +79,12 @@ You can verify the RPC credentials by checking `config.env` and the config files
 
 Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
 
-Once setup completes, run the sanity check from the [readme](../readme.md#usage) to confirm everything works end-to-end.
+Once setup completes, run the sanity check from the [README](../README.md#quick-start) to confirm everything works end-to-end.
+
+## Resetting the testbed
+
+Between iterations the orchestrator automatically resets containers, shared memory, and per-run files (`scripts/cleanup.sh iter`). To reset everything to a clean-checkout + `setup.sh` state — stopping bitcoind, wiping the regtest chain, and removing all runtime artifacts — run:
+
+```bash
+sudo ./scripts/cleanup.sh fresh
+```
