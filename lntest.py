@@ -590,7 +590,7 @@ def run_test(in_config, manager : NodeManager):
                 record['partitioned'] = False
                 test_data.append(record)
 
-                log.info(f'Command {y} is finished at {get_time()}. Propagation time is {send_time} seconds. Coverage: {coverage_pct*100:.1f}%')
+                log.info(f'Command {y} is finished at {get_time()}. Propagation time is {send_time:.2f} seconds. Coverage: {coverage_pct*100:.1f}%')
                 log.info(f'Time: {get_time()}')
 
             # record the test and set reset attempts
@@ -737,7 +737,7 @@ def run_takedown_test(in_config, manager : NodeManager):
             record['partitioned'] = not ok
             test_data.append(record)
             if ok:
-                log.info(f'Command {local_msg} (global #{global_cmd}) finished at {get_time()}. {send_time:.1f}s, coverage {coverage_pct*100:.1f}%')
+                log.info(f'Command {local_msg} (global #{global_cmd}) finished at {get_time()}. {send_time:.2f}s, coverage {coverage_pct*100:.1f}%')
             else:
                 log.info(f'Command {local_msg} (global #{global_cmd}) timed out at {get_time()}. coverage {coverage_pct*100:.1f}% '
                          f'({received}/{total} surviving) — partition (expected for takedown).')
@@ -904,7 +904,7 @@ def record_total_time(total_time, config, output_suffix="total_times_log.json"):
     }
 
     with open(filename, 'a') as f:
-        f.write(json.dumps(log_entry) + "\n")
+        f.write(json.dumps(log_entry, default=json_set_converter) + "\n")
 
     log.info(f'Recorded total time: {total_time:.0f} seconds to {filename}')
 
