@@ -37,9 +37,6 @@ STATUS_TIMER = ln_checker.STATUS_UPDATE_INTERVAL
 WAIT_RETRY_SLEEP = 0.5
 
 THIS_NODE = None
-# for global (is it sending right now?) type ask
-SENDING = False
-CONNECTING = True
 CREATED_CHANNELS = False
 
 # The TLV record type used for standard text messages in keysend.
@@ -52,13 +49,10 @@ def _state_updater_loop(status, stop_event):
     Background thread: refresh node-readiness state every STATUS_TIMER seconds
     until stop_event is set.
     """
-    global CONNECTING
     while not stop_event.is_set():
         try:
-            if is_node_ready(status):
-                CONNECTING = False
-            elif ln_checker.get_state() != 'connected':
-                CONNECTING = True
+            # is_node_ready() writes this node's readiness state to shared memory.
+            is_node_ready(status)
         except Exception as e:
             logging.warning(f'state-updater: exception {e}')
         stop_event.wait(STATUS_TIMER)
@@ -96,8 +90,6 @@ def main():
     Event-driven receive loop: waitanyinvoice blocks until a paid invoice with
     pay_index > LAST_INVOICE_INDEX arrives, then forwards the embedded command.
     """
-    global SENDING
-    global CONNECTING
     global LAST_INVOICE_INDEX
     load_this_node()
 
@@ -154,11 +146,7 @@ def main():
         if invoice.get('status') != 'paid':
             continue
 
-        SENDING = True
-        try:
-            _handle_invoice(status, invoice)
-        finally:
-            SENDING = False
+        _handle_invoice(status, invoice)
 
 
 
@@ -168,7 +156,6 @@ def send_message_to_connected_nodes(status, message, counter):
     Sends to all neighbors concurrently using threads for maximum
     propagation speed.
     """
-    global SENDING
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from pyln.client import LightningRpc
 
@@ -193,7 +180,6 @@ def send_message_to_connected_nodes(status, message, counter):
         return
 
     rpc_path = os.getenv("LIGHTNING_RPC_PATH", "/root/.lightning/regtest/lightning-rpc")
-    SENDING = True
 
     def _keysend_worker(target_node):
         """Each thread gets its own RPC connection for thread safety."""

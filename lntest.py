@@ -522,31 +522,6 @@ def run_test(in_config, manager : NodeManager):
                 log.info('No --inject specified: defaulting to CC1 for deterministic sweep.')
             # else: injection sweep with no --inject → random selection (deferred to botmaster.py)
 
-            if config.get('takedown', False):
-                # Takedown percentage always comes from the sweep variable
-                takedown_pct = parameters[TAKEDOWN_PCT] / 100.0
-                takedown_strategy = config.get('takedown_strategy', 'random')
-                log.info(f'Preparing for {takedown_strategy} takedown of {takedown_pct*100:.0f}% of nodes.')
-                if not manager.takedown(config, takedown_pct, takedown_strategy):
-                    log.warning('Takedown failed, retrying...')
-                    success = False
-                    attempt += 1
-                    continue
-
-            # Validate injection nodes survived takedown
-            if config.get('takedown', False) and 'inject_nodes' in config:
-                surviving_cc = {node.name for node in manager.get_cc_nodes()}
-                dead_inject = [n for n in config['inject_nodes'] if n not in surviving_cc]
-                if dead_inject:
-                    log.warning(f'Injection nodes killed during takedown: {dead_inject}')
-                    config['inject_nodes'] = [n for n in config['inject_nodes'] if n in surviving_cc]
-                    if not config['inject_nodes']:
-                        # All injection nodes dead — pick first surviving node
-                        fallback = sorted(surviving_cc, key=lambda x: int(re.search(r'\d+', x).group()))[0]
-                        config['inject_nodes'] = [fallback]
-                        log.warning(f'All injection nodes were killed. Falling back to {fallback}.')
-                    log.info(f'Post-takedown injection nodes: {config["inject_nodes"]}')
-
             log.info('Waiting done, proceeding to testing.')
 
             # Pre-open the botmaster's channel(s) to the injection target(s)
@@ -576,9 +551,10 @@ def run_test(in_config, manager : NodeManager):
                 coverage_pct, received, total = get_coverage(y, manager)
 
                 if not success:
-                    if config.get('takedown', False) or config.get('mode') == 'dlnbot-formation':
-                        # Partition / incomplete coverage is a valid result for takedown
-                        # tests and for nondeterministic formation — record it.
+                    if config.get('mode') == 'dlnbot-formation':
+                        # Partition / incomplete coverage is a valid result for
+                        # nondeterministic formation — record it. (Takedown sweeps
+                        # are handled separately in run_takedown_test.)
                         actual_elapsed = time.time() - send_anchor
                         record = parameters.copy()
                         record['message'] = y
@@ -611,10 +587,11 @@ def run_test(in_config, manager : NodeManager):
 
             if success:
                 attempt = 0
-            # A partition is a valid endpoint for takedown tests and for
-            # nondeterministic formation (the formed overlay may legitimately
-            # leave nodes unreachable); record it and advance instead of rebuilding.
-            elif config.get('takedown', False) or config.get('mode') == 'dlnbot-formation':
+            # A partition is a valid endpoint for nondeterministic formation (the
+            # formed overlay may legitimately leave nodes unreachable); record it
+            # and advance instead of rebuilding. (Takedown sweeps run in
+            # run_takedown_test, never here.)
+            elif config.get('mode') == 'dlnbot-formation':
                 success = True
                 attempt = 0
             else:

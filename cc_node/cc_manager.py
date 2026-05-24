@@ -5,7 +5,6 @@
 # The script will avoid connecting to nodes that already have a channel with a peer. 
 # The script will also close the channel with the Innocent node and disconnect once the maximum number of peers with channels 
 # is reached, making the CC node no longer discoverable.
-import json
 import time
 import logging
 from pathlib import Path
@@ -26,7 +25,6 @@ import ln_checker
 
 # Constants
 DISCOVERY_RULE_DIVISOR = ln_checker.DISCOVERY_RULE_DIVISOR
-BM_DIVISOR = ln_checker.BOTMASTER_RULE_DIVISOR
 MAX_ACTIVE_NODES = ln_checker.ACTIVE_NODES
 MAX_PEERS = ln_checker.MAX_PEERS 
 
@@ -38,8 +36,6 @@ CC_ADDRESS_LIST = None
 OUTBOUND_CHANNELS = set()
 INNOCENT_CHANNEL_CLOSED = False
 CHANNELS_CREATED = False
-# for channels that need to restart
-CHANNEL_OPENING_TIMES = {}
 
 # HOW OFTEN the script looks for new channels
 CHANNEL_CHECK_SLEEP_INT = 60
@@ -153,7 +149,6 @@ def create_channels():
     """
     global INNOCENT_CHANNEL_CLOSED
     global OUTBOUND_CHANNELS
-    global CHANNEL_OPENING_TIMES
 
     if is_max_inbound_channels() and not INNOCENT_CHANNEL_CLOSED:
         logging.info(f'create_channels: Reached m={MAX_ACTIVE_NODES} inbound connections. Closing innocent channel per Algorithm 2.')
@@ -415,17 +410,6 @@ def discover_nodes():
     logging.info(f"discover_nodes: Valid nodes discovered: \n{valid_nodes}")
     return valid_nodes
 
-
-def is_bm_node(node_id):
-    '''
-    Check if this is the bm node by looking at the channels capacity
-    '''
-    # no point in even checking if we don't have a channel with it
-    if not ln_checker.has_channel_with(node_id):
-        return False
-    capacity = ln_checker.get_capacity(node_id)
-
-    return (int(capacity) % BM_DIVISOR) == 0 if capacity else False
 
 def check_outbound_channels():
     '''

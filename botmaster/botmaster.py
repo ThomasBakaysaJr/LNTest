@@ -34,18 +34,14 @@ with open(os.path.basename(CC_ADDRESS_LIST_FILE), 'r') as id_file:
 
 
 DISCOVERY_RULE_DIVISOR = ln_checker.DISCOVERY_RULE_DIVISOR
-BM_CONNECTED_NODES = set()  # To track already connected nodes
 UNIQUE_FUNDING_AMOUNT = ln_checker.BOTMASTER_RULE_DIVISOR * 100
 COUNTER_FILE = "counter.txt"  # File to store the counter
 FUNDED_NODE_FILE = "funded_node.txt"
-AUTO_TEST_COUNT = 10 # How many commands for auto_test, default is 100
 
 THIS_NODE = None
 
 RETRY_MAX = 3
 
-# Global variable for the node BM funded a channel with
-FUNDED_NODE_IDS = []
 # The TLV record type used for standard text messages in keysend.
 MESSAGE_TLV_TYPE = "34349334"
 

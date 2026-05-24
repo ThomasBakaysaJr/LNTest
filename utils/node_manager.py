@@ -7,7 +7,7 @@ import docker
 from utils.config import cfg
 
 log = logging.getLogger(__name__)
-from utils.docker_helpers import get_all_nodes, get_cc_nodes, sort_containers
+from utils.docker_helpers import get_cc_nodes
 from utils.shm_status import ShmStatus
 from utils import topology
 
@@ -46,16 +46,6 @@ class Node:
             self.container.reload()
             return self.container.status == 'running'
         return False
-
-    def stop(self):
-        '''
-        Stops the Docker container.
-        '''
-        if self.is_running:
-            self.container.stop()
-            log.info(f'Stopped container {self.name}')
-        else:
-            log.info(f'Container {self.name} is not running.')
 
     def kill(self):
         '''
@@ -119,8 +109,6 @@ class NodeManager:
             )
             inno_node = Node(self.inno_name)
             bm_node = Node(self.bm_name)
-            self.active_nodes = active_nodes
-            self.max_peers = active_nodes * 2
             self.shm.block_size = self.shm.calculate_blocksize(active_nodes, total_nodes)
             self.nodes[inno_node.name] = inno_node
             self.nodes[bm_node.name] = bm_node
@@ -217,110 +205,6 @@ class NodeManager:
             return False
 
         return True
-
-    def create_status_config(self):
-        '''Delegate to ShmStatus.'''
-        self.shm.create_status_config(self.active_nodes, self.shm.block_size)
-
-    def takedown(self, config, percentage, strategy='random'):
-        '''
-        Takedown section for taking down a percentage of nodes.
-        Will append takedown nodes to the config.
-        Args:
-            percentage: float, percentage of nodes to take down (e.g., 0.1 for 10%)
-            strategy: 'random' for random selection, 'targeted' for highest-degree nodes
-        '''
-        import json as _json
-        cc_nodes = []
-        parameters = config['parameters']
-        num_nodes_kill = int(parameters[CC_COUNT] * percentage)
-
-        # get the list of running CC nodes
-        while not cc_nodes:
-            cc_nodes = self.get_cc_nodes()
-            time.sleep(cfg.NM_SLEEP)
-
-        if strategy == 'targeted':
-            nodes_to_kill = self._select_highest_degree(cc_nodes, num_nodes_kill)
-        else:
-            nodes_to_kill = random.sample(list(cc_nodes), num_nodes_kill)
-
-        # Record info about nodes being shut down.
-        # Try SHM first; if empty (orchestrator-controlled topology), query containers directly.
-        try:
-            dead_nodes = []
-            for node in nodes_to_kill:
-                status = self.get_node_status(node.name)
-                if status and status.get('channels') is not None:
-                    dead_nodes.append({
-                        'short_id': status.get('short_id'),
-                        'host_name': status.get('host_name'),
-                        'channels': status.get('channels')
-                    })
-                else:
-                    # SHM not populated — query container directly
-                    node_data = {'host_name': node.name, 'channels': {}}
-                    try:
-                        ec, out = node.exec_run('lightning-cli --regtest getinfo', demux=True)
-                        if ec == 0 and out[0]:
-                            info = _json.loads(out[0].decode('utf-8'))
-                            node_data['short_id'] = info.get('id', '')[-8:]
-
-                        ec, out = node.exec_run('lightning-cli --regtest listpeerchannels', demux=True)
-                        if ec == 0 and out[0]:
-                            result = _json.loads(out[0].decode('utf-8'))
-                            for ch in result.get('channels', []):
-                                if ch.get('state') == 'CHANNELD_NORMAL':
-                                    peer_id = ch.get('peer_id', '')
-                                    node_data['channels'][peer_id] = {
-                                        'short_id': peer_id[-8:],
-                                        'state': ch.get('state'),
-                                        'capacity': ch.get('total_msat', 0) // 1000 if ch.get('total_msat') else 0,
-                                        'our_amount': ch.get('to_us_msat', 0) // 1000 if ch.get('to_us_msat') else 0
-                                    }
-                    except Exception as e:
-                        log.warning(f'  Could not query container {node.name}: {e}')
-                    dead_nodes.append(node_data)
-        except Exception as e:
-            log.error(f"Failure in recording takedown nodes, restarting. Error: {e}")
-            return False
-
-        # add the nodes we shut down to the config
-        config.update({
-            'takendown_nodes': dead_nodes
-        })
-        # disconnect the nodes here
-        log.info("Takedown test:")
-        self.shutdown_nodes(nodes_to_kill)
-        return True
-
-    def _select_highest_degree(self, cc_nodes, num_to_kill):
-        '''
-        Select the nodes with the highest channel degree (most connections).
-        These are typically the early nodes in sequential creation that accumulate
-        many inbound connections, making them high-value targets for takedown.
-        '''
-        node_degrees = []
-        for node in cc_nodes:
-            try:
-                status = self.get_node_status(node.name)
-                if status and 'channels' in status:
-                    degree = len(status['channels'])
-                else:
-                    degree = 0
-                node_degrees.append((node, degree))
-            except Exception:
-                node_degrees.append((node, 0))
-
-        # Sort by degree descending, take top num_to_kill
-        node_degrees.sort(key=lambda x: -x[1])
-        selected = [nd[0] for nd in node_degrees[:num_to_kill]]
-
-        log.info(f'Targeted takedown selecting {num_to_kill} highest-degree nodes:')
-        for nd in node_degrees[:num_to_kill]:
-            log.info(f'  {nd[0].name}: {nd[1]} channels')
-
-        return selected
 
     def rank_nodes_for_takedown(self, strategy='random'):
         '''
@@ -437,17 +321,9 @@ class NodeManager:
 
     # ── Container operations delegation ──
 
-    def get_all_nodes(self):
-        '''Delegate to docker_helpers.'''
-        return get_all_nodes(self.nodes)
-
     def get_cc_nodes(self):
         '''Delegate to docker_helpers.'''
         return get_cc_nodes(self.nodes, self.CC_PREFIX)
-
-    def sort_containers(self, in_containers):
-        '''Delegate to docker_helpers.'''
-        return sort_containers(in_containers)
 
     def kill_node(self, node: Node):
         '''
