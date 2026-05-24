@@ -20,9 +20,15 @@ _CLN_TAG_RE = re.compile(r'^v(\d+)\.(\d+)(?:\.(\d+))?(?:rc(\d+))?$')
 
 def get_all_nodes(nodes):
     '''
-    Return a snapshot of running containers from the nodes dict.
+    Cached container objects for tracked nodes -- no per-node container.reload().
+    Killed nodes are dropped from the tracker, so all returned nodes are live.
     '''
-    return [node.container for node in nodes.values() if node.is_running]
+    containers = []
+    for node in nodes.values():
+        container = node.container  # lazy-loaded, then cached on the Node
+        if container is not None:
+            containers.append(container)
+    return containers
 
 
 def get_cc_nodes(nodes, prefix='CC'):

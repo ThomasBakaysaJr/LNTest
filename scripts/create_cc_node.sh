@@ -80,7 +80,7 @@ mining_address=$(curl -s --user $RPC_USER:$RPC_PASSWORD \
 
 curl -s --user $RPC_USER:$RPC_PASSWORD \
     --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"mining\", \"method\": \"generatetoaddress\", \"params\": [$CONFIRMATION_BLOCKS, \"$mining_address\"]}" \
-    -H 'content-type: text/plain;' $BITCOIND_RPC
+    -H 'content-type: text/plain;' $BITCOIND_RPC > /dev/null
 }
 
 # Function to create a node
@@ -121,7 +121,7 @@ create_node() {
 	    --grpc-port=$NODE_GRPC_PORT \
         --developer \
         --dev-bitcoind-poll=1 \
-        --dev-fast-gossip
+        --dev-fast-gossip > /dev/null
 
     # wait for the lightning daemon to be up and running
     wait_for_node_ready "$NODE_NAME"

@@ -53,7 +53,6 @@ clear_node_logs_and_state() {
     if [ -n "${BOT_MASTER_DIR:-}" ]; then
         rm -rf "$BOT_MASTER_DIR"/logs/bm_log* 2>/dev/null || true
         rm -f  "$BOT_MASTER_DIR"/counter.txt
-        rm -f  "$BOT_MASTER_DIR"/funded_node.txt
         rm -f  "${BOT_MASTER_ADDRESS_LIST:-}"
     fi
     if [ -n "${NODE_MANAGER_DIR:-}" ]; then

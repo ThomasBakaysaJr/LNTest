@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import random
 import subprocess
@@ -70,16 +71,20 @@ class Node:
 
     def send_botmaster_command(self, command):
         '''
-        Sends a command to the Docker container
-        if this is the botmaster.
+        Run a botmaster command in the BM container. Returns the keysend send
+        time (float) from the __SEND_TS__ marker, or None (warmup/failure).
         '''
-        if self.is_running:
-            exit_code, exec_log = self.container.exec_run(command, workdir=cfg.BOT_MASTER_CONTAINER_DIR)
-            if exit_code != 0:
-                log.error(f'Command "{command}" failed in container {self.name} with exit code {exit_code}.')
-                log.error(f'Error output: {exec_log.decode("utf-8")}')
-        else:
+        if not self.is_running:
             log.warning(f'Container {self.name} is not running.')
+            return None
+        exit_code, exec_log = self.container.exec_run(command, workdir=cfg.BOT_MASTER_CONTAINER_DIR)
+        output = exec_log.decode('utf-8', 'replace') if exec_log else ''
+        if exit_code != 0:
+            log.error(f'Command "{command}" failed in container {self.name} with exit code {exit_code}.')
+            log.error(f'Error output: {output}')
+            return None
+        match = re.search(r'__SEND_TS__ (\d+(?:\.\d+)?)', output)
+        return float(match.group(1)) if match else None
 
 class NodeManager:
     def __init__(self):
@@ -104,19 +109,25 @@ class NodeManager:
         '''
         import math
         try:
-            subprocess.run(
-                [cfg.INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}']
+            log.info('Creating innocent and botmaster nodes...')
+            # capture output (shown only on failure) to keep the console clean
+            result = subprocess.run(
+                [cfg.INIT_BOTNET_BASH, f'{total_nodes}', f'{active_nodes}'],
+                capture_output=True, text=True
             )
+            if result.returncode != 0:
+                log.error(f"init_botnet.sh failed with exit code {result.returncode}.")
+                if result.stdout.strip():
+                    log.error(f"  stdout: {result.stdout.strip()}")
+                if result.stderr.strip():
+                    log.error(f"  stderr: {result.stderr.strip()}")
+                return None
+            log.info('Innocent and botmaster nodes created.')
             inno_node = Node(self.inno_name)
             bm_node = Node(self.bm_name)
             self.shm.block_size = self.shm.calculate_blocksize(active_nodes, total_nodes)
             self.nodes[inno_node.name] = inno_node
             self.nodes[bm_node.name] = bm_node
-        except subprocess.CalledProcessError as e:
-            log.error(f"testsetup_tester failed with exit code {e.returncode}")
-            log.error(f"  setup_test STDOUT: {e.stdout.strip()}")
-            log.error(f"  setup_test STDERR: {e.stderr.strip()}")
-            raise
         except Exception as e:
             log.error(f"setup_test: Exception occurred: {e}")
             return None
@@ -171,16 +182,18 @@ class NodeManager:
             while counter <= total_nodes:
                 try:
                     self.shm.setup_shm("CC" + str(counter), True)
-                    subprocess.run(
-                        [cfg.CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag]
+                    log.info(f'Launching CC{counter} ({counter}/{total_nodes})...')
+                    # capture output (shown only on failure) to keep the console clean
+                    res = subprocess.run(
+                        [cfg.CREATE_CC_SERVER_BASH, f'{counter}', f'{active_nodes}', skip_flag],
+                        capture_output=True, text=True
                     )
+                    if res.returncode != 0:
+                        log.error(f"CC{counter} create failed (exit {res.returncode}): "
+                                  f"{(res.stderr or res.stdout or '').strip()[:300]}")
+                        return None
                     new_node = Node(f'CC{counter}')
                     self.nodes[new_node.name] = new_node
-                except subprocess.CalledProcessError as e:
-                    log.error(f"setup_test failed with exit code {e.returncode}")
-                    log.error(f"  setup_test STDOUT: {e.stdout.strip()}")
-                    log.error(f"  setup_test STDERR: {e.stderr.strip()}")
-                    raise
                 except Exception as e:
                     log.error(f"setup_test: Exception occurred: {e}")
                     return None
@@ -306,10 +319,16 @@ class NodeManager:
 
     # ── Status delegation ──
 
+    def get_cc_names(self):
+        '''
+        Tracked CC node names (no Docker calls). Killed nodes are dropped from
+        self.nodes, so this is the live survivor set the propagation loop polls.
+        '''
+        return [name for name in self.nodes if name.startswith(self.CC_PREFIX)]
+
     def retrieve_all_status(self):
-        '''Delegate to ShmStatus.'''
-        cc_nodes = self.get_cc_nodes()
-        return self.shm.retrieve_all_status(cc_nodes)
+        '''Delegate to ShmStatus (shared-memory only, no Docker).'''
+        return self.shm.retrieve_all_status(self.get_cc_names())
 
     def get_node_status(self, suffix):
         '''Delegate to ShmStatus.'''
@@ -317,21 +336,21 @@ class NodeManager:
 
     def are_channels_ready(self):
         '''Delegate to ShmStatus.'''
-        return self.shm.are_channels_ready(self.get_cc_nodes)
+        return self.shm.are_channels_ready(self.get_cc_names)
 
     # ── Container operations delegation ──
 
     def get_cc_nodes(self):
-        '''Delegate to docker_helpers.'''
+        '''Delegate to docker_helpers (container objects for exec_run; not the hot loop).'''
         return get_cc_nodes(self.nodes, self.CC_PREFIX)
 
     def kill_node(self, node: Node):
         '''
-        Cleanup a single node and unlink the shared memory.
-        Remove from nodes tracker.
+        Cleanup a single node, unlink its shared memory, and drop it from the tracker.
         '''
         node.kill()
         self.shm.remove_shm(node.name)
+        self.nodes.pop(node.name, None)
 
     def kill_all_nodes(self):
         '''
@@ -399,7 +418,12 @@ class NodeManager:
         '''
         self.kill_all_nodes()
 
-        subprocess.run([cfg.KILL_NODES_BASH, 'iter'])
+        # capture to keep the console clean; surface only errors
+        result = subprocess.run([cfg.KILL_NODES_BASH, 'iter'],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            log.warning(f"cleanup.sh iter exited {result.returncode}: "
+                        f"{(result.stderr or '').strip()}")
 
     # will enventually goto into a utils file
     def is_kill_time(self, start_time, wait_time):

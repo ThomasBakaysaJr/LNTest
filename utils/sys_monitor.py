@@ -97,8 +97,10 @@ class HardwareMonitor:
         if self._process is not None:
             return # Already running
 
+        # discard worker stdout/stderr; it writes metrics to the CSV, not stdout
         self._process = subprocess.Popen(
-            [sys.executable, __file__, "--run-worker", self.output_file]
+            [sys.executable, __file__, "--run-worker", self.output_file],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         log.info(f"[Monitor] Started background process (PID: {self._process.pid})")
 

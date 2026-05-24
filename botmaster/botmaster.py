@@ -36,7 +36,6 @@ with open(os.path.basename(CC_ADDRESS_LIST_FILE), 'r') as id_file:
 DISCOVERY_RULE_DIVISOR = ln_checker.DISCOVERY_RULE_DIVISOR
 UNIQUE_FUNDING_AMOUNT = ln_checker.BOTMASTER_RULE_DIVISOR * 100
 COUNTER_FILE = "counter.txt"  # File to store the counter
-FUNDED_NODE_FILE = "funded_node.txt"
 
 THIS_NODE = None
 
@@ -212,8 +211,7 @@ def fund_channels(node_ids=None, count=1):
         node_ids: list of CC node names to connect to (e.g., ['CC5', 'CC12'])
         count: number of random CC nodes to connect to (used when node_ids is None)
     '''
-    # Load funded nodes if we have this saved
-    funded_nodes = load_funded_nodes()
+    funded_nodes = set()
 
     if node_ids:
         # Explicit node selection: resolve names to pubkeys
@@ -283,36 +281,6 @@ def fund_channels(node_ids=None, count=1):
     
 
 
-def load_funded_nodes() -> set:
-    '''
-    Load the funded nodes from a file.
-    '''
-    funded_nodes = set()
-    if os.path.exists(FUNDED_NODE_FILE):
-        # load funded nodes from the saved text file, which should be comma delineated
-        logging.info(f'Found funded node file, loading.')
-        try:
-            with open(FUNDED_NODE_FILE, 'r') as file:
-                file_output = file.read().strip()
-                funded_nodes = set(file_output.split(','))
-                logging.debug(f'load_funded_nodes: Funded nodes are {funded_nodes}')
-        except Exception as e:
-            # something wrong happened, log it and return an empty array
-            logging.error(f'load_funded_nodes: ERROR: {e}')
-            return set()
-        # we check if we have a channel with each of these nodes
-        verified_nodes = set()
-        for node in funded_nodes:
-            if ln_checker.has_channel_with(node):
-                verified_nodes.add(node)
-            else:
-                logging.warning(f'load_funded_nodes: Warning: Node {node} is saved but BM has no channel with it.')
-        funded_nodes = verified_nodes
-    else:
-        logging.debug(f'load_funded_nodes: No files found at {FUNDED_NODE_FILE}.')
-
-    return funded_nodes
-
 def interactive_command_sender(funded_nodes):
     """
     Allow the user to send commands interactively to the node BM funded a channel with,
@@ -345,7 +313,8 @@ def send_msg(message, counter, funded_nodes):
     from concurrent.futures import ThreadPoolExecutor
 
     def _send_to_node(node):
-        """Send keysend to a single injection point. Returns True on success."""
+        """Keysend to one injection point. Returns (ok, send_ts); send_ts is when
+        the keysend was issued (t0 for propagation), or None on failure."""
         # Ensure channel is active, retry if needed
         for _ in range(RETRY_MAX):
             if ln_checker.wait_node_activated(node):
@@ -356,19 +325,21 @@ def send_msg(message, counter, funded_nodes):
                     logging.error(f'Could not reconnect to {node}.')
         else:
             logging.error(f'Cannot activate channel with {node} after {RETRY_MAX} tries.')
-            return False
+            return False, None
 
         command = ["lightning-cli", "--regtest", "xkeysend",
                    f"destination={node}", f"amount_msat=1",
                    f"extratlvs={tlv_json}"]
+        # t0: command leaves the botmaster (excludes our startup/discovery overhead)
+        send_ts = time.time()
         try:
             result = subprocess.run(command, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, check=True)
             logging.info(f"Keysend to {node} succeeded.")
-            return True
+            return True, send_ts
         except Exception as e:
             logging.error(f"Keysend to {node} failed: {e}")
-            return False
+            return False, None
 
     # Send to ALL injection points in parallel
     if not funded_nodes:
@@ -379,8 +350,11 @@ def send_msg(message, counter, funded_nodes):
     with ThreadPoolExecutor(max_workers=len(funded_nodes)) as pool:
         results = list(pool.map(_send_to_node, funded_nodes))
 
-    succeeded = sum(results)
-    if any(results):
+    send_times = [ts for ok, ts in results if ok and ts is not None]
+    succeeded = len(send_times)
+    if send_times:
+        # earliest send instant -> orchestrator's t0 (parsed in node_manager)
+        print(f"__SEND_TS__ {min(send_times):.6f}")
         logging.info(f"Command '{message_with_counter}' sent to {succeeded}/{len(funded_nodes)} injection points.")
         print(f"Command '{message_with_counter}' sent to {succeeded}/{len(funded_nodes)} injection points.")
         save_counter(counter + 1)

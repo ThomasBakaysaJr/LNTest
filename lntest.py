@@ -455,7 +455,8 @@ def run_test(in_config, manager : NodeManager):
 
             cc_start_time = time.time()
 
-            log.info(f'\n\n\nRunning init for a total of {parameters[CC_COUNT]} nodes with values \n{parameters}.')
+            log.info(f'\n=== Iteration: {parameters[CC_COUNT]} C&C nodes '
+                     f'(m={parameters[ACTIVE_NODES]}, inject={parameters[INJECTION_COUNT]}) ===')
             channels_created = manager.setup_test(parameters[CC_COUNT], parameters[ACTIVE_NODES], mode=config.get('mode', 'dlnbot'))
 
             log.info(f'Setup finished at {get_time()}')
@@ -543,8 +544,10 @@ def run_test(in_config, manager : NodeManager):
                     manager.are_channels_ready()
 
                 inject_nodes = config.get('inject_nodes', None)
-                send_anchor = time.time()
-                manager.send_botmaster_command(y, inject_nodes=inject_nodes, inject_count=parameters[INJECTION_COUNT])
+                pre_send = time.time()
+                send_ts = manager.send_botmaster_command(y, inject_nodes=inject_nodes, inject_count=parameters[INJECTION_COUNT])
+                # t0 = when the keysend left the botmaster (__SEND_TS__); pre_send is the fallback
+                send_anchor = send_ts if send_ts is not None else pre_send
                 send_time, success = wait_for_propagation(y, manager, send_anchor)
 
                 # Calculate coverage (what fraction of surviving nodes received the command)
@@ -602,8 +605,8 @@ def run_test(in_config, manager : NodeManager):
         _active_monitor = None
         stop_bitcoinminer()
 
-    log.info(f"FINISHED at {time.time() - overall_test_time} testing for {config['description']}.")
-    log.info(f"Testing with: \n{config}")
+    log.info(f"Finished in {time.time() - overall_test_time:.0f}s: {config['description']}.")
+    log.debug(f"Test config: {config}")
 
 def run_takedown_test(in_config, manager : NodeManager):
     '''
@@ -707,8 +710,10 @@ def run_takedown_test(in_config, manager : NodeManager):
         message_start_time = time.time()
         for local_msg in range(1, config['max_messages'] + 1):
             global_cmd += 1   # matches the botmaster's persistent counter.txt
-            send_anchor = time.time()
-            manager.send_botmaster_command(global_cmd, inject_nodes=inj, inject_count=parameters[INJECTION_COUNT])
+            pre_send = time.time()
+            send_ts = manager.send_botmaster_command(global_cmd, inject_nodes=inj, inject_count=parameters[INJECTION_COUNT])
+            # t0 = instant the keysend left the botmaster (see run_test).
+            send_anchor = send_ts if send_ts is not None else pre_send
             send_time, ok = wait_for_propagation(global_cmd, manager, send_anchor)
             coverage_pct, received, total = get_coverage(global_cmd, manager)
             record = parameters.copy()
@@ -887,7 +892,7 @@ def record_total_time(total_time, config, output_suffix="total_times_log.json"):
     with open(filename, 'a') as f:
         f.write(json.dumps(log_entry) + "\n")
 
-    log.info(f'Recorded total time: {total_time} seconds to {filename}')
+    log.info(f'Recorded total time: {total_time:.0f} seconds to {filename}')
 
 
 def record_test(config, test_data, setup_time, total_send_time):
@@ -1010,6 +1015,7 @@ def init_bitcoin_server():
         return
 
     # Full restart needed (first time or after crash)
+    log.info('bitcoind not ready - starting regtest node and miner...')
     stop_bitcoinminer()
     time.sleep(0.5)
     restart_bitcoind()
@@ -1062,10 +1068,13 @@ def start_miner():
 
 def restart_bitcoind():
     '''
-    Shut down and restart bitcoind for a fresh start.
+    Shut down and restart bitcoind for a fresh start. Detached (the script ends
+    by running the miner in the foreground); its output is console noise, so it
+    is discarded -- bitcoind logs to its own debug.log.
     '''
     subprocess.Popen(
-        [cfg.RESTART_BITCOIND_BASH]
+        [cfg.RESTART_BITCOIND_BASH],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
 def get_bitcoin_miner():
@@ -1086,7 +1095,7 @@ def stop_bitcoinminer():
     '''
     if pid := get_bitcoin_miner():
         for id in pid.split():
-            subprocess.run(["kill", str(id)])
+            subprocess.run(["kill", str(id)], capture_output=True)
             log.info(f"Found and killing the bitcoin miner with pid {id}.")
 
 
@@ -1119,7 +1128,7 @@ def get_time_interval(data, top_count, send_anchor):
         interval = None
 
     if is_done:
-        log.info(f'done with counter at {top_count}')
+        log.debug(f'All nodes reached counter {top_count}.')
 
     return interval, is_done
 

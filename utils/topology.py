@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.config import cfg
 
@@ -245,7 +246,6 @@ def build_topology(edges, cc_nodes):
             return src_num, targets, True, None
         return src_num, targets, False, (res.stderr or res.stdout or '').strip()[:120]
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     total_opened = 0
     total_failed = 0
     failed_sources = []
@@ -288,21 +288,24 @@ def build_topology(edges, cc_nodes):
         expected_degrees[dst] += 1
     expected_avg = sum(expected_degrees.values()) / n
 
+    def _node_degree(item):
+        num, info = item
+        try:
+            ec, out = info['container'].exec_run(
+                'lightning-cli --regtest listpeerchannels', demux=True)
+            if ec == 0 and out[0]:
+                res = json.loads(out[0].decode('utf-8'))
+                return num, sum(1 for c in res.get('channels', [])
+                                if c.get('state') == 'CHANNELD_NORMAL')
+        except Exception:
+            pass
+        return num, 0
+
     def compute_degrees():
-        dc = {}
-        for num, info in node_info.items():
-            try:
-                ec, out = info['container'].exec_run(
-                    'lightning-cli --regtest listpeerchannels', demux=True)
-                if ec == 0 and out[0]:
-                    res = json.loads(out[0].decode('utf-8'))
-                    dc[num] = sum(1 for c in res.get('channels', [])
-                                  if c.get('state') == 'CHANNELD_NORMAL')
-                else:
-                    dc[num] = 0
-            except Exception:
-                dc[num] = 0
-        return dc
+        # query concurrently: serial exec_run per node is too slow at large n
+        workers = min(16, len(node_info)) or 1
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return dict(pool.map(_node_degree, list(node_info.items())))
 
     # ── Phase 3: poll until every channel is CHANNELD_NORMAL, so we proceed the
     # moment the topology is fully active. The timeout is just an upper bound. ──

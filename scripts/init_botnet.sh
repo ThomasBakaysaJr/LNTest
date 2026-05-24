@@ -19,8 +19,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LNTEST_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# We start fresh
-"$SCRIPT_DIR/cleanup.sh" iter
+# (the orchestrator's cleanup_test already runs `cleanup.sh iter` before this)
 
 # Base directories for lightning and Bitcoin
 source "$LNTEST_ROOT/config.env"
@@ -41,7 +40,6 @@ create_innocent_node() {
     mkdir -p $NODE_LIGHTNING_DIR
 
     # Run the Docker container without NODE_MANAGER_DIR and without bootstrap
-    echo "LNTEST_VERSION is: $LNTEST_VERSION"
     docker run -d --restart unless-stopped --network host --name $NODE_NAME \
         -v $NODE_LIGHTNING_DIR:/root/.lightning \
         -v $BITCOIN_DIR:/root/.bitcoin \
@@ -52,7 +50,7 @@ create_innocent_node() {
 	    --grpc-port=$INNOCENT_GRPC_PORT \
         --developer \
         --dev-bitcoind-poll=1 \
-        --dev-fast-gossip
+        --dev-fast-gossip > /dev/null
 }
 
 extract_address_and_id() {
@@ -111,6 +109,7 @@ create_botmaster_node() {
 
     # Run the Docker container with the specified name
     docker run -d --restart unless-stopped --network host --name $BOTMASTER_NODE \
+        -e CONTAINER_NAME=$BOTMASTER_NODE \
         -e LIGHTNING_RPC_PATH="$LIGHTNING_CONTAINER_DIR/regtest/lightning-rpc" \
         -e NODE_ADDRESS_FILE=$BOT_ADDRESS_FILE \
         -e NODE_ID_FILE=$BOT_ID_FILE \
@@ -125,7 +124,7 @@ create_botmaster_node() {
 	    --grpc-port=$BOTMASTER_GRPC_PORT \
         --developer \
         --dev-bitcoind-poll=1 \
-        --dev-fast-gossip
+        --dev-fast-gossip > /dev/null
 }
 
 echo "Creating BotMaster node..."

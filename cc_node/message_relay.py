@@ -425,7 +425,7 @@ def load_status():
             'last_msg_time': time.time(),
             'state' : 'initializing',
             'tracking_dict' : {},
-            'sent_messages' : {}
+            'sent_messages' : []
         }
         save_status(status)
     

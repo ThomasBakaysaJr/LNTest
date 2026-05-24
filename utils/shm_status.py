@@ -68,7 +68,7 @@ class ShmStatus:
         '''
         node_name = f'{suffix}_status'
         if first_block:
-            log.info(f'Creating shared memory buffer for {node_name}')
+            log.debug(f'Creating shared memory buffer for {node_name}')
 
         try:
             shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
@@ -132,15 +132,14 @@ class ShmStatus:
         else:
             return None
 
-    def retrieve_all_status(self, cc_nodes):
+    def retrieve_all_status(self, cc_node_names):
         '''
-        Retrieve all running CC container statuses from shared memory.
-        Returns all statuses in a list.
+        Retrieve CC node statuses from shared memory by name (no Docker calls).
+        Returns the present statuses as a list.
         '''
         all_status = list()
 
-        for cont in cc_nodes:
-            node_name = cont.name
+        for node_name in cc_node_names:
             try:
                 status = self.get_node_status(node_name)
                 if not status:
@@ -153,11 +152,11 @@ class ShmStatus:
                 continue
         return all_status
 
-    def are_channels_ready(self, cc_nodes_fn):
+    def are_channels_ready(self, cc_names_fn):
         '''
         Wait for channel creation between nodes to finish.
         Args:
-            cc_nodes_fn: callable that returns current CC node containers
+            cc_names_fn: callable that returns current CC node names
         Returns:
             True when channels have finished creating,
             False when waiting time has exceeded MAX_WAIT
@@ -166,12 +165,12 @@ class ShmStatus:
 
         while True:
             time.sleep(cfg.NM_SLEEP)
-            cc_nodes = cc_nodes_fn()
-            all_status = self.retrieve_all_status(cc_nodes)
+            cc_names = cc_names_fn()
+            all_status = self.retrieve_all_status(cc_names)
 
             if (time.time() - start_time) >= cfg.NM_MAX_WAIT * cfg.NM_MAX_WAIT_MULT:
                 return False
-            if len(cc_nodes) == len(all_status) and all_status:
+            if len(cc_names) == len(all_status) and all_status:
                 channels_created = True
                 # if a single channel is not online, then channels create will be false and we sleep
                 for status in all_status:
