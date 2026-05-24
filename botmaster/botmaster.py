@@ -204,9 +204,8 @@ def pick_random_nodes(num_nodes, valid_nodes):
 
 def fund_channels(node_ids=None, count=1):
     '''
-    Discover valid CC nodes and fund channels.
-    Will return saved funded channels if they exist, to fund completely new channels
-    you must call disconnect_all_channels() first.
+    Open the botmaster's injection channels; return the funded node pubkeys.
+    Existing channels are reused (idempotent via has_channel_with).
     Parameters:
         node_ids: list of CC node names to connect to (e.g., ['CC5', 'CC12'])
         count: number of random CC nodes to connect to (used when node_ids is None)

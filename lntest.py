@@ -20,6 +20,7 @@ import datetime
 import copy
 import resource
 import re
+import random
 from utils.config import cfg
 from utils.log import setup_logging, add_file_handler
 from utils.docker_helpers import ensure_custom_image
@@ -286,10 +287,9 @@ def main():
                       f'No iterations would run. Check --sweep-start and --sweep-end.')
             return
 
-        # E2: Validate m >= 2 for active_nodes sweep
-        if testing == ACTIVE_NODES and parameters[ACTIVE_NODES] < 2:
-            error_red('active_nodes sweep must start at m >= 2. '
-                      'm=1 topologies fragment under --dev-fast-gossip.')
+        # m must be >= 1 (m=0 produces no chain edges)
+        if testing == ACTIVE_NODES and parameters[ACTIVE_NODES] < 1:
+            error_red('active_nodes sweep must start at m >= 1.')
             return
 
         # E3: Cap takedown percentage at 90%
@@ -504,9 +504,9 @@ def run_test(in_config, manager : NodeManager):
                 time.sleep(3)
             # dlnbot-formation: cc_manager handles formation, nothing to build here
 
-            # Resolve injection points for this iteration
+            # Resolve injection points for this iteration (iter_inject).
             if 'inject_nodes' in config:
-                # Explicit mode: validate that all specified nodes exist in this iteration
+                # Explicit --inject: validate all specified nodes exist this iteration.
                 n = parameters[CC_COUNT]
                 for name in config['inject_nodes']:
                     cc_num = int(re.search(r'CC(\d+)', name).group(1))
@@ -516,20 +516,26 @@ def run_test(in_config, manager : NodeManager):
                         _active_monitor = None
                         stop_bitcoinminer()
                         return
+                iter_inject = config['inject_nodes']
             elif testing != INJECTION_COUNT:
-                # No --inject specified and not an injection sweep:
-                # Default to CC1 for deterministic results across sweep iterations
+                # No --inject and not an injection sweep: default to CC1 (deterministic).
                 config['inject_nodes'] = ['CC1']
+                iter_inject = ['CC1']
                 log.info('No --inject specified: defaulting to CC1 for deterministic sweep.')
-            # else: injection sweep with no --inject → random selection (deferred to botmaster.py)
+            else:
+                # Injection sweep: pick `count` random nodes ONCE per iteration so warmup
+                # and every message share them (avoids per-call drift + BM fund exhaustion).
+                k = parameters[INJECTION_COUNT]
+                n = parameters[CC_COUNT]
+                iter_inject = [f'CC{i}' for i in sorted(random.sample(range(1, n + 1), min(k, n)))]
+                log.info(f'Injection sweep: {k} random injection point(s) this iteration: {iter_inject}')
 
             log.info('Waiting done, proceeding to testing.')
 
-            # Pre-open the botmaster's channel(s) to the injection target(s)
-            # so the channel-open cost is excluded from per-command propagation delay.
-            warmup_inject_nodes = config.get('inject_nodes', None)
+            # Pre-open the botmaster's channel(s) to the injection target(s) so the
+            # channel-open cost is excluded from per-command propagation delay.
             manager.warmup_botmaster_channels(
-                inject_nodes=warmup_inject_nodes,
+                inject_nodes=iter_inject,
                 inject_count=parameters[INJECTION_COUNT])
 
             message_start_time = time.time()
@@ -543,9 +549,8 @@ def run_test(in_config, manager : NodeManager):
                 if config.get('mode', 'dlnbot') == 'dlnbot-formation':
                     manager.are_channels_ready()
 
-                inject_nodes = config.get('inject_nodes', None)
                 pre_send = time.time()
-                send_ts = manager.send_botmaster_command(y, inject_nodes=inject_nodes, inject_count=parameters[INJECTION_COUNT])
+                send_ts = manager.send_botmaster_command(y, inject_nodes=iter_inject, inject_count=parameters[INJECTION_COUNT])
                 # t0 = when the keysend left the botmaster (__SEND_TS__); pre_send is the fallback
                 send_anchor = send_ts if send_ts is not None else pre_send
                 send_time, success = wait_for_propagation(y, manager, send_anchor)
