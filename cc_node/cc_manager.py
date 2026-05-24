@@ -182,8 +182,12 @@ def create_channels():
                 demoGetAddressAndConnect(node)
 
             if ln_checker.does_connection_exist(node):
-                fund_channel(node)
-                OUTBOUND_CHANNELS.add(node)  # Only track after successful connection
+                # Only record an outbound peer if the channel actually opened.
+                # Otherwise a rejected open (e.g. target already full) would still
+                # count toward this node's m outbound, falsely "saturating" it
+                # with a phantom channel and stopping it from opening real ones.
+                if fund_channel(node):
+                    OUTBOUND_CHANNELS.add(node)
             else:
                 logging.error(f"create_channels: Failed to connect to {node}.")
         
@@ -315,6 +319,8 @@ def close_and_disconnect_innocent():
     
 
 def fund_channel(node):
+    '''Open a channel to `node`. Returns True only if the channel actually opened,
+    so the caller never records a rejected/failed open as an outbound peer.'''
     logging.info(f'fund_channel: Connected to {node}. Funding.')
     # random funding amount
     funding_amount = random.randint(ln_checker.MIN_CHANNEL_CAPACITY, ln_checker.MAX_CHANNEL_CAPACITY)
@@ -327,10 +333,13 @@ def fund_channel(node):
             result = ln_checker.lightning_rpc.fundchannel(node, funding_amount, push_msat=push_amount)
             if result:
                 logging.info(f"fund_channel: Channel successfully created with node {node}.")
+                return True
         except Exception as e:
             logging.error(f"fund_channel: fundchannel failed for {node}: {e}")
+        return False
     else:
         logging.error(f"create_channels: Failed to create channel with node {node}.")
+        return False
 
 
 def list_peers_with_channels():

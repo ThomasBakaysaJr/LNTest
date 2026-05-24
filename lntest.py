@@ -576,8 +576,9 @@ def run_test(in_config, manager : NodeManager):
                 coverage_pct, received, total = get_coverage(y, manager)
 
                 if not success:
-                    if config.get('takedown', False):
-                        # Network partition is a valid result for takedown tests — record it
+                    if config.get('takedown', False) or config.get('mode') == 'dlnbot-formation':
+                        # Partition / incomplete coverage is a valid result for takedown
+                        # tests and for nondeterministic formation — record it.
                         actual_elapsed = time.time() - send_anchor
                         record = parameters.copy()
                         record['message'] = y
@@ -610,9 +611,10 @@ def run_test(in_config, manager : NodeManager):
 
             if success:
                 attempt = 0
-            # if not a success, add to the attempt
-            elif config.get('takedown', False):
-                # Network partition is a valid data point for takedown tests, advance to next iteration
+            # A partition is a valid endpoint for takedown tests and for
+            # nondeterministic formation (the formed overlay may legitimately
+            # leave nodes unreachable); record it and advance instead of rebuilding.
+            elif config.get('takedown', False) or config.get('mode') == 'dlnbot-formation':
                 success = True
                 attempt = 0
             else:

@@ -111,10 +111,11 @@ clear_botmaster_runtime() {
 clear_cc_node_runtime() {
     # Wipe everything in cc_node/ except the tracked source files.
     if [ -n "${NODE_MANAGER_DIR:-}" ] && [ -d "$NODE_MANAGER_DIR" ]; then
-        echo "Wiping $NODE_MANAGER_DIR/ (keeping cc_manager.py, message_relay.py)..."
+        echo "Wiping $NODE_MANAGER_DIR/ (keeping cc_manager.py, message_relay.py, reject_inbound.py)..."
         find "$NODE_MANAGER_DIR" -mindepth 1 -maxdepth 1 \
             ! -name 'cc_manager.py' \
             ! -name 'message_relay.py' \
+            ! -name 'reject_inbound.py' \
             -exec rm -rf {} +
     fi
 }

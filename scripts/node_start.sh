@@ -4,9 +4,16 @@
 LIGHTNING_HOME=${LIGHTNING_HOME:-"/root/.lightning"}
 NODE_CONTAINER_DIR=${NODE_CONTAINER_DIR:-"/root/nodemanager"}
 
-# Start lightningd in the background
+# Start lightningd in the background. In formation mode (cc_manager running),
+# load the reject_inbound plugin so a node can stop accepting inbound channels
+# once it has finished forming. Orchestrator-built modes (SKIP_CC_MANAGER=1)
+# do not load it, so the orchestrator's channel opens are never rejected.
+PLUGIN_ARGS=""
+if [ "${SKIP_CC_MANAGER}" != "1" ]; then
+    PLUGIN_ARGS="--plugin=$NODE_CONTAINER_DIR/reject_inbound.py"
+fi
 # The '$@' passes all command-line arguments to it
-exec lightningd "$@" &
+exec lightningd "$@" $PLUGIN_ARGS &
 
 # Get the Process ID (PID) of the lightningd process
 LND_PID=$!
