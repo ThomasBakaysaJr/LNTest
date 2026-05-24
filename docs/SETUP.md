@@ -74,8 +74,11 @@ The setup script will:
 * Create the Python virtual environment and install packages
 * Create config files in `~/.lightning` and `~/.bitcoin`
 * Prompt for RPC username and password
+* Build the LNTest Docker image, pinning the Core Lightning version at setup time
 
 You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
+
+The Core Lightning version is fixed when the image is built, so it stays constant across test runs. To rebuild against the latest release, re-run `./setup.sh` or `sudo venv/bin/python3 -m utils.docker_helpers`.
 
 Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
 

@@ -57,7 +57,7 @@ extract_address_and_id() {
     NODE_NAME="InnocentNode"
 
     # Extract the information using the Docker exec command
-    NODE_INFO=$(sudo docker exec $NODE_NAME lightning-cli --regtest getinfo)
+    NODE_INFO=$(docker exec $NODE_NAME lightning-cli --regtest getinfo)
 
     # Parse the address and ID from the JSON output
     NODE_ID=$(echo $NODE_INFO | jq -r '.id')
@@ -118,6 +118,7 @@ create_botmaster_node() {
         -v $BITCOIN_DIR:/root/.bitcoin \
         -v $BOT_MASTER_DIR:$BOT_MASTER_CONTAINER_DIR \
         -v $LN_CHECKER_FILE:$BOT_MASTER_CONTAINER_DIR/ln_checker.py \
+        -v $NODE_STATE_DIR:$BOT_MASTER_CONTAINER_DIR/testState \
         $LNTEST_VERSION \
         --network=$NETWORK_TYPE \
         --addr=$BITCOIN_HOST:$NODE_PORT \

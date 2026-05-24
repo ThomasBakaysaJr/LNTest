@@ -146,7 +146,7 @@ write_address_to_file() {
     NODE_NAME="$1"
 
     # Extract the information using the Docker exec command
-    NODE_INFO=$(sudo docker exec $NODE_NAME lightning-cli --regtest getinfo)
+    NODE_INFO=$(docker exec $NODE_NAME lightning-cli --regtest getinfo)
 
     # Parse the address from the JSON output
     NODE_ID=$(echo $NODE_INFO | jq -r '.id')

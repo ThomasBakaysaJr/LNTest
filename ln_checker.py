@@ -126,7 +126,7 @@ def wait_node_activated(target_node):
 
 def does_connection_exist(target_node):
     '''
-    Returns wether a connection between this node and target_node exists.
+    Returns whether a connection between this node and target_node exists.
     '''
     try:
         peers_info = lightning_rpc.listpeers()
@@ -227,7 +227,7 @@ def get_status_data():
 
         data = json.loads(data.decode('utf-8'))
     except Exception as e:
-        print(f'retrieve_all_status: {node_name} failed to retrived shm because {e}')
+        logging.error(f'get_status_data: {node_name} failed to read shm: {e}')
 
     return data
 
@@ -308,7 +308,8 @@ def is_synched():
     try:
         height = int(block_height)
     except ValueError:
-        logging.warning(f'check_blockchain_height: Could not convert blockheight {block_height} to int')
+        logging.warning(f'is_synched: could not convert blockheight {block_height} to int')
+        return False
 
     logging.info(f'Blockchain height is {height} against incoming height of {lightning_height}')
     return height == lightning_height

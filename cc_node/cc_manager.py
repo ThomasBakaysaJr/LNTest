@@ -1,4 +1,3 @@
-#nodeManagerFinalVersion.py
 # This script is designed to run on a Lightning Network node (c-lightning) and manage the discovery of CC nodes and creating channels with them 
 # centered on a discovery rule. The script will connect to an "Innocent" node and fund a channel meeting the discovery rule amount. It will then connect and 
 # create channels with other nodes that meet the discovery rule, while avoiding duplicates and blacklisted nodes (i.e. innocent node). 
@@ -72,7 +71,7 @@ def main():
     cc_addr_list_file = os.path.basename(os.getenv('NODE_MANAGER_ADDRESS_LIST', 'CC_address_list.txt'))
 
     if not load_this_node(): # retrieve vital information and wait for node to sync
-        logging.warning(f'Node tried to start with saturated nodes. Aborting start.')
+        logging.warning('Node tried to start with saturated nodes. Aborting start.')
         return
 
     for _ in range(attempt_max):
@@ -135,7 +134,7 @@ def main():
             time.sleep(5)
         finally:
             signal.alarm(0)  # Cancel any pending alarm
-    logging.info(f'Node has finished creating connections. Exiting out of CC_manager.')
+    logging.info('Node has finished creating connections. Exiting out of CC_manager.')
 
 
 def create_channels():
@@ -162,7 +161,7 @@ def create_channels():
         valid_nodes = discover_nodes()
 
         if not valid_nodes:
-            logging.info(f'create_channels: No valid nodes found. Aborting channel creation.')
+            logging.info('create_channels: No valid nodes found. Aborting channel creation.')
             return
 
         for node in valid_nodes:
@@ -262,7 +261,7 @@ def fund_innocent_channel():
         # If we already have the innocent channel, check if outbound is ready
         if ln_checker.has_channel_with(INNOCENT_NODE_ID):
             if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
-                logging.info(f'Outbound channels established. Marking channel creation as complete.')
+                logging.info('Outbound channels established. Marking channel creation as complete.')
                 CHANNELS_CREATED = True
             return
 
@@ -270,10 +269,10 @@ def fund_innocent_channel():
         funding_amount = DISCOVERY_RULE_DIVISOR * 10000
         inno_channels = ln_checker.lightning_rpc.listchannels(source=INNOCENT_NODE_ID).get('channels')
         if inno_channels is not None and len(inno_channels) >= MAX_ACTIVE_NODES:
-            logging.info(f'Trying to connect to innocent node but it currently has max number of active nodes channeled. Aborting.')
+            logging.info('Trying to connect to innocent node but it currently has max number of active nodes channeled. Aborting.')
             # If outbound channels are working, mark as done
             if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
-                logging.info(f'Outbound channels are working. Marking channels as created despite innocent saturation.')
+                logging.info('Outbound channels are working. Marking channels as created despite innocent saturation.')
                 CHANNELS_CREATED = True
             return
 
@@ -282,11 +281,11 @@ def fund_innocent_channel():
             if ln_checker.check_funds():
                 result = ln_checker.lightning_rpc.fundchannel(INNOCENT_NODE_ID, funding_amount)
                 if result:
-                    logging.info(f'Channel funded with innocent node.')
+                    logging.info('Channel funded with innocent node.')
                     INNOCENT_CHANNEL_CLOSED = False
                     # Only mark as fully done if outbound channels are established
                     if len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES:
-                        logging.info(f'Outbound channels ready. Channel creation complete.')
+                        logging.info('Outbound channels ready. Channel creation complete.')
                         CHANNELS_CREATED = True
                     else:
                         logging.info(f'Innocent channel funded but waiting for outbound channels ({len(OUTBOUND_CHANNELS)}/{MAX_ACTIVE_NODES}).')
@@ -391,16 +390,16 @@ def discover_nodes():
         # only check either source or destination (connected to innocent node)
         # a check, but this shouldn't be called if we're connected to the innnocent node anyway
         if (source == own_node_id or destination == own_node_id):
-            logging.error(f'discover_nodes: Is connected to innocent node. Not supposed to creating channels after connection to Innocent node.')
+            logging.error('discover_nodes: Is connected to innocent node. Not supposed to creating channels after connection to Innocent node.')
             continue
         if (len(OUTBOUND_CHANNELS) >= MAX_ACTIVE_NODES):
-            logging.info(f'Node outbound channels is saturated.')
+            logging.info('Node outbound channels is saturated.')
             return []
         
         node_is_outbound = destination in OUTBOUND_CHANNELS
         node_is_innocent = (destination == INNOCENT_NODE_ID)
 
-        # checkpoint, we only want nodes connceted to the innocent node while our outbound nodes < Max active nodes
+        # checkpoint, we only want nodes connected to the innocent node while our outbound nodes < Max active nodes
         if node_is_innocent or node_is_outbound:
             continue
         
@@ -437,7 +436,7 @@ def load_this_node ():
     output = get_node_info()
     THIS_NODE = output.get('id')
 
-    logging.info(f'Waiting for node to sync with blockchain')
+    logging.info('Waiting for node to sync with blockchain')
 
     while not ln_checker.is_synched():
         time.sleep(1)
@@ -446,7 +445,7 @@ def load_this_node ():
         close_and_disconnect_innocent()
         return False
 
-    logging.info(f'Node has synced successfully.')
+    logging.info('Node has synced successfully.')
     return True
 
 def get_node_info():

@@ -147,6 +147,11 @@ else
     echo "No requirements.txt found. Skipping dependency install."
 fi
 
+# Build the LNTest Docker image now (pulls the latest Core Lightning release) so
+# the CLN version is fixed at setup time instead of being re-fetched on each run.
+echo "Building the LNTest Docker image (pulls the latest Core Lightning release; may take a minute)..."
+sudo ./venv/bin/python3 -m utils.docker_helpers
+
 echo "Setup complete. Please verify your settings in config.env"
 echo ""
 echo "Next Steps:"

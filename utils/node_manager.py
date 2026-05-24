@@ -144,7 +144,7 @@ class NodeManager:
             # buffers are created first since each container writes status on start.
             from concurrent.futures import ThreadPoolExecutor, as_completed
             for counter in range(1, total_nodes + 1):
-                self.shm.setup_shm("CC" + str(counter), True)
+                self.shm.setup_shm("CC" + str(counter))
 
             def _launch(counter):
                 return counter, subprocess.run(
@@ -181,7 +181,7 @@ class NodeManager:
             counter = 1
             while counter <= total_nodes:
                 try:
-                    self.shm.setup_shm("CC" + str(counter), True)
+                    self.shm.setup_shm("CC" + str(counter))
                     log.info(f'Launching CC{counter} ({counter}/{total_nodes})...')
                     # capture output (shown only on failure) to keep the console clean
                     res = subprocess.run(
@@ -389,7 +389,6 @@ class NodeManager:
             log.warning(f"cleanup.sh iter exited {result.returncode}: "
                         f"{(result.stderr or '').strip()}")
 
-    # will enventually goto into a utils file
     def is_kill_time(self, start_time, wait_time):
         '''
         Determine whether too much time has elapsed and that we should kill this iteration.

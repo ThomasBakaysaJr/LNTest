@@ -195,7 +195,7 @@ def build_topology(edges, cc_nodes):
                 info = json.loads(output[0].decode('utf-8'))
                 binding = info.get('binding', [{}])
                 addr = binding[0].get('address', '127.0.0.1') if binding else '127.0.0.1'
-                port = binding[0].get('port', 19849 + num) if binding else 19849 + num
+                port = binding[0].get('port', 19848 + num) if binding else 19848 + num
                 node_info[num] = {
                     'pubkey': info['id'],
                     'address': f"{info['id']}@{addr}:{port}",

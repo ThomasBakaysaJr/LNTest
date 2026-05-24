@@ -1,6 +1,6 @@
 #NOTE!!! this file should be in the cc_node/ directory that gets mounted to the CC docker container
 
-#This script is used to relay commands to all CC nodes it has channels with, it connects to the REST server and passes the commands to the server.   
+#This script relays commands to the CC nodes it has channels with, over the CLN RPC socket.
 
 import random
 import json
@@ -297,18 +297,19 @@ def process_message(message):
         parts = message.split('|')
         if len(parts) != 2:
             logging.info(f"Ignoring invalid message format: {message}")
-            return
+            return None, None
 
         command, counter = parts[0], parts[1]
 
         # Check if the counter is valid and unprocessed
         if not counter.isdigit():
             logging.info(f"Ignoring message with invalid counter: {message}")
-            return
-        # we return the commmand and the counter associated with it
+            return None, None
+        # return the command and its counter
         return command, counter
     except Exception as e:
         logging.error(f"Error processing message: {e}")
+        return None, None
 
 def get_processed_counters(status):
     '''
@@ -317,7 +318,7 @@ def get_processed_counters(status):
     Moves counter to one global set when its been sent to all channels
     '''
 
-    prun_msg_dict(status)
+    prune_msg_dict(status)
     if status.get('tracking_dict'):
         first_value = next(iter(status.get('tracking_dict').values()))
         processed_counters = first_value.copy()
@@ -339,7 +340,7 @@ def get_processed_counters(status):
 
     return processed_counters
 
-def prun_msg_dict(status):
+def prune_msg_dict(status):
     '''
     Look at our channels - remove from the dictionary if
     something happened to them (the node died or something)
@@ -360,12 +361,12 @@ def prun_msg_dict(status):
 def set_state(status, state):
     '''
     Update current status state to state
-    Save the current state to shared memory for tester_v1 to use.
+    Save the current state to shared memory for the orchestrator (lntest.py) to read.
     DOES NOT save to disk - call update_stats or save_status instead
     '''
     # just in case we somehow send this an empty status
     if not status:
-        logging.warning(f'set_state: WARNING: Received an empty status. Attempting to load from disk.')
+        logging.warning('set_state: WARNING: Received an empty status. Attempting to load from disk.')
         status = load_status()
 
     #update the status
@@ -390,7 +391,7 @@ def update_status(status, message, counter):
     logging.info(f"update_status: status counter: {status.get('counter')} and new counter: {counter}")
     counter = int(counter)
     if int(counter) > status.get('counter'):
-        logging.info(f'update_status: incrementing counter')
+        logging.info('update_status: incrementing counter')
         status.update({
             'time' : time.time(),
             'last_msg_time': time.time(),
@@ -415,7 +416,7 @@ def load_status():
     # If no status was loaded, create a default status
     # and save that to file.
     if not status:
-        logging.info(f'load_status: No status found, creating default status.')
+        logging.info('load_status: No status found, creating default status.')
         status = {
             'time' : time.time(),
             'short_id' : ln_checker.get_short_id(THIS_NODE),

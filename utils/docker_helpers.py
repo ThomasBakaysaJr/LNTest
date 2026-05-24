@@ -74,6 +74,15 @@ def get_latest_cln_tag():
     return latest_tag
 
 
+def image_exists(image_name):
+    """True if the LNTest Docker image has already been built locally."""
+    try:
+        docker.from_env().images.get(image_name)
+        return True
+    except docker.errors.ImageNotFound:
+        return False
+
+
 def ensure_custom_image(image_name):
     """
     Build the LNTest Docker image on top of the most recent Core Lightning
@@ -122,3 +131,11 @@ def ensure_custom_image(image_name):
     except docker.errors.BuildError as e:
         log.error(f"Error building image: {e}")
         exit(1)
+
+
+if __name__ == "__main__":
+    # Invoked by setup.sh: build (or rebuild against a newer CLN release) the
+    # image once at setup, so the CLN version stays fixed across test runs.
+    from utils.config import cfg
+    cfg.load()
+    ensure_custom_image(cfg.LNTEST_VERSION)

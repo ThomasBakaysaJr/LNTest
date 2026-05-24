@@ -56,7 +56,7 @@ def get_docker_stats():
 
         return total_cpu, total_mem_mb, count
 
-    except (subprocess.TimeoutExpired, Exception):
+    except Exception:
         return 0.0, 0.0, 0
 
 

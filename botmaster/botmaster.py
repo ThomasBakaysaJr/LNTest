@@ -102,7 +102,7 @@ def connect_to_innocent():
     Connect to the Innocent node.
     """
     if ln_checker.does_connection_exist(INNOCENT_NODE_ID):
-        logging.info(f'Already connected to innocent node')
+        logging.info('Already connected to innocent node')
     else:
         logging.info(f"Connecting to Innocent node: {INNOCENT_NODE_ADDRESS}")
         run_lightning_cli(["connect", INNOCENT_NODE_ADDRESS])
@@ -222,10 +222,6 @@ def fund_channels(node_ids=None, count=1):
         target_nodes = None
         final_num_channels = count
 
-    # if the nodes are already funded then just return those.
-    if len(funded_nodes) == final_num_channels:
-        return funded_nodes
-
     # Discover all CC nodes
     discovered_nodes = discover_cc_nodes()
     while not discovered_nodes:
@@ -243,32 +239,28 @@ def fund_channels(node_ids=None, count=1):
 
     for _ in range(RETRY_MAX):
         for node in new_nodes:
-
-            # first check if we have a channel with this node, if we do, then we can skip everything
+            # skip nodes we already have a channel with
             if node in funded_nodes:
                 continue
-            elif (node not in funded_nodes) and ln_checker.has_channel_with(node):
-                logging.warning(f'fund_channels: Trying to fund a channel with {node} but channel already exists.')
+            if ln_checker.has_channel_with(node):
+                logging.warning(f'fund_channels: channel with {node} already exists.')
                 funded_nodes.add(node)
                 continue
 
-            # no channel with the node
+            # no channel yet: connect and open one
             demoGetAddressAndConnect(node)
             connect_and_channel_node(node)
-            # make sure channel is ready to receive
             ln_checker.wait_node_activated(node)
 
-            if not ln_checker.has_channel_with(node):
-                logging.error(f'fund_channels: ERROR: Could not connect to node.')
-                print(f'Error: Could not open channel with {node}')
-                continue
-            else:
+            if ln_checker.has_channel_with(node):
                 print(f'Successfully opened channel with {node}')
                 logging.info(f'Successfully opened channel with {node}')
                 funded_nodes.add(node)
-        else:
-            print(f'BM node has channeled with {final_num_channels} nodes successfully.')
-            logging.info(f'fund_channels: BM node has channeled with {final_num_channels} nodes successfully.')
+            else:
+                logging.error(f'fund_channels: could not open channel with {node}.')
+                print(f'Error: Could not open channel with {node}')
+        # stop retrying once every target has a channel
+        if len(funded_nodes) == final_num_channels:
             break
 
     if len(funded_nodes) != final_num_channels:
@@ -287,7 +279,7 @@ def interactive_command_sender(funded_nodes):
     """
     counter = load_counter()  # Load the counter from the file
 
-    print(f"Type 'quit' to exit.")
+    print("Type 'quit' to exit.")
 
     while True:
         user_input = input("Enter command: ")
@@ -379,7 +371,7 @@ def connect_and_channel_node(node):
         logging.info(f"fund_channels: Funding channel with node {node} (amount: {UNIQUE_FUNDING_AMOUNT}).")
         ln_checker.check_funds()
         run_lightning_cli(["fundchannel", node, str(UNIQUE_FUNDING_AMOUNT)])
-        logging.info(f'funds_channels: Funding channel with {node}')
+        logging.info(f'connect_and_channel_node: Funding channel with {node}')
         return True
     except Exception as e:
         logging.error(f'connect_and_channel_node: ERROR: {e}')
@@ -427,9 +419,10 @@ def main(goal, message, node_ids=None, count=1, start_fresh=False, warmup=False)
     funded_nodes = fund_channels(node_ids=node_ids, count=count)
 
     if start_fresh:
-        logging.info(f'main: Closing and disconnceting from all nodes. Starting fresh')
-        save_counter('0')
+        logging.info('main: closing all channels and resetting counter (--fresh).')
+        save_counter(0)
         disconnect_all_channels(funded_nodes)
+        return
 
     elif not funded_nodes:
         funded_nodes = fund_channels(node_ids=node_ids, count=count)
@@ -474,4 +467,4 @@ if __name__ == "__main__":
         if input(f'Starting botmaster. Will connect to {desc}. Continue? y/n').lower() in ['y', 'yes']:
             main(1, args.msg, node_ids=node_ids, count=args.count, start_fresh=args.fresh)
         else:
-            print(f'Exiting Botmaster script.')
+            print('Exiting Botmaster script.')

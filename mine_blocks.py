@@ -11,8 +11,7 @@ BITCOIN_CLI = ''
 def get_new_address(user, password):
     try:
         address = subprocess.check_output(
-            f"{BITCOIN_CLI} -rpcuser={user} -rpcpassword={password} getnewaddress",
-            shell=True,
+            [BITCOIN_CLI, f"-rpcuser={user}", f"-rpcpassword={password}", "getnewaddress"],
             text=True
         ).strip()
         return address
@@ -22,7 +21,7 @@ def get_new_address(user, password):
 
 def main(user, password):
     if BITCOIN_CLI == '':
-        print(f'mine_blocks: Path to bitcoin-cli not available. Exiting.')
+        print('mine_blocks: Path to bitcoin-cli not available. Exiting.')
         return
     # Get an initial valid address
     address = get_new_address(user, password)
@@ -30,7 +29,7 @@ def main(user, password):
         print("Failed to generate a valid address. Exiting.")
         exit(1)
 
-    # Generate the required 100 blocks first then
+    # Generate the initial blocks for coinbase maturity, then
     # Run the command every 2 seconds
     try:
         from utils.config import cfg
@@ -54,14 +53,14 @@ if __name__ == "__main__":
         BITCOIN_CLI = sys.argv[3]
         main(sys.argv[1], sys.argv[2])
     elif len(sys.argv) > 2:
-        print(f'mine_blocks: No path to bitcoin-cli given. Attempting to load from config.env')
+        print('mine_blocks: No path to bitcoin-cli given. Attempting to load from config.env')
         try:
             from utils.config import cfg
             cfg.load()
             BITCOIN_CLI = cfg.BITCOIN_CLI
-            print(f'mine_blocks: Loading success. Starting bitcoin miner')
+            print('mine_blocks: Loading success. Starting bitcoin miner')
             main(sys.argv[1], sys.argv[2])
         except Exception as e:
             print(f'mine_blocks: ERROR: {e}')
     else:
-        print(f'mine_blocks: ERROR: Not enough arguments. Please provide an rpc username and password for bitcoin-core')
+        print('mine_blocks: ERROR: Not enough arguments. Please provide an rpc username and password for bitcoin-core')

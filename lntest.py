@@ -7,9 +7,9 @@ This is the main script that will handle
     - Breaking down the testing environment.
     - Doing it all over again
 Use -h to see the options available.
-Logs for CC nodes are stored in Node_Manager/logs
-Logs for the Botmaster are in Botmaster/
-Most errors can be solved by crtl+c and then running the script again.
+Logs for CC nodes are in cc_node/logs/
+Botmaster logs are in botmaster/logs/
+Most errors can be solved by Ctrl+C and then running the script again.
 '''
 import argparse
 import logging
@@ -21,9 +21,13 @@ import copy
 import resource
 import re
 import random
+import os
+import sys
+import atexit
+import signal
 from utils.config import cfg
 from utils.log import setup_logging, add_file_handler
-from utils.docker_helpers import ensure_custom_image
+from utils.docker_helpers import image_exists
 from utils.node_manager import NodeManager
 from utils import sys_monitor
 
@@ -51,9 +55,6 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (min(65536, hard), hard))
 
 # Global reference to active monitor for cleanup on exit
 _active_monitor = None
-
-import atexit
-import signal
 
 def _cleanup_on_exit():
     """Kill orphan child processes (monitor, miner) on exit or Ctrl+C."""
@@ -203,7 +204,9 @@ def main():
 
     args = parser.parse_args()
 
-    ensure_custom_image(cfg.LNTEST_VERSION)
+    if not image_exists(cfg.LNTEST_VERSION):
+        error_red(f'Docker image "{cfg.LNTEST_VERSION}" not found. Run ./setup.sh to build it.')
+        sys.exit(1)
     manager = NodeManager()
     # start recording time for total testing
     start_time = time.time()
@@ -447,7 +450,7 @@ def run_test(in_config, manager : NodeManager):
             _active_monitor = monitor
 
             if attempt > MAX_TRY:
-                log.error(f"{testing} Test failed with paramaters {parameters} at {time.time() - overall_test_time} seconds")
+                log.error(f"{testing} Test failed with parameters {parameters} at {time.time() - overall_test_time} seconds")
                 monitor.stop()
                 _active_monitor = None
                 stop_bitcoinminer()
@@ -839,7 +842,7 @@ def print_execution_plan(config):
     elif var_key == INJECTION_COUNT:
         log.info(f'  Injection from : random nodes (count swept {start}->{end})')
     elif var_key == CC_COUNT:
-        log.info(f'  Injection from : middle node (scales with n, default)')
+        log.info('  Injection from : middle node (scales with n, default)')
     else:
         log.info(f'  Injection from : CC{(params[CC_COUNT] + 1) // 2} (middle, default)')
 
@@ -853,7 +856,7 @@ def print_execution_plan(config):
     log.info(f'{"="*60}')
 
 def confirm_test():
-    if input(f'Confirm test? y / n: ').lower() in ['y', 'yes']:
+    if input('Confirm test? y / n: ').lower() in ['y', 'yes']:
         return True
     else:
         return False
@@ -890,9 +893,9 @@ def record_total_time(total_time, config, output_suffix="total_times_log.json"):
     Create a running record of the total time taken for test runs
     along with their configuration(s) to a JSON file.
     '''
-    import os
     os.makedirs(cfg.TEST_DATA_DIR, exist_ok=True)
-    filename = datetime.datetime.now().strftime(f"data/%Y-%m-%d_{output_suffix}")
+    filename = os.path.join(cfg.TEST_DATA_DIR,
+                            datetime.datetime.now().strftime(f"%Y-%m-%d_{output_suffix}"))
 
     log_entry = {
         'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1030,7 +1033,6 @@ def start_miner():
     Start just the background miner without restarting bitcoind.
     Uses sys.executable to ensure the same Python (venv) is used.
     '''
-    import sys
     rpc_user = cfg.RPC_USER
     rpc_password = cfg.RPC_PASSWORD
     subprocess.Popen(
@@ -1089,7 +1091,7 @@ def get_time_interval(data, top_count, send_anchor):
         is_done: True when every node has reached top_count.
     '''
     # Retrieve the status of all nodes with their counter at top count
-    top_data = [status for status in data if int(status.get('counter')) == int(top_count)]
+    top_data = [status for status in data if int(status.get('counter', 0)) == int(top_count)]
 
     # propagation is done when all of statuses have the same counter
     is_done = len(top_data) == len(data)

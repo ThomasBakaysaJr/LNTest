@@ -59,16 +59,14 @@ class ShmStatus:
 
         return int((overhead_size + (max_channels * per_peer_size)) * buffer)
 
-    def setup_shm(self, suffix, first_block=False):
+    def setup_shm(self, suffix):
         '''
-        Setup the shm block for this node using incoming suffix counter.
-        Make sure node_name and block_size matches the name and block_size in ln_checker.
-        Unregisters from Python's resource_tracker to prevent automatic cleanup.
-        Explicit cleanup is handled by remove_shm() and scripts/cleanup.sh.
+        Create this node's shared-memory status block (name/size must match
+        ln_checker). Unregisters from Python's resource_tracker so the block
+        isn't auto-unlinked; remove_shm() and scripts/cleanup.sh clean up.
         '''
         node_name = f'{suffix}_status'
-        if first_block:
-            log.debug(f'Creating shared memory buffer for {node_name}')
+        log.debug(f'Creating shared memory buffer for {node_name}')
 
         try:
             shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
@@ -78,17 +76,13 @@ class ShmStatus:
             resource_tracker.unregister(shm._name, 'shared_memory')
             self.shm_blocks[node_name] = shm  # Keep reference alive
         except FileExistsError:
-            # Found a block by this name still, probably from bad cleanup. Clear and prepare it again
-            log.warning(f'setup_shm: Shared memory block found for {node_name}.')
-            if first_block:
-                # if first_block is true, we want this to the first block of memory
-                # so get rid of anything that may be here and re-create it.
-                temp_shm = shared_memory.SharedMemory(name=node_name)
-                temp_shm.unlink()
-                # recreate memory block
-                shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
-                resource_tracker.unregister(shm._name, 'shared_memory')
-                self.shm_blocks[node_name] = shm  # Keep reference alive
+            # Stale block from a bad cleanup: unlink and recreate it.
+            log.warning(f'setup_shm: stale shared memory block for {node_name}; recreating.')
+            temp_shm = shared_memory.SharedMemory(name=node_name)
+            temp_shm.unlink()
+            shm = shared_memory.SharedMemory(name=node_name, create=True, size=self.block_size)
+            resource_tracker.unregister(shm._name, 'shared_memory')
+            self.shm_blocks[node_name] = shm  # Keep reference alive
 
     def remove_shm(self, suffix):
         node_name = f'{suffix}_status'
@@ -148,7 +142,7 @@ class ShmStatus:
                 all_status.append(status)
             except Exception as e:
                 log.warning(f'retrieve_all_status: {node_name} failed to retrieve shm because {e}. Recreating shm.')
-                self.setup_shm(node_name, True)
+                self.setup_shm(node_name)
                 continue
         return all_status
 
