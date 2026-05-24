@@ -356,9 +356,11 @@ def send_msg(message, counter, funded_nodes):
         print(f"__SEND_TS__ {min(send_times):.6f}")
         logging.info(f"Command '{message_with_counter}' sent to {succeeded}/{len(funded_nodes)} injection points.")
         print(f"Command '{message_with_counter}' sent to {succeeded}/{len(funded_nodes)} injection points.")
-        save_counter(counter + 1)
     else:
         logging.error(f'All {len(funded_nodes)} injection points failed for message {message_with_counter}.')
+    # Advance even on failure so counter.txt stays in lockstep with the orchestrator's
+    # per-command index (the build-once takedown run never resets it between percentages).
+    save_counter(counter + 1)
         
 def load_this_node ():
     global THIS_NODE 

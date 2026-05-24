@@ -255,47 +255,11 @@ class NodeManager:
 
     def execute_takedown(self, config, nodes_to_kill):
         '''
-        Record and shut down a specific list of nodes, APPENDING them to
-        config['takendown_nodes'] (cumulative across a nested takedown sweep).
-        Returns the list actually shut down.
+        Shut down a specific list of nodes (one step of a nested takedown sweep).
+        The removed names are logged to orchestrator.log. Returns what was shut down.
         '''
-        import json as _json
         if not nodes_to_kill:
             return []
-        dead_nodes = []
-        for node in nodes_to_kill:
-            status = self.get_node_status(node.name)
-            if status and status.get('channels') is not None:
-                dead_nodes.append({
-                    'short_id': status.get('short_id'),
-                    'host_name': status.get('host_name'),
-                    'channels': status.get('channels')
-                })
-            else:
-                # SHM not populated (orchestrator-controlled topology) — query directly
-                node_data = {'host_name': node.name, 'channels': {}}
-                try:
-                    ec, out = node.exec_run('lightning-cli --regtest getinfo', demux=True)
-                    if ec == 0 and out[0]:
-                        info = _json.loads(out[0].decode('utf-8'))
-                        node_data['short_id'] = info.get('id', '')[-8:]
-                    ec, out = node.exec_run('lightning-cli --regtest listpeerchannels', demux=True)
-                    if ec == 0 and out[0]:
-                        result = _json.loads(out[0].decode('utf-8'))
-                        for ch in result.get('channels', []):
-                            if ch.get('state') == 'CHANNELD_NORMAL':
-                                peer_id = ch.get('peer_id', '')
-                                node_data['channels'][peer_id] = {
-                                    'short_id': peer_id[-8:],
-                                    'state': ch.get('state'),
-                                    'capacity': ch.get('total_msat', 0) // 1000 if ch.get('total_msat') else 0,
-                                    'our_amount': ch.get('to_us_msat', 0) // 1000 if ch.get('to_us_msat') else 0
-                                }
-                except Exception as e:
-                    log.warning(f'  Could not query container {node.name}: {e}')
-                dead_nodes.append(node_data)
-
-        config['takendown_nodes'] = config.get('takendown_nodes', []) + dead_nodes
         log.info(f'Takedown: removing {len(nodes_to_kill)} node(s): {[n.name for n in nodes_to_kill]}')
         self.shutdown_nodes(nodes_to_kill)
         return nodes_to_kill

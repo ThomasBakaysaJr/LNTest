@@ -518,10 +518,12 @@ def run_test(in_config, manager : NodeManager):
                         return
                 iter_inject = config['inject_nodes']
             elif testing != INJECTION_COUNT:
-                # No --inject and not an injection sweep: default to CC1 (deterministic).
-                config['inject_nodes'] = ['CC1']
-                iter_inject = ['CC1']
-                log.info('No --inject specified: defaulting to CC1 for deterministic sweep.')
+                # No --inject and not an injection sweep: default to the middle node
+                # (CC ceil(n/2)) -- a representative central injection point. Override with --inject.
+                mid = f'CC{(parameters[CC_COUNT] + 1) // 2}'
+                config['inject_nodes'] = [mid]
+                iter_inject = [mid]
+                log.info(f'No --inject specified: defaulting to middle node {mid}.')
             else:
                 # Injection sweep: pick `count` random nodes ONCE per iteration so warmup
                 # and every message share them (avoids per-call drift + BM fund exhaustion).
@@ -667,10 +669,12 @@ def run_takedown_test(in_config, manager : NodeManager):
     total_setup_time = time.time() - cc_start_time
     log.info(f'[takedown-reuse] Topology built in {total_setup_time:.0f}s; reused across all percentages.')
 
-    # Default injection point (re-resolved each percentage as survivors change)
+    # Default injection: the middle node (re-resolved each percentage as survivors
+    # change). The chain end orphans under targeted takedown; the middle doesn't. Override with --inject.
     if 'inject_nodes' not in config:
-        config['inject_nodes'] = ['CC1']
-        log.info('No --inject specified: defaulting to CC1.')
+        mid = f'CC{(n + 1) // 2}'
+        config['inject_nodes'] = [mid]
+        log.info(f'No --inject specified: defaulting to middle node {mid}.')
 
     # Fix the removal ORDER once on the intact topology.
     takedown_order = manager.rank_nodes_for_takedown(strategy)
@@ -834,8 +838,10 @@ def print_execution_plan(config):
         log.info(f'  Injection from : {", ".join(config["inject_nodes"])}')
     elif var_key == INJECTION_COUNT:
         log.info(f'  Injection from : random nodes (count swept {start}->{end})')
+    elif var_key == CC_COUNT:
+        log.info(f'  Injection from : middle node (scales with n, default)')
     else:
-        log.info(f'  Injection from : CC1 (default)')
+        log.info(f'  Injection from : CC{(params[CC_COUNT] + 1) // 2} (middle, default)')
 
     if config.get('topology_file'):
         log.info(f'  Topology file  : {config["topology_file"]}')
@@ -918,7 +924,6 @@ def record_test(config, test_data, setup_time, total_send_time):
     }
 
     data = {
-        'meta_data' : create_meta_data(config),
         'total_times' :  total_times,
         'test_data' : test_data
         }
@@ -927,48 +932,11 @@ def record_test(config, test_data, setup_time, total_send_time):
         json.dump(data, f, indent = 4, default = json_set_converter)
 
 
-def create_meta_data(config):
-    '''
-    Create the record for the recording test data.
-    Write the meta_data to the file and then return
-    that to the calling function.
-    '''
-    variable = config['var_key']
-    constants = [param for param in config['parameters'].keys() if param != variable]
-    is_takedown = config.get('takedown', False)
-
-    meta_data = {
-        'experiment' : 'LNBot Simulation Experiment',
-        'version' : cfg.LNTEST_VERSION,
-        'description' : 'This file contains the individual propagation times for messages being distributed across the simulated network.',
-        'testing': config['description'],
-        'variable' : variable,
-        'constants' : constants,
-        'takedown' : is_takedown,
-        'authors' : [
-            'Anonymous Author 1'
-        ]
-    }
-
-    # add the takendown nodes - if they exist
-    if is_takedown:
-        meta_data['takendown_nodes'] = config.get('takendown_nodes', [])
-        meta_data['takedown_strategy'] = config.get('takedown_strategy', 'random')
-
-    meta_data['mode'] = config.get('mode', 'dlnbot')
-    if config.get('topology_file'):
-        meta_data['topology_file'] = config['topology_file']
-
-    return meta_data
-
 def record_topology(config, manager : NodeManager):
     all_status = manager.retrieve_all_status()
     top_name = f'{get_record_name(config)}_{TOPO_JSON}'
 
-    meta_data = create_meta_data(config)
-
     data = {
-        'meta_data' : meta_data,
         'topology' : all_status
     }
 

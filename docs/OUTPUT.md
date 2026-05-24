@@ -9,15 +9,12 @@ Filenames follow the convention: `data/<variable>_<value>_<unique_id>_<type>`.
 For takedown tests, filenames include a strategy marker: `T` for random takedown, `Ttargeted` for targeted takedown. Mode suffixes indicate the topology mode: `D` for dlnbot, `F` for dlnbot-formation, `X` for custom (e.g., `TD` for random takedown on dlnbot topology).
 
 * **Propagation Data** (`*_time_data.json`)
-  * Contains the time it took for each message to propagate through the network.
-  * Includes metadata about the test configuration (number of C&C nodes, active nodes, etc.).
-  * Records total setup time and total message sending time.
-  * For takedown tests, also includes coverage data: coverage percentage, number of nodes that received the message, total surviving nodes, and whether the network partitioned.
+  * `test_data`: one record per message, each carrying its own parameters (C&C node count, active nodes, injection count, the swept value) plus the propagation time, coverage percentage, nodes received, surviving total, and whether the network partitioned.
+  * `total_times`: total setup time and total message-sending time.
 
 * **Topology Snapshots** (`*_topology_data.json`)
-  * Captures the state of the Lightning Network at the end of each test iteration.
-  * Lists every surviving node, its channels, channel capacity, and connection status.
-  * For takedown tests, the metadata includes which nodes were removed and their channel details at the time of removal.
+  * Captures the surviving Lightning Network at the end of each test iteration: every node, its channels, channel capacity, and connection status.
+  * For takedown tests this is the topology *after* removals; the removed nodes are listed in `orchestrator.log`.
 
 * **System Metrics** (`*_system_metrics.csv`)
   * Logs CPU and RAM usage of the host machine throughout the test.

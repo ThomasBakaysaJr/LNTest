@@ -10,11 +10,11 @@ sudo venv/bin/python3 lntest.py run <test> [options]
 
 | Test | Sweeps | Fixed | Default range |
 | --- | --- | --- | --- |
-| `cc_count` | botnet size *n* | m=4, inject=CC1 | 10 → 100, step 10 |
-| `active_nodes` | overlay width *m* | n=50, inject=CC1 | 2 → 6, step 1 |
+| `cc_count` | botnet size *n* | m=4, inject=middle | 10 → 100, step 10 |
+| `active_nodes` | overlay width *m* | n=50, inject=middle | 2 → 6, step 1 |
 | `injection` | # of botmaster injection points | n=50, m=4 | 1 → 6, step 1 |
-| `takedown_random` | % of nodes removed (random) | n=50, m=4, inject=CC1 | 10% → 50%, step 10% |
-| `takedown_targeted` | % of nodes removed (highest-degree first) | n=50, m=4, inject=CC1 | 10% → 50%, step 10% |
+| `takedown_random` | % of nodes removed (random) | n=50, m=4, inject=middle | 10% → 50%, step 10% |
+| `takedown_targeted` | % of nodes removed (highest-degree first) | n=50, m=4, inject=middle | 10% → 50%, step 10% |
 
 - **Scalability** (`cc_count`, `active_nodes`) — how propagation delay scales with botnet size and overlay width. Delay grows ~linearly with *n*; *m* has little effect, because parallel forwarding advances the wavefront one hop per step regardless of width. D-LNBot-specific.
 - **Injection** (`injection`) — whether more parallel entry points speed propagation. Each iteration picks *N* random C&C nodes **once**, and the botmaster injects from all of them for every message in that iteration.
@@ -51,7 +51,7 @@ See [TOPOLOGIES.md](TOPOLOGIES.md) for what each mode builds.
 
 ## Injection points (`--inject`)
 
-`--inject` sets where the botmaster injects, e.g. `--inject CC1` or `--inject CC5,CC12,CC30` (all in parallel). Default is **CC1** for every test except `injection`, which picks *N* random nodes per iteration — and where `--inject` is rejected, since that sweep must vary the *count*, not fix the nodes. In takedown tests, if a chosen injection node is removed, the orchestrator falls back to the lowest-numbered survivor.
+`--inject` sets where the botmaster injects, e.g. `--inject CC5,CC12,CC30` (all in parallel). Default is the **middle node** (`CC⌈n/2⌉`) for every test except `injection`, which picks *N* random nodes per iteration (and rejects `--inject`, since that sweep varies the *count*). The middle is the default because the chain *end* gets orphaned into a tiny fragment under targeted takedown. In takedown tests, if the injection node is removed, the orchestrator falls back to the lowest-numbered survivor.
 
 **m=1 note:** `active_nodes` defaults to start at m=2 but allows m=1 via `--sweep-start 1`. On the dlnbot chain m=1 is a connected line (single-path, so fragile to a dropped keysend); under formation it may fragment, which is recorded as a partition.
 
