@@ -24,20 +24,21 @@ sudo venv/bin/python3 lntest.py run <test> [options]
 
 | Flag | Description |
 | --- | --- |
-| `--nodes N` | Fixed botnet size (ignored when `cc_count` is the swept variable) |
-| `--m N` | Fixed overlay width (ignored when `active_nodes` is the swept variable) |
-| `--num-msg N` | Messages sent per sweep iteration |
+| `--at N` | Run a single value of the swept variable (shorthand for `--sweep-start N --sweep-end N`) |
 | `--sweep-start N` / `--sweep-end N` / `--sweep-step N` | Override the swept variable's range |
+| `--nodes N` | Fixed botnet size, for tests that don't sweep `cc_count` (use `--at` to pin the swept one) |
+| `--m N` | Fixed overlay width, for tests that don't sweep `active_nodes` (use `--at` to pin the swept one) |
+| `--num-msg N` | Messages sent per sweep iteration |
 | `--inject CC5,CC12` | Explicit injection point(s); the botmaster injects from all in parallel |
 | `--topology dlnbot` | D-LNBot chain (default) |
-| `--topology custom --topology-file PATH` | User-supplied JSON overlay |
-| `--dlnbot-formation` | Autonomous staggered formation (mutually exclusive with `--topology`) |
+| `--topology autonomous` | Autonomous D-LNBot peer-discovery formation (staggered launches) |
+| `--topology custom --topology-file PATH` | User-supplied JSON overlay (`--topology-file` alone implies `custom`) |
 
 ## Topology modes & compatibility
 
 See [TOPOLOGIES.md](TOPOLOGIES.md) for what each mode builds.
 
-| Test | dlnbot | dlnbot-formation | custom |
+| Test | dlnbot | autonomous | custom |
 | --- | --- | --- | --- |
 | `cc_count` | ✅ | ⚠️ | ❌ |
 | `active_nodes` | ✅ | ⚠️ | ❌ |
@@ -47,13 +48,13 @@ See [TOPOLOGIES.md](TOPOLOGIES.md) for what each mode builds.
 
 ✅ clean single-variable experiment · ⚠️ runs but prints a red warning — formation rebuilds a fresh, nondeterministic overlay each iteration, so results have higher variance (and for `active_nodes`, *m* changes both the formed topology and propagation) · ❌ blocked, because `cc_count`/`active_nodes` must vary *n*/*m*, which a fixed custom file can't provide.
 
-**Blocked combinations** (abort with a red error before the run): `--topology-file` without `--topology custom`; `--dlnbot-formation` together with `--topology`; `--topology custom` without `--topology-file`; `cc_count`/`active_nodes` with `--topology custom`; `active_nodes` starting at m < 1; takedown `--sweep-end` > 90; `--inject` with the `injection` sweep; `--sweep-start` > `--sweep-end`; `--sweep-step` ≤ 0.
+**Blocked combinations** (abort with a red error before the run): `--topology dlnbot`/`autonomous` together with `--topology-file`; `--at` together with `--sweep-start`/`--sweep-end`/`--sweep-step`; `--topology custom` without `--topology-file`; `cc_count`/`active_nodes` with `--topology custom`; `active_nodes` starting at m < 1; takedown end > 90; `--inject` with the `injection` sweep; `--sweep-start` > `--sweep-end`; `--sweep-step` ≤ 0.
 
 ## Injection points (`--inject`)
 
 `--inject` sets where the botmaster injects, e.g. `--inject CC5,CC12,CC30` (all in parallel). Default is the **middle node** (`CC⌈n/2⌉`) for every test except `injection`, which picks *N* random nodes per iteration (and rejects `--inject`, since that sweep varies the *count*). The middle is the default because the chain *end* gets orphaned into a tiny fragment under targeted takedown. In takedown tests, if the injection node is removed, the orchestrator falls back to the lowest-numbered survivor.
 
-**m=1 note:** `active_nodes` defaults to start at m=2 but allows m=1 via `--sweep-start 1`. On the dlnbot chain m=1 is a connected line (single-path, so fragile to a dropped keysend); under formation it may fragment, which is recorded as a partition.
+**m=1 note:** `active_nodes` defaults to start at m=2 but allows m=1 via `--sweep-start 1`. On the dlnbot chain m=1 is a connected line (single-path, so fragile to a dropped keysend); under `--topology autonomous` it may fragment, which is recorded as a partition.
 
 ## Coverage & partition detection
 
@@ -69,9 +70,12 @@ sudo venv/bin/python3 lntest.py run cc_count --num-msg 3
 # Custom sweep range
 sudo venv/bin/python3 lntest.py run cc_count --num-msg 3 --sweep-start 20 --sweep-end 40 --sweep-step 10
 
-# Injection sweep on a custom overlay
-sudo venv/bin/python3 lntest.py run injection --num-msg 3 --topology custom --topology-file topologies/ring_20.json
+# A single network size (no sweep)
+sudo venv/bin/python3 lntest.py run cc_count --num-msg 3 --at 50
+
+# Injection sweep on a custom overlay (--topology-file implies custom)
+sudo venv/bin/python3 lntest.py run injection --num-msg 3 --topology-file topologies/ring_20.json
 
 # Targeted takedown on an autonomously-formed (non-uniform) overlay
-sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --dlnbot-formation
+sudo venv/bin/python3 lntest.py run takedown_targeted --num-msg 3 --topology autonomous
 ```

@@ -14,7 +14,7 @@ data/<variable>_<value>_<id>_<type>
 - `<value>` — its value for this iteration.
 - `<id>` — a fingerprint of the full configuration: every parameter value concatenated in the order `cc_count`, `active_nodes`, `injection_count` (plus `takedown_pct` for takedown tests), followed by markers:
   - takedown strategy: `T` (random) or `Ttargeted` (targeted) — omitted for non-takedown tests;
-  - topology mode: `D` (dlnbot), `F` (dlnbot-formation), or `X` (custom).
+  - topology mode: `D` (dlnbot), `F` (autonomous), or `X` (custom).
 - `<type>` — `time_data.json`, `topology_data.json`, or `system_metrics.csv`.
 
 Examples:
@@ -25,7 +25,7 @@ Examples:
 | active_nodes, dlnbot, m=4 | `active_nodes_4_5041D_time_data.json` |
 | injection, custom, k=2 | `injection_count_2_2042X_time_data.json` |
 | takedown_random, dlnbot, 10% | `takedown_pct_10_504110TD_time_data.json` |
-| takedown_targeted, formation, 20% | `takedown_pct_20_504120TtargetedF_time_data.json` |
+| takedown_targeted, autonomous, 20% | `takedown_pct_20_504120TtargetedF_time_data.json` |
 
 ## Files
 
@@ -41,7 +41,7 @@ Examples:
   - `nodes_total` — number of surviving nodes polled via shared memory;
   - `partitioned` — `true` if the command did not reach every surviving node before the timeout.
 
-In `dlnbot` and `custom` modes a timed-out message is treated as a failed iteration and retried, so no `partitioned: true` record is kept. In `dlnbot-formation` and the takedown tests a timeout is a valid outcome and is recorded with `partitioned: true`.
+In `dlnbot` and `custom` modes a timed-out message is treated as a failed iteration and retried, so no `partitioned: true` record is kept. In `autonomous` and the takedown tests a timeout is a valid outcome and is recorded with `partitioned: true`.
 
 ### `*_topology_data.json`
 

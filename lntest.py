@@ -38,11 +38,6 @@ RED = '\033[91m'
 BOLD = '\033[1m'
 RESET = '\033[0m'
 
-def warn_red(msg):
-    """Print a prominent red warning to both logger and terminal."""
-    log.warning(msg)
-    print(f'\n{RED}{BOLD}WARNING: {msg}{RESET}\n')
-
 def error_red(msg):
     """Print a prominent red error to the terminal and log file (not duplicated on console)."""
     # Log at DEBUG so it reaches the file handler but not the console (console level = INFO)
@@ -169,18 +164,21 @@ def add_common_arguments(parser):
     """Add common simulation arguments to the given parser."""
     group = parser.add_argument_group('Simulation Parameters (fixed values for non-sweep variables)')
     group.add_argument('--nodes', dest='cc_count', type=int,
-        help='Fixed network size (number of C&C nodes). Ignored when cc_count is the sweep variable; use --sweep-start instead.')
+        help='Fixed network size (number of C&C nodes). Ignored when cc_count is the swept variable; use --at instead.')
     group.add_argument('--m', dest='active_nodes', type=int,
-        help='Fixed overlay width (active C&C servers per node). Ignored when active_nodes is the sweep variable; use --sweep-start instead.')
+        help='Fixed overlay width (active C&C servers per node). Ignored when active_nodes is the swept variable; use --at instead.')
     group.add_argument('--inject', dest='inject', type=str, default=None,
         help='Botmaster injection points (e.g., "CC5,CC12,CC30"). '
-             'Default: CC1 (deterministic). Injection sweep uses random nodes when omitted.')
+             'Default: the middle node (CC ceil(n/2)). The injection sweep uses random nodes when omitted.')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
 
     topology = parser.add_argument_group('Topology Settings')
-    topology.add_argument('--topology', dest='topology', choices=['dlnbot', 'custom'], default=None, help='Topology mode: dlnbot (D-LNBot sequential chain, built by orchestrator) or custom (user-supplied JSON topology file, built by orchestrator). Default is dlnbot unless --dlnbot-formation is used.')
-    topology.add_argument('--topology-file', dest='topology_file', default=None, help='Path to custom topology JSON file (required when --topology custom).')
-    topology.add_argument('--dlnbot-formation', dest='dlnbot_formation', action='store_true', default=False, help='Enable autonomous D-LNBot formation with staggered container launches. cc_manager discovers peers via innocent node. Mutually exclusive with --topology.')
+    topology.add_argument('--topology', dest='topology', choices=['dlnbot', 'autonomous', 'custom'], default=None,
+        help='Overlay mode: dlnbot (D-LNBot sequential chain, orchestrator-built; default), '
+             'autonomous (D-LNBot peer discovery via the innocent node, staggered launches), '
+             'or custom (user-supplied JSON graph). --topology-file implies custom.')
+    topology.add_argument('--topology-file', dest='topology_file', default=None,
+        help='Custom topology JSON file. Implies --topology custom.')
 
 def main():
     '''
@@ -197,9 +195,12 @@ def main():
     # Subcommand: run
     parser_run = subparsers.add_parser('run', help='Run a specific test configuration.')
     parser_run.add_argument('test_id', choices=TEST_CONFIGS.keys(), help='Test to run (e.g., cc_count, active_nodes, takedown_random).')
-    parser_run.add_argument('--sweep-start', dest='sweep_start', type=int, help='Override the starting value of the sweep variable.')
-    parser_run.add_argument('--sweep-end', dest='sweep_end', type=int, help='Override the ending value of the sweep variable.')
-    parser_run.add_argument('--sweep-step', dest='sweep_step', type=int, help='Override the step size for the sweep variable.')
+    parser_run.add_argument('--at', dest='at', type=int, default=None,
+        help='Run a single value of the swept variable (shorthand for --sweep-start N --sweep-end N). '
+             'Mutually exclusive with --sweep-start/--sweep-end/--sweep-step.')
+    parser_run.add_argument('--sweep-start', dest='sweep_start', type=int, help='Override the starting value of the swept variable.')
+    parser_run.add_argument('--sweep-end', dest='sweep_end', type=int, help='Override the ending value of the swept variable.')
+    parser_run.add_argument('--sweep-step', dest='sweep_step', type=int, help='Override the step size for the swept variable.')
     add_common_arguments(parser_run)
 
     args = parser.parse_args()
@@ -242,8 +243,8 @@ def main():
         for param_key, arg_value, flag_name in param_flags:
             if arg_value is not None:
                 if testing == param_key:
-                    log.warning(f'{flag_name} is ignored because {param_key} is the sweep variable. '
-                                f'Use --sweep-start to set the starting value.')
+                    log.warning(f'{flag_name} is ignored because {param_key} is the swept variable. '
+                                f'Use --at for a single value, or --sweep-start/--sweep-end for a range.')
                 else:
                     log.info(f'{param_key} is set to {arg_value}')
                     parameters[param_key] = arg_value
@@ -266,19 +267,28 @@ def main():
         if args.num_msg is not None:
             log.info(f'num_msg is set to {args.num_msg}')
             config['max_messages'] = args.num_msg
-        if args.sweep_start is not None:
-            log.info(f'sweep_start is set to {args.sweep_start}')
-            parameters[config['var_key']] = args.sweep_start
-        if args.sweep_end is not None:
-            log.info(f'sweep_end is set to {args.sweep_end}')
-            temp_range = list(config['range'])
-            temp_range[0] = args.sweep_end
-            config['range'] = temp_range
-        if args.sweep_step is not None:
-            log.info(f'sweep_step is set to {args.sweep_step}')
-            temp_range = list(config['range'])
-            temp_range[1] = args.sweep_step
-            config['range'] = temp_range
+        if args.at is not None:
+            # Single point: pin the swept variable to one value (end == start).
+            if any(v is not None for v in (args.sweep_start, args.sweep_end, args.sweep_step)):
+                error_red('--at cannot be combined with --sweep-start/--sweep-end/--sweep-step.')
+                return
+            log.info(f'Single value: {config["var_key"]} = {args.at}')
+            parameters[config['var_key']] = args.at
+            config['range'] = (args.at, config['range'][1])
+        else:
+            if args.sweep_start is not None:
+                log.info(f'sweep_start is set to {args.sweep_start}')
+                parameters[config['var_key']] = args.sweep_start
+            if args.sweep_end is not None:
+                log.info(f'sweep_end is set to {args.sweep_end}')
+                temp_range = list(config['range'])
+                temp_range[0] = args.sweep_end
+                config['range'] = temp_range
+            if args.sweep_step is not None:
+                log.info(f'sweep_step is set to {args.sweep_step}')
+                temp_range = list(config['range'])
+                temp_range[1] = args.sweep_step
+                config['range'] = temp_range
         # Validate sweep range
         sweep_start = parameters[config['var_key']]
         sweep_end, sweep_step = config['range']  # (end_value, step_size)
@@ -297,58 +307,56 @@ def main():
 
         # E3: Cap takedown percentage at 90%
         if testing == TAKEDOWN_PCT:
-            effective_end = args.sweep_end if args.sweep_end is not None else config['range'][0]
+            effective_end = config['range'][0]
             if effective_end > 90:
                 error_red(f'Takedown percentage cannot exceed 90% (got {effective_end}%). '
                           f'At least 10% of nodes must survive.')
                 return
 
-        # Determine mode: --dlnbot-formation or --topology {dlnbot, custom}
-        if args.dlnbot_formation and args.topology is not None:
-            error_red('--dlnbot-formation and --topology are mutually exclusive.')
+        # Determine overlay mode from --topology (default dlnbot). --topology-file
+        # implies custom. The CLI value 'autonomous' maps to the internal
+        # 'dlnbot-formation' mode string used throughout the orchestrator.
+        if args.topology is not None and args.topology != 'custom' and args.topology_file is not None:
+            error_red(f'--topology {args.topology} conflicts with --topology-file (which implies custom).')
             return
-        if args.dlnbot_formation:
+        if args.topology == 'custom' or (args.topology is None and args.topology_file is not None):
+            config['mode'] = 'custom'
+        elif args.topology == 'autonomous':
             config['mode'] = 'dlnbot-formation'
-        elif args.topology is not None:
-            config['mode'] = args.topology
         else:
             config['mode'] = 'dlnbot'
         log.info(f'Mode is set to {config["mode"]}')
 
-        # Formation mode warnings
+        # Warnings for autonomous-mode combinations
         config['warnings'] = []
         if config['mode'] == 'dlnbot-formation':
             if testing == ACTIVE_NODES:
                 config['warnings'].append(
-                    'active_nodes sweep with dlnbot-formation is NOT a single-variable experiment. '
-                    'm changes BOTH autonomous formation topology AND propagation behavior. '
+                    'active_nodes sweep with --topology autonomous is NOT a single-variable experiment. '
+                    'm changes BOTH the formed topology AND propagation behavior. '
                     'Results show how different m values affect the GENERATED topology.')
             if args.active_nodes is not None and testing != ACTIVE_NODES:
                 config['warnings'].append(
-                    f'--m {args.active_nodes} in formation mode changes the autonomous '
+                    f'--m {args.active_nodes} with --topology autonomous changes the formed '
                     f'topology structure (MAX_ACTIVE_NODES, MAX_PEERS in cc_manager).')
             if testing == CC_COUNT:
                 config['warnings'].append(
-                    'cc_count sweep with dlnbot-formation: formation topology is nondeterministic. '
+                    'cc_count sweep with --topology autonomous: the formed topology is nondeterministic. '
                     'Results will have higher variance than dlnbot mode. '
                     'Run multiple repetitions for statistical significance.')
             if testing == INJECTION_COUNT:
                 config['warnings'].append(
-                    'injection sweep with dlnbot-formation: topology is rebuilt each iteration '
+                    'injection sweep with --topology autonomous: topology is rebuilt each iteration '
                     'with nondeterministic formation. Results are confounded by topology variance. '
-                    'Consider using --topology dlnbot or custom for cleaner results.')
+                    'Consider --topology dlnbot or custom for cleaner results.')
 
-        # E1: --topology-file without --topology custom is a hard error
-        if args.topology_file is not None:
-            if config['mode'] != 'custom':
-                error_red('--topology-file requires --topology custom. '
-                          'Did you mean: --topology custom --topology-file <path>?')
+        # Custom mode requires a topology file; attach it. (--topology-file alone
+        # already set mode=custom above; a conflicting --topology was rejected there.)
+        if config['mode'] == 'custom':
+            if args.topology_file is None:
+                error_red('--topology custom requires --topology-file PATH.')
                 return
-            else:
-                config['topology_file'] = args.topology_file
-        if config['mode'] == 'custom' and 'topology_file' not in config:
-            error_red('--topology custom requires --topology-file.')
-            return
+            config['topology_file'] = args.topology_file
 
         # Custom topology: read node count from file and block incompatible tests
         if config['mode'] == 'custom':
@@ -824,7 +832,7 @@ def print_execution_plan(config):
     log.info(f'  Sweep range    : {start} -> {end} (step {step})')
     log.info(f'  Iterations     : {len(iterations)} values: {iterations}')
     log.info(f'  Messages/iter  : {config["max_messages"]}')
-    log.info(f'  Topology mode  : {mode}')
+    log.info(f"  Topology mode  : {'autonomous' if mode == 'dlnbot-formation' else mode}")
 
     # Show fixed parameters (everything except the sweep variable)
     fixed = {k: v for k, v in params.items() if k != var_key}
