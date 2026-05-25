@@ -43,7 +43,7 @@ sudo systemctl status docker
 
 ## 2. Install Bitcoin Core
 
-Pick a workspace directory — `LNTest/` (cloned in step 3) and `bitcoin/` (extracted below) just need to live as siblings under it. Example using `~/lntest`:
+Pick a workspace directory. `LNTest/` (cloned in step 3) and `bitcoin/` (extracted below) just need to live as siblings under it. Example using `~/lntest`:
 
 ```bash
 mkdir -p ~/lntest
@@ -58,7 +58,7 @@ mv bitcoin-*/ bitcoin
 rm bitcoin-*.tar.gz
 ```
 
-Do not start Bitcoin Core yet — `setup.sh` writes the regtest config in the next step and refuses to run if `bitcoind` is already up.
+Do not start Bitcoin Core yet; `setup.sh` writes the regtest config in the next step and refuses to run if `bitcoind` is already up.
 
 ## 3. Clone and configure LNTest
 
@@ -74,11 +74,9 @@ The setup script will:
 * Create the Python virtual environment and install packages
 * Create config files in `~/.lightning` and `~/.bitcoin`
 * Prompt for RPC username and password
-* Build the LNTest Docker image, pinning the Core Lightning version at setup time
+* Build the LNTest Docker image against the latest Core Lightning, pinned at build time
 
-You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
-
-The Core Lightning version is fixed when the image is built, so it stays constant across test runs. To rebuild against the latest release, re-run `./setup.sh` or `sudo venv/bin/python3 -m utils.docker_helpers`.
+The image is built against whatever Core Lightning version is latest at build time, which may be a release candidate (this is intended), and that version is pinned so it stays constant across runs. Re-run `./setup.sh` to rebuild against a newer release. You can verify the RPC credentials by checking `config.env` and the config files in `~/.bitcoin` and `~/.lightning`.
 
 Note: `lntest.py` runs with `sudo` (required for Docker and shared memory management), so `config.env` uses absolute paths.
 
@@ -86,7 +84,7 @@ Once setup completes, run the sanity check from the [README](../README.md#quick-
 
 ## Resetting the testbed
 
-Between iterations the orchestrator automatically resets containers, shared memory, and per-run files (`scripts/cleanup.sh iter`). To reset everything to a clean-checkout + `setup.sh` state — stopping bitcoind, wiping the regtest chain, and removing all runtime artifacts — run:
+Between iterations the orchestrator automatically resets containers, shared memory, and per-run files (`scripts/cleanup.sh iter`). To reset everything to a clean-checkout + `setup.sh` state (stopping bitcoind, wiping the regtest chain, and removing all runtime artifacts), run:
 
 ```bash
 sudo ./scripts/cleanup.sh fresh

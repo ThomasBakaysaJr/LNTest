@@ -18,7 +18,7 @@ Reproduces the exact topology described in the D-LNBot paper. cc_manager is disa
 sudo venv/bin/python3 lntest.py run takedown_random --num-msg 3 --topology autonomous
 ```
 
-Simulates a realistic D-LNBot deployment where C&C servers join the network autonomously. Containers are launched with staggered delays drawn from a log-normal distribution (median ~30s on regtest), modeling the variable LN setup time in D-LNBot's malware pipeline: downloading an LN light client, syncing with the blockchain, fetching funding from a pre-funded wallet, and opening+confirming channels. Each node runs cc_manager, which discovers peers via the innocent node and opens channels autonomously. The staggering ensures gossip has time to propagate between node arrivals. This mode produces a **clustered chain topology** — groups of fully-connected cliques linked by bridge nodes — which differs from both the idealized D-LNBot chain and a hub-and-spoke topology. Select this mode with `--topology autonomous`.
+Simulates a realistic D-LNBot deployment where C&C servers join the network autonomously. Containers are launched with staggered delays drawn from a log-normal distribution (median ~30s on regtest), modeling the variable LN setup time in D-LNBot's malware pipeline: downloading an LN light client, syncing with the blockchain, fetching funding from a pre-funded wallet, and opening+confirming channels. Each node runs cc_manager, which discovers peers via the innocent node and opens channels autonomously. The staggering ensures gossip has time to propagate between node arrivals. This mode produces a **clustered chain topology** (groups of fully-connected cliques linked by bridge nodes) that differs from both the idealized D-LNBot chain and a hub-and-spoke topology. Select this mode with `--topology autonomous`.
 
 ## Custom
 
@@ -58,5 +58,5 @@ The three modes produce meaningfully different topologies and resilience profile
 | Mode | Topology Shape | Formation | Vulnerability |
 | --- | --- | --- | --- |
 | `--topology dlnbot` | Uniform chain | Orchestrator-built | Degrades gradually, no single point of failure |
-| `--topology autonomous` | Clustered chain with bridges | Autonomous (staggered) | Bridge nodes are critical — removing them partitions the network |
+| `--topology autonomous` | Clustered chain with bridges | Autonomous (staggered) | Bridge nodes are critical; removing them partitions the network |
 | `--topology custom` | User-defined | Orchestrator-built | Depends on the supplied graph |

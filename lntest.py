@@ -211,9 +211,6 @@ def main():
         error_red(f'Docker image "{cfg.LNTEST_VERSION}" not found. Run ./setup.sh to build it.')
         sys.exit(1)
     manager = NodeManager()
-    # start recording time for total testing
-    start_time = time.time()
-    all_configs = []
 
     if args.command == 'small':
         # Quick sanity check: 4 nodes, 1 message, 1 iteration
@@ -230,7 +227,6 @@ def main():
                 INJECTION_COUNT: 1,
             }
         }
-        all_configs.append(config)
         run_test(config, manager)
 
     elif args.command == 'run':
@@ -401,17 +397,12 @@ def main():
         else:
             log.info('Continuing')
 
-        all_configs.append(config)
         # Takedown sweeps reuse one built topology and remove nodes cumulatively
         # (nested); other tests rebuild per iteration.
         if config.get('takedown', False):
             run_takedown_test(config, manager)
         else:
             run_test(config, manager)
-
-    # record total time
-    total_time = time.time() - start_time
-    record_total_time(total_time, all_configs)
 
     # we only kill the nodes here since we want to keep
     # the logs for the last run.
@@ -907,27 +898,6 @@ def fund_nodes():
     rc = run_logged([cfg.FUND_WALLETS_BASH], prefix='[fund] ')
     if rc != 0:
         log.error(f'fund_wallets.sh exited with code {rc}')
-
-
-def record_total_time(total_time, config, output_suffix="total_times_log.json"):
-    '''
-    Create a running record of the total time taken for test runs
-    along with their configuration(s) to a JSON file.
-    '''
-    os.makedirs(cfg.TEST_DATA_DIR, exist_ok=True)
-    filename = os.path.join(cfg.TEST_DATA_DIR,
-                            datetime.datetime.now().strftime(f"%Y-%m-%d_{output_suffix}"))
-
-    log_entry = {
-        'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "total_time": total_time,
-        "config": config
-    }
-
-    with open(filename, 'a') as f:
-        f.write(json.dumps(log_entry, default=json_set_converter) + "\n")
-
-    log.info(f'Recorded total time: {total_time:.0f} seconds to {filename}')
 
 
 def record_test(config, test_data, setup_time, total_send_time):
