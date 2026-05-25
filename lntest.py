@@ -168,8 +168,10 @@ def add_common_arguments(parser):
     group.add_argument('--m', dest='active_nodes', type=int,
         help='Fixed overlay width (active C&C servers per node). Ignored when active_nodes is the swept variable; use --at instead.')
     group.add_argument('--inject', dest='inject', type=str, default=None,
-        help='Botmaster injection points (e.g., "CC5,CC12,CC30"). '
-             'Default: the middle node (CC ceil(n/2)). The injection sweep uses random nodes when omitted.')
+        help='Botmaster injection point(s), e.g. "CC5,CC12,CC30" (all in parallel). '
+             'Defaults: takedown tests inject from the most-connected surviving node '
+             '(re-resolved each step); other tests use the middle node CC ceil(n/2); '
+             'the injection sweep picks random nodes.')
     group.add_argument('--num-msg', dest='num_msg', type=int, help='Number of messages to send per test iteration.')
 
     topology = parser.add_argument_group('Topology Settings')
@@ -529,12 +531,17 @@ def run_test(in_config, manager : NodeManager):
                         return
                 iter_inject = config['inject_nodes']
             elif testing != INJECTION_COUNT:
-                # No --inject and not an injection sweep: default to the middle node
-                # (CC ceil(n/2)) -- a representative central injection point. Override with --inject.
+                # Middle node, re-resolved each iteration. Must NOT persist into
+                # config['inject_nodes'] or a cc_count sweep pins it to the first n.
                 mid = f'CC{(parameters[CC_COUNT] + 1) // 2}'
-                config['inject_nodes'] = [mid]
                 iter_inject = [mid]
-                log.info(f'No --inject specified: defaulting to middle node {mid}.')
+                if config.get('mode', 'dlnbot') != 'dlnbot':
+                    log.warning(f'No --inject specified: defaulting to {mid}. NOTE: the '
+                                f'"{config.get("mode")}" topology has no logical middle -- {mid} is '
+                                f'just the index CC ceil(n/2), not a central node. Pass --inject to '
+                                f'pick a meaningful injection point.')
+                else:
+                    log.info(f'No --inject specified: defaulting to middle node {mid}.')
             else:
                 # Injection sweep: pick `count` random nodes ONCE per iteration so warmup
                 # and every message share them (avoids per-call drift + BM fund exhaustion).
@@ -680,14 +687,11 @@ def run_takedown_test(in_config, manager : NodeManager):
     total_setup_time = time.time() - cc_start_time
     log.info(f'[takedown-reuse] Topology built in {total_setup_time:.0f}s; reused across all percentages.')
 
-    # Default injection: the middle node (re-resolved each percentage as survivors
-    # change). The chain end orphans under targeted takedown; the middle doesn't. Override with --inject.
-    if 'inject_nodes' not in config:
-        mid = f'CC{(n + 1) // 2}'
-        config['inject_nodes'] = [mid]
-        log.info(f'No --inject specified: defaulting to middle node {mid}.')
+    # Takedown injects from the most-connected survivor (resolved per step below);
+    # explicit --inject overrides. Capture it before the loop overwrites inject_nodes.
+    user_inject = list(config['inject_nodes']) if 'inject_nodes' in config else None
 
-    # Fix the removal ORDER once on the intact topology.
+    # Removal order fixed once on the intact topology.
     takedown_order = manager.rank_nodes_for_takedown(strategy)
     removed = []
 
@@ -707,12 +711,19 @@ def run_takedown_test(in_config, manager : NodeManager):
         log.info(f'[takedown-reuse] {strategy} takedown at {test_value}%: '
                  f'{len(removed)}/{n} removed (+{len(delta)} this step).')
 
-        # Re-resolve injection among survivors
+        # Re-resolve injection among current survivors.
         surviving = {node.name for node in manager.get_cc_nodes()}
-        inj = [x for x in config['inject_nodes'] if x in surviving]
-        if not inj:
-            inj = [sorted(surviving, key=lambda x: int(re.search(r'\d+', x).group()))[0]]
-            log.warning(f'Injection node(s) removed by takedown; falling back to {inj}.')
+        if user_inject:
+            inj = [x for x in user_inject if x in surviving]
+            if not inj:
+                best = manager.most_connected_survivor()
+                inj = [best] if best else sorted(surviving, key=lambda x: int(re.search(r'\d+', x).group()))[:1]
+                log.warning(f'Injection node(s) {user_inject} removed by takedown; '
+                            f'falling back to most-connected survivor {inj}.')
+        else:
+            best = manager.most_connected_survivor()
+            inj = [best] if best else sorted(surviving, key=lambda x: int(re.search(r'\d+', x).group()))[:1]
+            log.info(f'Injecting from most-connected surviving node: {inj}.')
         config['inject_nodes'] = inj
 
         # Pre-open the botmaster channel to the injection target(s).
@@ -847,10 +858,12 @@ def print_execution_plan(config):
     # Show injection point info
     if 'inject_nodes' in config:
         log.info(f'  Injection from : {", ".join(config["inject_nodes"])}')
+    elif config.get('takedown', False):
+        log.info('  Injection from : most-connected surviving node (auto, re-resolved per step)')
     elif var_key == INJECTION_COUNT:
         log.info(f'  Injection from : random nodes (count swept {start}->{end})')
     elif var_key == CC_COUNT:
-        log.info('  Injection from : middle node (scales with n, default)')
+        log.info('  Injection from : middle node CC ceil(n/2) (re-resolved per n)')
     else:
         log.info(f'  Injection from : CC{(params[CC_COUNT] + 1) // 2} (middle, default)')
 

@@ -74,6 +74,8 @@ class _Config:
         # --- Channel / node behavior (passed to containers via node_config.json) ---
         self.DISCOVERY_RULE = int(os.getenv('DISCOVERY_RULE', 19))
         self.BOTMASTER_RULE = int(os.getenv('BOTMASTER_RULE', 123123))
+        # Fixed seed for reproducible random-takedown node ordering (internal).
+        self.TAKEDOWN_SEED = int(os.getenv('TAKEDOWN_SEED', 42))
         self.NODE_CHANNEL_SLEEP = int(os.getenv('NODE_CHANNEL_SLEEP', 10))
         self.NODE_UPDATE_INTERVAL = float(os.getenv('NODE_UPDATE_INTERVAL', 1.5))
         self.NODE_BALANCE_COUNTER = int(os.getenv('NODE_BALANCE_COUNTER', 3))

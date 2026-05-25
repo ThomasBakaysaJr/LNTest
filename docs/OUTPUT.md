@@ -41,7 +41,7 @@ Examples:
   - `nodes_total` — number of surviving nodes polled via shared memory;
   - `partitioned` — `true` if the command did not reach every surviving node before the timeout.
 
-In `dlnbot` and `custom` modes a timed-out message is treated as a failed iteration and retried, so no `partitioned: true` record is kept. In `autonomous` and the takedown tests a timeout is a valid outcome and is recorded with `partitioned: true`.
+In `dlnbot` and `custom` modes a timed-out message is treated as a failed iteration and retried, so no `partitioned: true` record is kept. In `autonomous` and the takedown tests a timeout is a valid outcome and is recorded with `partitioned: true`. For takedown tests a partition ends that percentage's iteration immediately, so the file holds a single `partitioned: true` record for that point rather than the full message count (the reachable set is fixed by the surviving topology, so resending cannot change coverage).
 
 ### `*_topology_data.json`
 

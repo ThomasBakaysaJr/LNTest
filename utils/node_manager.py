@@ -249,9 +249,65 @@ class NodeManager:
                      f'{[(n.name, d) for n, d in node_degrees[:10]]} ...')
         else:
             ranked = cc_nodes[:]
-            random.shuffle(ranked)
-            log.info(f'Nested random takedown order: {[n.name for n in ranked[:10]]} ...')
+            # Fixed seed; isolated RNG so autonomous formation stays nondeterministic.
+            random.Random(cfg.TAKEDOWN_SEED).shuffle(ranked)
+            log.info(f'Nested random takedown order (seed={cfg.TAKEDOWN_SEED}): '
+                     f'{[n.name for n in ranked[:10]]} ...')
         return ranked
+
+    def most_connected_survivor(self):
+        '''
+        Best injection point among survivors: highest-degree node in the largest
+        surviving component (maximizes reach). Deterministic tie-breaks; None if empty.
+        '''
+        statuses = self.retrieve_all_status()
+        survivor_names = self.get_cc_names()
+        if not statuses:
+            return survivor_names[0] if survivor_names else None
+
+        def cc_index(name):
+            m = re.search(r'\d+', name)
+            return int(m.group()) if m else 0
+
+        # short_id -> host_name (survivors only; removed peers drop out).
+        sid2host = {s.get('short_id'): s.get('host_name')
+                    for s in statuses if s.get('short_id') and s.get('host_name')}
+        adj = {s['host_name']: set() for s in statuses if s.get('host_name')}
+        for s in statuses:
+            host = s.get('host_name')
+            if host is None:
+                continue
+            for ch in (s.get('channels') or {}).values():
+                if ch.get('state', 'CHANNELD_NORMAL') != 'CHANNELD_NORMAL':
+                    continue
+                peer = sid2host.get(ch.get('short_id'))
+                if peer and peer != host:
+                    adj[host].add(peer)
+                    adj[peer].add(host)
+
+        if not adj:
+            return survivor_names[0] if survivor_names else None
+
+        seen, components = set(), []
+        for start in adj:
+            if start in seen:
+                continue
+            stack, comp = [start], []
+            while stack:
+                u = stack.pop()
+                if u in seen:
+                    continue
+                seen.add(u)
+                comp.append(u)
+                stack.extend(adj[u] - seen)
+            components.append(comp)
+
+        # Largest component, then highest-degree node in it (ties: lowest index).
+        largest = max(components, key=lambda c: (len(c), -min(cc_index(x) for x in c)))
+        best = max(largest, key=lambda x: (len(adj[x]), -cc_index(x)))
+        log.info(f'Most-connected survivor: {best} (degree {len(adj[best])}, '
+                 f'largest component {len(largest)}/{len(survivor_names)} survivors).')
+        return best
 
     def execute_takedown(self, config, nodes_to_kill):
         '''
