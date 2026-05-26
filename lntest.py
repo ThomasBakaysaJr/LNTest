@@ -203,6 +203,9 @@ def main():
     parser_run.add_argument('--sweep-start', dest='sweep_start', type=int, help='Override the starting value of the swept variable.')
     parser_run.add_argument('--sweep-end', dest='sweep_end', type=int, help='Override the ending value of the swept variable.')
     parser_run.add_argument('--sweep-step', dest='sweep_step', type=int, help='Override the step size for the swept variable.')
+    parser_run.add_argument('--sweep-values', dest='sweep_values', type=str, default=None,
+        help='Explicit comma-separated list of swept values (e.g. "10,20,50,100,200,500"), '
+             'for non-uniform spacing in one run. Overrides --at/--sweep-start/--sweep-end/--sweep-step.')
     add_common_arguments(parser_run)
 
     args = parser.parse_args()
@@ -265,7 +268,23 @@ def main():
         if args.num_msg is not None:
             log.info(f'num_msg is set to {args.num_msg}')
             config['max_messages'] = args.num_msg
-        if args.at is not None:
+        if args.sweep_values is not None:
+            if args.at is not None or any(v is not None for v in (args.sweep_start, args.sweep_end, args.sweep_step)):
+                error_red('--sweep-values cannot be combined with --at/--sweep-start/--sweep-end/--sweep-step.')
+                return
+            try:
+                vals = sorted({int(x) for x in args.sweep_values.split(',') if x.strip() != ''})
+            except ValueError:
+                error_red('--sweep-values must be a comma-separated list of integers, e.g. "10,20,50,100".')
+                return
+            if not vals:
+                error_red('--sweep-values is empty.')
+                return
+            config['sweep_values'] = vals
+            parameters[config['var_key']] = min(vals)   # start; per-test bounds checked via range below
+            config['range'] = (max(vals), 1)             # so the range validation below uses min..max
+            log.info(f'Sweep values: {vals}')
+        elif args.at is not None:
             # Single point: pin the swept variable to one value (end == start).
             if any(v is not None for v in (args.sweep_start, args.sweep_end, args.sweep_step)):
                 error_red('--at cannot be combined with --sweep-start/--sweep-end/--sweep-step.')
@@ -427,7 +446,7 @@ def run_test(in_config, manager : NodeManager):
     start = parameters[testing]
     end, step = config['range']
 
-    for test_value in range(start, end + 1, step):
+    for test_value in sweep_iterations(config):
         init_bitcoin_server()
         success = False
         # change the value we're testing for.
@@ -486,9 +505,6 @@ def run_test(in_config, manager : NodeManager):
                     success = False
                     attempt += 1
                     continue
-                # Phase 3 polled until channels were CHANNELD_NORMAL; brief SHM settle.
-                log.info('Brief settle for SHM status writes...')
-                time.sleep(3)
             elif mode == 'custom':
                 edges = NodeManager.load_and_validate_topology(config['topology_file'], parameters[CC_COUNT])
                 if edges is None:
@@ -503,9 +519,6 @@ def run_test(in_config, manager : NodeManager):
                     success = False
                     attempt += 1
                     continue
-                # Phase 3 polled until channels were CHANNELD_NORMAL; brief SHM settle.
-                log.info('Brief settle for SHM status writes...')
-                time.sleep(3)
             # dlnbot-formation: cc_manager handles formation, nothing to build here
 
             # Resolve injection points for this iteration (iter_inject).
@@ -672,9 +685,6 @@ def run_takedown_test(in_config, manager : NodeManager):
     if not built:
         log.error('[takedown-reuse] could not build topology after retries; aborting.')
         return
-    if mode in ('dlnbot', 'custom'):
-        # Phase 3 polled until channels were CHANNELD_NORMAL; brief SHM settle.
-        time.sleep(3)
     total_setup_time = time.time() - cc_start_time
     log.info(f'[takedown-reuse] Topology built in {total_setup_time:.0f}s; reused across all percentages.')
 
@@ -812,13 +822,22 @@ def get_coverage(command, manager : NodeManager):
     coverage = received / total if total > 0 else 0.0
     return coverage, received, total
 
+def sweep_iterations(config):
+    '''Values the sweep iterates: an explicit --sweep-values list, else the range.'''
+    if config.get('sweep_values'):
+        return list(config['sweep_values'])
+    start = config['parameters'][config['var_key']]
+    end, step = config['range']
+    return list(range(start, end + 1, step))
+
+
 def print_execution_plan(config):
     '''Print a human-readable execution plan before confirmation.'''
     params = config['parameters']
     var_key = config['var_key']
     start = params[var_key]
     end, step = config['range']
-    iterations = list(range(start, end + 1, step))
+    iterations = sweep_iterations(config)
     mode = config.get('mode', 'dlnbot')
 
     log.info(f'\n{"="*60}')
@@ -831,7 +850,10 @@ def print_execution_plan(config):
         'takedown_pct': 'takedown percentage',
     }
     log.info(f'  Sweep variable : {display_names.get(var_key, var_key)}')
-    log.info(f'  Sweep range    : {start} -> {end} (step {step})')
+    if config.get('sweep_values'):
+        log.info(f'  Sweep values   : {iterations}')
+    else:
+        log.info(f'  Sweep range    : {start} -> {end} (step {step})')
     log.info(f'  Iterations     : {len(iterations)} values: {iterations}')
     log.info(f'  Messages/iter  : {config["max_messages"]}')
     log.info(f"  Topology mode  : {'autonomous' if mode == 'dlnbot-formation' else mode}")

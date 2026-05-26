@@ -130,6 +130,47 @@ def load_and_validate_topology(file_path, n):
     return edges
 
 
+def _wait_for_gossip(node_info, expected_channels, timeout, poll=5, sample=8):
+    '''
+    Gate until LN gossip converges, so propagation is measured on a steady
+    routing graph rather than while channel_announcements are still flooding
+    (which makes the first ~minute of commands artificially fast). listchannels
+    reports two directional entries per public channel, so full convergence ==
+    2*expected_channels. Gossip views differ per node mid-convergence, so we
+    poll a spread of nodes and gate on the SLOWEST one. Returns True if converged.
+    '''
+    target = 2 * expected_channels
+    nums = sorted(node_info)
+    if len(nums) <= sample:
+        sampled = nums
+    else:
+        sampled = sorted({nums[round(i * (len(nums) - 1) / (sample - 1))] for i in range(sample)})
+
+    def channel_views(num):
+        try:
+            ec, out = node_info[num]['container'].exec_run(
+                'lightning-cli --regtest listchannels', demux=True)
+            if ec == 0 and out[0]:
+                return out[0].count(b'"source"')   # one entry per channel direction
+        except Exception:
+            pass
+        return -1
+
+    log.info(f'  Gossip gate: waiting for {target} channel views on {len(sampled)} sampled nodes (max {timeout}s)...')
+    deadline = time.time() + timeout
+    while True:
+        with ThreadPoolExecutor(max_workers=len(sampled)) as pool:
+            slowest = min(pool.map(channel_views, sampled))
+        if slowest >= target:
+            log.info(f'  Gossip converged: all sampled nodes see {target}/{target} channel views.')
+            return True
+        if time.time() >= deadline:
+            log.warning(f'  Gossip gate timeout ({timeout}s): slowest sampled node {slowest}/{target}; proceeding.')
+            return False
+        log.info(f'  Gossip converging: slowest sampled node {slowest}/{target} ...')
+        time.sleep(poll)
+
+
 def build_topology(edges, cc_nodes):
     '''
     Build an arbitrary topology on a clean network from a set of edges.
@@ -334,5 +375,6 @@ def build_topology(edges, cc_nodes):
         else:
             log.warning(f'  {mismatches} nodes have mismatched channel counts.')
 
+    _wait_for_gossip(node_info, len(edges), timeout=max(120, n))
     log.info('  Topology build complete.')
     return True
