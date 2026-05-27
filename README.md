@@ -51,6 +51,21 @@ sudo venv/bin/python3 lntest.py run <test> [options]
 - [docs/TESTS.md](docs/TESTS.md): tests, flags, sweep ranges, mode compatibility, coverage and partition detection
 - [docs/OUTPUT.md](docs/OUTPUT.md): generated data files and naming
 
+## Reproduce the results in the paper
+
+`run_all_paper_tests.sh` in the repo root runs every experiment from Sections 4.1-4.5 back to back and unattended, so you can kick it off and come back later. Results land in `data/`, and each test's terminal output is saved under `data/terminal_logs/`.
+
+The suite runs for hours, so launch it inside `tmux` and keep the machine from sleeping while it works:
+
+```bash
+tmux new -s lntest
+sudo systemd-inhibit --what=sleep:idle:handle-lid-switch --why=LNTest ./run_all_paper_tests.sh
+```
+
+The full run took about 13 hours on our hardware: a Supermicro tower with a 16-core AMD Ryzen Threadripper PRO 3955WX CPU and 64 GB of DDR4 3200 MT/s RAM, running Ubuntu 26.04 on a 1 TB Toshiba KXG60ZNV1T02 NVMe SSD (PCIe Gen3 ×4). Expect longer on slower hardware.
+
+To preview the plan without running anything, use `DRY_RUN=1 ./run_all_paper_tests.sh`. The output paths and the per-test timeout are configurable through environment variables, all documented at the top of the script.
+
 ## Issues
 
 Spot a bug or have a question? Please [open an issue on GitHub](https://github.com/ThomasBakaysaJr/LNTest/issues).
