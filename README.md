@@ -2,7 +2,7 @@
 
 LNTest is a reproducible testbed for deploying and evaluating Lightning Network (LN)-based botnets on Bitcoin `regtest`. It implements the command-and-control (C&C) overlay and autonomous formation protocol of [D-LNBot](https://ieeexplore.ieee.org/document/10198749/), and also runs arbitrary user-defined overlays, so researchers can measure how topology shapes command propagation and resilience to takedowns. Every node is a real Core Lightning (CLN) instance in its own Docker container, all backed by a single Bitcoin Core node on the host. After setup, runs are fully offline.
 
-This work was **accepted to [ARES 2026](https://www.ares-conference.eu/)** (International Conference on Availability, Reliability and Security).
+This work was **accepted to [ARES 2026](https://www.ares-conference.eu/)** (21st International Conference on Availability, Reliability and Security).
 
 ## Citation
 
@@ -10,7 +10,7 @@ If you use LNTest, please cite the ARES 2026 paper (to appear):
 
 ```bibtex
 @inproceedings{lntest2026,
-  author    = {Thomas Bakaysa and Abdul-Salem Byeibitkhan and Jesus Maria Romo Diaz de Leon and Tag Kalat and Joshua Kramer and Estela Rodriguez and Abraham Watkins and Abdullah Aydeger and Ahmet Kurt},
+  author    = {Thomas Bakaysa and Ahmet Kurt and Abdul-Salem Beibitkhan and Jesus Maria Romo Diaz de Leon and Tag Kalat and Joshua Kramer and Estela Rodriguez and Abraham Watkins and Abdullah Aydeger},
   title     = {{LNTest}: A Testbed for Evaluating Bitcoin Lightning Network-Based Botnets},
   booktitle = {Proceedings of the 21st International Conference on Availability, Reliability and Security (ARES)},
   publisher = {Springer},
@@ -42,18 +42,17 @@ Run an experiment:
 sudo venv/bin/python3 lntest.py run <test> [options]
 ```
 
-`<test>` is one of `cc_count`, `active_nodes`, `injection`, `takedown_random`, `takedown_targeted`, grouped as **scalability** (how propagation scales with botnet size and overlay width), **injection** (whether more botmaster entry points help), and **resilience** (how coverage degrades as nodes are removed). Sweeps, flags, and topology modes are documented in [docs/TESTS.md](docs/TESTS.md).
+`<test>` is one of `cc_count`, `active_nodes`, `injection`, `takedown_random`, `takedown_targeted`. More details in [docs/USAGE.md](docs/USAGE.md).
 
 ## Documentation
 
 - [docs/SETUP.md](docs/SETUP.md): installation, configuration, and resetting the testbed
-- [docs/TOPOLOGIES.md](docs/TOPOLOGIES.md): overlay modes (D-LNBot chain, autonomous formation, custom) and the topology-file format
-- [docs/TESTS.md](docs/TESTS.md): tests, flags, sweep ranges, mode compatibility, coverage and partition detection
+- [docs/USAGE.md](docs/USAGE.md): running tests, overlay topology modes, options, and reading results
 - [docs/OUTPUT.md](docs/OUTPUT.md): generated data files and naming
 
 ## Reproduce the results in the paper
 
-`run_all_paper_tests.sh` in the repo root runs every experiment from Sections 4.1-4.5 back to back and unattended, so you can kick it off and come back later. Results land in `data/`, and each test's terminal output is saved under `data/terminal_logs/`.
+`run_all_paper_tests.sh` in the repo root runs every experiment from Sections 5.1-5.5 back to back and unattended, so you can kick it off and come back later. Results land in `data/`, and each test's terminal output is saved under `data/terminal_logs/`.
 
 The suite runs for hours, so launch it inside `tmux` and keep the machine from sleeping while it works:
 

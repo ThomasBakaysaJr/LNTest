@@ -41,11 +41,11 @@ Examples:
   - `nodes_total`: number of surviving nodes polled via shared memory;
   - `partitioned`: `true` if the command did not reach every surviving node before the timeout.
 
-In `dlnbot` and `custom` modes a timed-out message is treated as a failed iteration and retried, so no `partitioned: true` record is kept. In `autonomous` and the takedown tests a timeout is a valid outcome and is recorded with `partitioned: true`. For takedown tests a partition ends that percentage's iteration immediately, so the file holds a single `partitioned: true` record for that point rather than the full message count (the reachable set is fixed by the surviving topology, so resending cannot change coverage).
+Whether a timed-out message leaves a `partitioned: true` record depends on the mode (see [USAGE.md](USAGE.md#reading-the-result) for the full rule): `dlnbot` and `custom` retry the iteration, so no such record is kept, while `autonomous` and the takedown tests keep it. A takedown partition ends that percentage immediately, so the file holds a single `partitioned: true` record for that point rather than the full message count.
 
 ### `*_topology_data.json`
 
-- `topology`: a snapshot taken at the end of the iteration. It lists the shared-memory status of each surviving **C&C node**: `host_name`, `short_id`, `state`, `counter` (the last command number it received), `message`, `last_msg_time`, `time`, and `channels` (a map of peer pubkey → `short_id`, `state`, `capacity`, `our_amount`). For takedown tests this is the overlay *after* removals; the removed nodes are listed in `orchestrator.log`.
+- `topology`: a snapshot taken at the end of the iteration. It lists the shared-memory status of each surviving **C&C node**: `host_name`, `short_id`, `state`, `counter` (the last command number it received), `message`, `last_msg_time`, `time`, and `channels` (a map of peer pubkey → `short_id`, `state`, `capacity`, `our_amount`; `capacity` and `our_amount` are in msat). For takedown tests this is the overlay *after* removals; the removed nodes are listed in `orchestrator.log`.
 
 ### `*_system_metrics.csv`
 

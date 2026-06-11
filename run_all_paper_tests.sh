@@ -31,7 +31,7 @@ LNTEST_DIR="${LNTEST_DIR:-$(cd "$(dirname "$0")" && pwd)}"   # repo root (dir ho
 TERMINAL_DIR="${TERMINAL_DIR:-$LNTEST_DIR/data/terminal_logs}"  # per-test terminal logs (inside data/, already gitignored)
 PY="${PY:-venv/bin/python3}"                                 # python in the repo venv (relative to LNTEST_DIR)
 OWNER="${OWNER:-${SUDO_USER:-$(id -un)}}"                    # logs chown'd back to this user (sudo invoker)
-TEST_TIMEOUT="${TEST_TIMEOUT:-21600}"                        # hard cap per test (6 h); 4.1 sweep is the long pole
+TEST_TIMEOUT="${TEST_TIMEOUT:-21600}"                        # hard cap per test (6 h); 5.1 sweep is the long pole
 DRY_RUN="${DRY_RUN:-0}"
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -122,55 +122,55 @@ log "===== LNTest overnight batch START (dry_run=$DRY_RUN, timeout=${TEST_TIMEOU
 # Smoke test first (4 nodes); continue regardless of result.
 run_test smoke_small small
 
-# 4.5 Injection point (n=50, dlnbot). Runs BEFORE 4.1: the position cases share
-# the filename cc_count_50_5041D, so each is tagged immediately, then 4.1 writes
+# 5.5 Injection point (n=50, dlnbot). Runs BEFORE 5.1: the position cases share
+# the filename cc_count_50_5041D, so each is tagged immediately, then 5.1 writes
 # a clean n=50 afterward.
 # Random injection x5 (picks a random node each time -> repeat for statistics).
 for k in 1 2 3 4 5; do
-    run_test "4.5_inject_random_rep$k" run injection --at 1 --num-msg 10
+    run_test "5.5_inject_random_rep$k" run injection --at 1 --num-msg 10
     rename_out injection_count_1_5041D "rep$k"
 done
-run_test 4.5_inject_bottom run cc_count --at 50 --inject CC1 --num-msg 10
+run_test 5.5_inject_bottom run cc_count --at 50 --inject CC1 --num-msg 10
 rename_out cc_count_50_5041D inj-CC1
-run_test 4.5_inject_middle run cc_count --at 50 --inject CC25 --num-msg 10
+run_test 5.5_inject_middle run cc_count --at 50 --inject CC25 --num-msg 10
 rename_out cc_count_50_5041D inj-CC25
-run_test 4.5_inject_top    run cc_count --at 50 --inject CC50 --num-msg 10
+run_test 5.5_inject_top    run cc_count --at 50 --inject CC50 --num-msg 10
 rename_out cc_count_50_5041D inj-CC50
-run_test 4.5_inject_multi  run cc_count --at 50 --inject CC1,CC25,CC50 --num-msg 10
+run_test 5.5_inject_multi  run cc_count --at 50 --inject CC1,CC25,CC50 --num-msg 10
 rename_out cc_count_50_5043D inj-multi
 
-# 4.1 Scalability (dlnbot) - single run over the full non-uniform range
-run_test 4.1_scalability run cc_count --sweep-values "10,20,30,40,50,60,70,80,90,100,200,300,400,500" --num-msg 10
+# 5.1 Scalability (dlnbot) - single run over the full non-uniform range
+run_test 5.1_scalability run cc_count --sweep-values "10,20,30,40,50,60,70,80,90,100,200,300,400,500" --num-msg 10
 
-# 4.2 Autonomous formation topology - non-deterministic -> 5 reps each (n=20, n=50),
-# tagged _repK so reps never collide (same approach as 4.3 autonomous / 4.5 random).
+# 5.2 Autonomous formation topology - non-deterministic -> 5 reps each (n=20, n=50),
+# tagged _repK so reps never collide (same approach as 5.3 autonomous / 5.5 random).
 for k in 1 2 3 4 5; do
-    run_test "4.2_formation_n20_rep$k" run cc_count --topology autonomous --at 20 --num-msg 10
+    run_test "5.2_formation_n20_rep$k" run cc_count --topology autonomous --at 20 --num-msg 10
     rename_out cc_count_20_2041F "rep$k"
-    run_test "4.2_formation_n50_rep$k" run cc_count --topology autonomous --at 50 --num-msg 10
+    run_test "5.2_formation_n50_rep$k" run cc_count --topology autonomous --at 50 --num-msg 10
     rename_out cc_count_50_5041F "rep$k"
 done
 
-# 4.3 Resilience to takedowns.
+# 5.3 Resilience to takedowns.
 # dlnbot chain + BA scale-free are deterministic -> run once each.
-run_test 4.3_takedown_random_dlnbot     run takedown_random   --num-msg 10
-run_test 4.3_takedown_targeted_dlnbot   run takedown_targeted --num-msg 10
-run_test 4.3_takedown_random_ba         run takedown_random   --topology-file topologies/ba_50_m4.json --num-msg 10
-run_test 4.3_takedown_targeted_ba       run takedown_targeted --topology-file topologies/ba_50_m4.json --num-msg 10
+run_test 5.3_takedown_random_dlnbot     run takedown_random   --num-msg 10
+run_test 5.3_takedown_targeted_dlnbot   run takedown_targeted --num-msg 10
+run_test 5.3_takedown_random_ba         run takedown_random   --topology-file topologies/ba_50_m4.json --num-msg 10
+run_test 5.3_takedown_targeted_ba       run takedown_targeted --topology-file topologies/ba_50_m4.json --num-msg 10
 # Autonomous formation is non-deterministic -> 5 reps each, tagged so none collide.
 for k in 1 2 3 4 5; do
-    run_test "4.3_takedown_random_autonomous_rep$k"   run takedown_random   --topology autonomous --num-msg 10
+    run_test "5.3_takedown_random_autonomous_rep$k"   run takedown_random   --topology autonomous --num-msg 10
     tag_takedown TF "rep$k"
 done
 for k in 1 2 3 4 5; do
-    run_test "4.3_takedown_targeted_autonomous_rep$k" run takedown_targeted --topology autonomous --num-msg 10
+    run_test "5.3_takedown_targeted_autonomous_rep$k" run takedown_targeted --topology autonomous --num-msg 10
     tag_takedown TtargetedF "rep$k"
 done
 
-# 4.4 Active neighbor count m (n=50, n=100, n=200)
-run_test 4.4_active_nodes_n50  run active_nodes --num-msg 10
-run_test 4.4_active_nodes_n100 run active_nodes --nodes 100 --num-msg 10
-run_test 4.4_active_nodes_n200 run active_nodes --nodes 200 --num-msg 10
+# 5.4 Active neighbor count m (n=50, n=100, n=200)
+run_test 5.4_active_nodes_n50  run active_nodes --num-msg 10
+run_test 5.4_active_nodes_n100 run active_nodes --nodes 100 --num-msg 10
+run_test 5.4_active_nodes_n200 run active_nodes --nodes 200 --num-msg 10
 
 log "===== LNTest overnight batch COMPLETE: $PASS passed, $FAIL failed, $TMO timed out ====="
 { echo; echo "RESULTS (in run order):"; for r in "${RESULTS[@]}"; do echo "  $r"; done; } | tee -a "$MASTER_LOG"

@@ -259,7 +259,6 @@ def create_shared_status(status, state = None):
         'message' : status.get('message'),
         'last_msg_time' : status.get('last_msg_time'),
         'state' : state if state else status.get('state'),
-        'receiver' : 'not sending',
         'channels' : channels
     }
 
