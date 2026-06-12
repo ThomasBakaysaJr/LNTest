@@ -2,7 +2,7 @@
 
 LNTest is a reproducible testbed for deploying and evaluating Lightning Network (LN)-based botnets on Bitcoin `regtest`. It implements the command-and-control (C&C) overlay and autonomous formation protocol of [D-LNBot](https://ieeexplore.ieee.org/document/10198749/), and also runs arbitrary user-defined overlays, so researchers can measure how topology shapes command propagation and resilience to takedowns. Every node is a real Core Lightning (CLN) instance in its own Docker container, all backed by a single Bitcoin Core node on the host. After setup, runs are fully offline.
 
-This work was **accepted to [ARES 2026](https://www.ares-conference.eu/)** (21st International Conference on Availability, Reliability and Security).
+This work was **accepted to [ARES 2026](https://www.ares-conference.eu/)** (21st International Conference on Availability, Reliability and Security). The full paper is available on [arXiv](https://arxiv.org/abs/2606.12887).
 
 ## Citation
 
